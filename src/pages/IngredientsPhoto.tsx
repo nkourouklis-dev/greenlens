@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import PhotoCapture from "../components/PhotoCapture";
-import { saveIngredientsDraft } from "../services/captureDraftService";
+import { saveIngredientsDraft, saveOcrDraft } from "../services/captureDraftService";
 import { compressImageForStorage } from "../services/historyService";
+import { extractOcr } from "../services/ocrClient";
 
 export default function IngredientsPhoto() {
   const [searchParams] = useSearchParams();
@@ -11,14 +12,18 @@ export default function IngredientsPhoto() {
   const [error, setError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
-  async function continueToProductPhoto(file: File) {
+  async function readIngredients(file: File) {
     setError("");
     setIsSaving(true);
     try {
-      saveIngredientsDraft(barcode, await compressImageForStorage(file));
-      navigate(`/product-photo?barcode=${encodeURIComponent(barcode)}`);
-    } catch {
-      setError("Δεν ήταν δυνατή η προετοιμασία της φωτογραφίας. Δοκίμασε ξανά.");
+      const image = await compressImageForStorage(file);
+      const productId = crypto.randomUUID();
+      saveIngredientsDraft(barcode, image);
+      const result = await extractOcr(image, barcode, productId);
+      saveOcrDraft(productId, { barcode, image, result });
+      navigate(`/ingredients-review/${productId}`);
+    } catch (readError) {
+      setError(readError instanceof Error ? readError.message : "Δεν ήταν δυνατή η ανάγνωση της ετικέτας.");
     } finally {
       setIsSaving(false);
     }
@@ -49,7 +54,7 @@ export default function IngredientsPhoto() {
           {barcode}
         </div>
 
-        <PhotoCapture inputId="ingredients-photo" title="Ετικέτα συστατικών" description="Συμπερίλαβε όλο το κείμενο σε μία ευκρινή φωτογραφία." actionLabel="Συνέχεια" onContinue={continueToProductPhoto} isSaving={isSaving} error={error} />
+        <PhotoCapture inputId="ingredients-photo" title="Ετικέτα συστατικών" description="Συμπερίλαβε όλο το κείμενο σε μία ευκρινή φωτογραφία." actionLabel={isSaving ? "Διαβάζω την ετικέτα" : "Διάβασμα ετικέτας"} onContinue={readIngredients} isSaving={isSaving} error={error} />
 
         <button
           type="button"

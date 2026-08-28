@@ -1,5 +1,10 @@
 export type ScanStatus = "known" | "unknown";
 
+export interface OcrResult {
+  rawText: string;
+  confidence: number;
+}
+
 export interface Product {
   id: string;
   barcode: string;
@@ -19,4 +24,6 @@ export interface ScanHistoryItem {
   productName?: string;
   ingredientsPhoto?: string;
   productPhoto?: string;
+  ocrRawText?: string;
+  ocrConfidence?: number;
 }
