@@ -9,6 +9,7 @@ export default function AddProduct() {
   return (
     <main className="min-h-screen bg-green-50 px-4 py-8">
       <section className="mx-auto max-w-md rounded-3xl bg-white p-6 shadow-sm">
+
         <button
           type="button"
           onClick={() => navigate("/scan")}
@@ -27,6 +28,7 @@ export default function AddProduct() {
 
         <div className="mt-6 rounded-2xl bg-slate-100 p-4">
           <p className="text-sm text-slate-500">Barcode</p>
+
           <p className="mt-1 break-all text-xl font-bold text-slate-900">
             {barcode || "Δεν έχει δοθεί barcode"}
           </p>
@@ -35,6 +37,17 @@ export default function AddProduct() {
         <p className="mt-6 text-slate-600">
           Επόμενο βήμα: φωτογραφία μπροστινής όψης προϊόντος.
         </p>
+
+        <button
+          type="button"
+          onClick={() =>
+            navigate(`/product-photo?barcode=${barcode}`)
+          }
+          className="mt-6 w-full rounded-2xl bg-green-600 py-4 text-white font-semibold"
+        >
+          Συνέχεια στη φωτογράφιση
+        </button>
+
       </section>
     </main>
   );
