@@ -18,6 +18,10 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event
   if (request.method !== 'GET') return
+  if (request.url.includes('/api/')) {
+    event.respondWith(fetch(request))
+    return
+  }
 
   event.respondWith(
     caches.match(request).then((cachedResponse) => {

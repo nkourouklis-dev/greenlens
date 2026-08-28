@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS products (
   product_type TEXT NOT NULL,
   ingredients TEXT NOT NULL,
   score INTEGER,
+  product_photo_key TEXT,
+  ingredient_photo_key TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 

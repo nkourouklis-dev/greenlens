@@ -45,6 +45,22 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return (await response.json()) as T
 }
 
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('Failed to read image file.'))
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+        return
+      }
+      reject(new Error('Invalid image payload.'))
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
 function fallbackAnalysis(ingredients: string): AnalysisResult {
   const lowered = ingredients.toLowerCase()
   const flaggedIngredients = HIGH_RISK_INGREDIENTS.filter((item) => lowered.includes(item))
@@ -156,13 +172,16 @@ function App() {
     }
 
     await withBusy('Saving product in shared database...', async () => {
+      const productPhotoDataUrl = productPhoto ? await fileToDataUrl(productPhoto) : null
+      const ingredientPhotoDataUrl = ingredientPhoto ? await fileToDataUrl(ingredientPhoto) : null
+
       await postJson<{ ok: boolean }>('/api/products', {
         name: productName.trim(),
         productType,
         barcode: barcode.trim(),
         ingredients: ingredientText.trim(),
-        productPhotoName: productPhoto?.name ?? null,
-        ingredientPhotoName: ingredientPhoto?.name ?? null,
+        productPhotoDataUrl,
+        ingredientPhotoDataUrl,
         score: analysis?.score ?? null,
       })
       setStatus('Product saved to shared database.')
@@ -282,7 +301,7 @@ function App() {
 
           <div className="button-row full-width">
             <button type="button" onClick={runOcr} disabled={busyLabel !== null}>
-              Extract ingredients (OCR)
+              Extract ingredients (OCR stub)
             </button>
             <button type="button" onClick={runIngredientAnalysis} disabled={busyLabel !== null}>
               Analyze ingredients (AI)
@@ -329,8 +348,8 @@ function App() {
           </button>
         </div>
         <ul className="results">
-          {searchResults.map((product, index) => (
-            <li key={`${product.barcode}-${index}`}>
+          {searchResults.map((product) => (
+            <li key={product.id ?? product.barcode}>
               <strong>{product.name}</strong> ({product.productType})<br />
               Barcode: {product.barcode}
             </li>
