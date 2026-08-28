@@ -4,10 +4,15 @@ import {
   type IScannerControls,
 } from "@zxing/browser";
 import { useNavigate } from "react-router-dom";
+import { findProductByBarcode } from "../data/productRepository";
+import { saveHistoryItem } from "../services/historyService";
 
 export default function Scan() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
+  const scannerStartingRef = useRef(false);
+  const detectedRef = useRef(false);
+  const scannerRunRef = useRef(0);
 
   const [barcode, setBarcode] = useState("");
   const [error, setError] = useState("");
@@ -16,8 +21,12 @@ export default function Scan() {
   const navigate = useNavigate();
 
   async function startScanner() {
-    if (!videoRef.current) return;
+    if (!videoRef.current || scannerStartingRef.current || controlsRef.current) return;
 
+    const scannerRun = scannerRunRef.current + 1;
+    scannerRunRef.current = scannerRun;
+    scannerStartingRef.current = true;
+    detectedRef.current = false;
     setError("");
     setBarcode("");
     setIsScanning(true);
@@ -25,7 +34,7 @@ export default function Scan() {
     try {
       const codeReader = new BrowserMultiFormatReader();
 
-      controlsRef.current =
+      const controls =
         await codeReader.decodeFromConstraints(
           {
             audio: false,
@@ -37,18 +46,24 @@ export default function Scan() {
           },
           videoRef.current,
           (result) => {
-            if (!result) return;
+            if (scannerRun !== scannerRunRef.current || !result || detectedRef.current) return;
 
             const scannedBarcode = result.getText();
+            if (!scannedBarcode) return;
 
             setBarcode(scannedBarcode);
-            setIsScanning(false);
-
-            controlsRef.current?.stop();
-            controlsRef.current = null;
+            detectedRef.current = true;
+            stopScanner();
+            continueWithBarcode(scannedBarcode);
           },
         );
+      if (scannerRun !== scannerRunRef.current) {
+        controls.stop();
+        return;
+      }
+      controlsRef.current = controls;
     } catch (scannerError) {
+      if (scannerRun !== scannerRunRef.current) return;
       console.error(scannerError);
 
       setError(
@@ -56,27 +71,48 @@ export default function Scan() {
       );
 
       setIsScanning(false);
+    } finally {
+      if (scannerRun === scannerRunRef.current) scannerStartingRef.current = false;
     }
   }
 
   function stopScanner() {
+    scannerRunRef.current += 1;
+    scannerStartingRef.current = false;
     controlsRef.current?.stop();
     controlsRef.current = null;
+    const stream = videoRef.current?.srcObject;
+    if (stream instanceof MediaStream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
     setIsScanning(false);
   }
 
-  function continueToProduct() {
-    if (!barcode.trim()) return;
+  function continueWithBarcode(value: string) {
+    const cleanBarcode = value.trim();
+    if (!cleanBarcode) return;
 
-    navigate(`/add-product?barcode=${encodeURIComponent(barcode.trim())}`);
+    const knownProduct = findProductByBarcode(cleanBarcode);
+    if (knownProduct) {
+      saveHistoryItem({
+        id: crypto.randomUUID(),
+        barcode: cleanBarcode,
+        status: "known",
+        scannedAt: new Date().toISOString(),
+        productId: knownProduct.id,
+        productName: knownProduct.name,
+      });
+      navigate(`/product/${knownProduct.id}`);
+      return;
+    }
+
+    navigate(`/ingredients-photo?barcode=${encodeURIComponent(cleanBarcode)}`);
   }
 
   useEffect(() => {
-  startScanner();
+    startScanner();
 
-  return () => {
-    controlsRef.current?.stop();
-  };
+    return stopScanner;
   }, []);
 
   return (
@@ -119,7 +155,7 @@ export default function Scan() {
             onClick={startScanner}
             className="mt-6 w-full rounded-2xl bg-green-600 px-5 py-4 font-semibold text-white transition hover:bg-green-700"
           >
-            Άνοιγμα κάμερας
+            {error ? "Δοκιμή ξανά" : "Άνοιγμα κάμερας"}
           </button>
         )}
 
@@ -151,7 +187,7 @@ export default function Scan() {
 
             <button
               type="button"
-              onClick={continueToProduct}
+              onClick={() => continueWithBarcode(barcode)}
               className="mt-5 w-full rounded-2xl bg-green-600 px-5 py-4 font-semibold"
             >
               Συνέχεια στην καταχώρηση
@@ -181,9 +217,17 @@ export default function Scan() {
             inputMode="numeric"
             value={barcode}
             onChange={(event) => setBarcode(event.target.value)}
-            placeholder="π.χ. 5201234567890"
+            placeholder="π.χ. 0000000000000"
             className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-4 text-white outline-none focus:border-green-500"
           />
+          <button
+            type="button"
+            onClick={() => continueWithBarcode(barcode)}
+            disabled={!barcode.trim()}
+            className="mt-3 h-12 w-full rounded-xl border border-emerald-500/70 font-semibold text-emerald-300 disabled:border-slate-700 disabled:text-slate-500"
+          >
+            Συνέχεια με barcode
+          </button>
         </div>
       </section>
     </main>

@@ -1,10 +1,40 @@
+import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import PhotoCapture from "../components/PhotoCapture";
+import { clearCaptureDraft, getIngredientsDraft } from "../services/captureDraftService";
+import { compressImageForStorage, saveHistoryItem } from "../services/historyService";
 
 export default function ProductPhoto() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-
   const barcode = searchParams.get("barcode") ?? "";
+  const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function saveProduct(file: File) {
+    const ingredientsPhoto = getIngredientsDraft(barcode);
+    if (!ingredientsPhoto) {
+      setError("Χρειάζεται πρώτα φωτογραφία των συστατικών.");
+      return;
+    }
+    setError("");
+    setIsSaving(true);
+    const scanId = crypto.randomUUID();
+    try {
+      const productPhoto = await compressImageForStorage(file);
+      const wasSaved = saveHistoryItem({ id: scanId, barcode, status: "unknown", scannedAt: new Date().toISOString(), ingredientsPhoto, productPhoto });
+      if (!wasSaved) {
+        setError("Ο χώρος αποθήκευσης της συσκευής δεν επαρκεί. Δοκίμασε μικρότερη φωτογραφία.");
+        return;
+      }
+      clearCaptureDraft(barcode);
+      navigate(`/product/${scanId}`);
+    } catch {
+      setError("Δεν ήταν δυνατή η αποθήκευση της φωτογραφίας. Δοκίμασε ξανά.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
   return (
     <main className="min-h-screen bg-slate-950 text-white">
@@ -13,47 +43,25 @@ export default function ProductPhoto() {
         <div className="mb-6 flex gap-2">
           <div className="h-2 flex-1 rounded-full bg-green-500" />
           <div className="h-2 flex-1 rounded-full bg-green-500" />
-          <div className="h-2 flex-1 rounded-full bg-slate-700" />
-          <div className="h-2 flex-1 rounded-full bg-slate-700" />
         </div>
 
         <p className="text-sm font-semibold text-green-400">
-          Step 2 of 5
+          Βήμα 2 από 2
         </p>
 
         <h1 className="mt-2 text-4xl font-bold">
-          Product Photo
+          Φωτογραφία προϊόντος
         </h1>
 
         <p className="mt-3 text-slate-400">
-          Barcode detected successfully.
+          Φωτογράφισε την μπροστινή όψη του προϊόντος.
         </p>
 
         <div className="mt-4 rounded-2xl bg-slate-800 p-4 break-all">
           {barcode}
         </div>
 
-        <div className="mt-8 flex-1 rounded-3xl border-2 border-dashed border-green-500 bg-slate-900 flex items-center justify-center">
-          <div className="text-center">
-            <div className="text-6xl">📦</div>
-
-            <h2 className="mt-4 text-xl font-bold">
-              Product Photo
-            </h2>
-
-            <p className="mt-2 px-6 text-slate-400">
-              Camera integration will be added next.
-            </p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => navigate("/")}
-          className="mt-6 h-14 rounded-2xl bg-green-600 text-lg font-semibold"
-        >
-          Continue
-        </button>
+        <PhotoCapture inputId="product-photo" title="Μπροστινή όψη" description="Βεβαιώσου ότι φαίνεται καθαρά η συσκευασία." actionLabel="Αποθήκευση" onContinue={saveProduct} isSaving={isSaving} error={error} />
 
       </section>
     </main>

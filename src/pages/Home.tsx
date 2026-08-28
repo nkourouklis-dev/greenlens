@@ -4,26 +4,26 @@ export default function Home() {
   const navigate = useNavigate();
 
   return (
-    <main className="min-h-screen bg-green-50 px-4">
-      <section className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center text-center">
-        <div className="rounded-3xl bg-green-600 px-5 py-3 text-3xl">
-          🌿
-        </div>
-
-        <h1 className="mt-6 text-5xl font-bold text-green-700">
+    <main className="min-h-screen bg-slate-950 px-5 text-white">
+      <section className="mx-auto flex min-h-screen max-w-md flex-col justify-center">
+        <p className="text-sm font-bold uppercase tracking-[0.18em] text-emerald-400">Καθημερινές επιλογές</p>
+        <h1 className="mt-4 text-5xl font-bold text-white">
           GreenLens
         </h1>
 
-        <p className="mt-4 text-lg text-slate-600">
-          Know what you consume.
+        <p className="mt-5 max-w-sm text-lg leading-8 text-slate-300">
+          Σκάναρε ένα προϊόν και κράτησε τις πληροφορίες του οργανωμένες στη συσκευή σου.
         </p>
 
         <button
           type="button"
           onClick={() => navigate("/scan")}
-          className="mt-10 w-full rounded-2xl bg-green-600 px-6 py-4 text-lg font-semibold text-white shadow-lg shadow-green-600/20 transition hover:bg-green-700"
+          className="mt-10 h-15 w-full rounded-xl bg-emerald-500 px-6 text-lg font-bold text-slate-950"
         >
-          Scan Product
+          Σάρωση προϊόντος
+        </button>
+        <button type="button" onClick={() => navigate("/history")} className="mt-4 h-14 w-full rounded-xl border border-slate-700 px-6 text-base font-semibold text-slate-100">
+          Ιστορικό σαρώσεων
         </button>
       </section>
     </main>
