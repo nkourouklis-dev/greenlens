@@ -14,7 +14,6 @@ function App() {
           <NavLink to="/">Home</NavLink>
           <NavLink to="/scan">Scan</NavLink>
           <NavLink to="/add-product">Add Product</NavLink>
-          <NavLink to="/product/sample-product">Product</NavLink>
         </nav>
       </header>
 
