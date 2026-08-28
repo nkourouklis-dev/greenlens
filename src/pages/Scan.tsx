@@ -72,9 +72,11 @@ export default function Scan() {
   }
 
   useEffect(() => {
-    return () => {
-      controlsRef.current?.stop();
-    };
+  startScanner();
+
+  return () => {
+    controlsRef.current?.stop();
+  };
   }, []);
 
   return (
