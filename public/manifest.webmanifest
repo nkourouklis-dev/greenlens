@@ -1,0 +1,16 @@
+{
+  "name": "GreenLens",
+  "short_name": "GreenLens",
+  "description": "Scan and analyze food/cosmetic ingredients with AI-powered insights.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f3f8f3",
+  "theme_color": "#0e7a4f",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

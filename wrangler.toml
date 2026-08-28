@@ -1,0 +1,16 @@
+name = "greenlens"
+main = "worker/index.ts"
+compatibility_date = "2026-08-28"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "greenlens"
+database_id = "replace-with-your-d1-database-id"
+
+[[r2_buckets]]
+binding = "PRODUCT_IMAGES"
+bucket_name = "greenlens-product-images"
