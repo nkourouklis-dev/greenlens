@@ -6,10 +6,13 @@ import IngredientsPhoto from "./pages/IngredientsPhoto";
 import Product from "./pages/Product";
 import History from "./pages/History";
 import IngredientsReview from "./pages/IngredientsReview";
+import MobileNav from "./components/MobileNav";
+import AnalysisRun from "./pages/AnalysisRun";
 
 export default function App() {
   return (
     <BrowserRouter>
+      <MobileNav />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/scan" element={<Scan />} />
@@ -17,6 +20,7 @@ export default function App() {
         <Route path="/ingredients-review/:id" element={<IngredientsReview />} />
         <Route path="/product-photo" element={<ProductPhoto />} />
         <Route path="/product/:id" element={<Product />} />
+        <Route path="/product/:id/analysis" element={<AnalysisRun />} />
         <Route path="/history" element={<History />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

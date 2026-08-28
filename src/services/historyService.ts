@@ -64,3 +64,11 @@ function loadImage(source: string): Promise<HTMLImageElement> {
     image.src = source;
   });
 }
+
+export function updateHistoryItem(id: string, update: Partial<ScanHistoryItem>): boolean {
+  const history = readHistory();
+  const index = history.findIndex((item) => item.id === id);
+  if (index < 0) return false;
+  history[index] = { ...history[index], ...update };
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); return true; } catch { return false; }
+}

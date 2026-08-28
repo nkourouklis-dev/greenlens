@@ -1,3 +1,4 @@
+import { Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getHistory } from "../services/historyService";
@@ -6,29 +7,8 @@ import type { ScanHistoryItem } from "../types";
 export default function History() {
   const navigate = useNavigate();
   const [history, setHistory] = useState<ScanHistoryItem[]>([]);
-
-  useEffect(() => {
-    setHistory(getHistory());
-  }, []);
-
-  return (
-    <main className="min-h-screen bg-slate-950 px-5 py-6 text-white">
-      <section className="mx-auto max-w-md">
-        <button type="button" onClick={() => navigate("/")} className="text-sm font-semibold text-emerald-400">Επιστροφή</button>
-        <h1 className="mt-6 text-3xl font-bold">Ιστορικό σαρώσεων</h1>
-        {history.length === 0 ? (
-          <p className="mt-8 rounded-2xl border border-slate-800 bg-slate-900 p-5 leading-7 text-slate-300">Δεν υπάρχουν αποθηκευμένες σαρώσεις ακόμη.</p>
-        ) : (
-          <div className="mt-6 space-y-3">
-            {history.map((item) => (
-              <button key={item.id} type="button" onClick={() => navigate(`/product/${item.id}`)} className="flex w-full items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900 p-3 text-left">
-                {item.productPhoto || item.ingredientsPhoto ? <img src={item.productPhoto || item.ingredientsPhoto} alt="Σάρωση προϊόντος" className="h-16 w-16 rounded-xl object-cover" /> : <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-emerald-500/15 text-sm font-bold text-emerald-300">Demo</div>}
-                <span className="min-w-0 flex-1"><span className="block truncate font-bold">{item.productName || "Άγνωστο προϊόν"}</span><span className="mt-1 block text-sm text-slate-400">{new Date(item.scannedAt).toLocaleString("el-GR")}</span></span>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
-    </main>
-  );
+  const [query, setQuery] = useState("");
+  useEffect(() => setHistory(getHistory()), []);
+  const visible = history.filter((item) => `${item.productName || "Νέο προϊόν"} ${item.barcode}`.toLowerCase().includes(query.toLowerCase()));
+  return <main className="min-h-screen bg-slate-950 px-4 py-5 text-white"><section className="mx-auto max-w-md"><h1 className="text-2xl font-bold">Ιστορικό</h1><label className="relative mt-5 block"><span className="sr-only">Αναζήτηση ιστορικού</span><Search size={18} className="absolute left-3 top-3.5 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Αναζήτηση προϊόντος ή barcode" className="h-11 w-full rounded-xl border border-slate-700 bg-slate-900 pl-10 pr-3 text-sm" /></label>{visible.length === 0 ? <div className="mt-8 rounded-xl border border-slate-800 bg-slate-900 p-5"><p className="text-slate-300">Δεν υπάρχουν σαρώσεις που ταιριάζουν.</p><button type="button" onClick={() => navigate("/scan")} className="mt-4 h-12 rounded-xl bg-emerald-500 px-4 font-bold text-slate-950">Σάρωση πρώτου προϊόντος</button></div> : <div className="mt-5 space-y-3">{visible.map((item) => <button key={item.id} type="button" onClick={() => navigate(`/product/${item.id}`)} className="flex w-full gap-3 rounded-xl border border-slate-800 bg-slate-900 p-3 text-left"><img src={item.productPhoto || item.ingredientsPhoto} alt="Φωτογραφία προϊόντος" className="h-16 w-16 rounded-lg bg-slate-800 object-cover" /><span className="min-w-0 flex-1"><span className="block truncate font-semibold">{item.productName || "Νέο προϊόν"}</span><span className="mt-1 block text-xs text-slate-400">{item.barcode}</span><span className="mt-1 block text-xs text-slate-500">{new Date(item.scannedAt).toLocaleString("el-GR")}</span></span><span className="text-right text-xs">{item.analysis?.score.score !== null && item.analysis ? <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-emerald-200">{item.analysis.score.score}</span> : <span className="text-slate-400">{item.analysis ? "Ανεπαρκή" : "Ετικέτα"}</span>}</span></button>)}</div>}<button type="button" onClick={() => navigate("/scan")} className="mt-6 h-14 w-full rounded-xl bg-emerald-500 font-bold text-slate-950">Νέα σάρωση</button></section></main>;
 }

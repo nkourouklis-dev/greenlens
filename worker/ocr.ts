@@ -4,6 +4,8 @@ export const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/we
 export interface OcrResponse {
   rawText: string;
   confidence: number;
+  labelType: "ingredients" | "nutrition" | "mixed" | "unknown";
+  unreadableSegments: string[];
 }
 
 export function validateOcrRequest(image: File | null, barcode: string | null, productId: string | null): string | null {
@@ -17,8 +19,8 @@ export function validateOcrRequest(image: File | null, barcode: string | null, p
 
 export function parseOcrModelOutput(value: unknown): OcrResponse | null {
   const candidate = typeof value === "string" ? parseJson(value) : isRecord(value) && typeof value.description === "string" ? parseJson(value.description) : null;
-  if (!isRecord(candidate) || typeof candidate.rawText !== "string" || !candidate.rawText.trim() || typeof candidate.confidence !== "number" || !Number.isFinite(candidate.confidence) || candidate.confidence < 0 || candidate.confidence > 1) return null;
-  return { rawText: candidate.rawText.trim(), confidence: candidate.confidence };
+  if (!isRecord(candidate) || typeof candidate.rawText !== "string" || !candidate.rawText.trim() || typeof candidate.confidence !== "number" || !Number.isFinite(candidate.confidence) || candidate.confidence < 0 || candidate.confidence > 1 || !isLabelType(candidate.labelType) || !isStringArray(candidate.unreadableSegments)) return null;
+  return { rawText: candidate.rawText.trim(), confidence: candidate.confidence, labelType: candidate.labelType, unreadableSegments: candidate.unreadableSegments };
 }
 
 function parseJson(value: string): unknown {
@@ -31,4 +33,12 @@ function parseJson(value: string): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isLabelType(value: unknown): value is OcrResponse["labelType"] {
+  return value === "ingredients" || value === "nutrition" || value === "mixed" || value === "unknown";
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }

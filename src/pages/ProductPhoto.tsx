@@ -31,7 +31,7 @@ export default function ProductPhoto() {
       }
       clearCaptureDraft(barcode);
       if (productId) clearOcrDraft(productId);
-      navigate(`/product/${scanId}`);
+      navigate(`/product/${scanId}/analysis`);
     } catch {
       setError("Δεν ήταν δυνατή η αποθήκευση της φωτογραφίας. Δοκίμασε ξανά.");
     } finally {

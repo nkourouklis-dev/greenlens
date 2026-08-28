@@ -101,6 +101,9 @@ export default function Scan() {
         scannedAt: new Date().toISOString(),
         productId: knownProduct.id,
         productName: knownProduct.name,
+        ocrRawText: knownProduct.ingredients.join(", "),
+        userCorrectedText: knownProduct.ingredients.join(", "),
+        ocrConfidence: 1,
       });
       navigate(`/product/${knownProduct.id}`);
       return;

@@ -43,3 +43,8 @@ export function updateOcrDraftText(productId: string, text: string): void {
   if (!draft) return;
   saveOcrDraft(productId, { ...draft, result: { ...draft.result, rawText: text } });
 }
+
+export interface ConfirmedIngredientsDraft {
+  text: string;
+  confidence: number;
+}

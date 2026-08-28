@@ -10,5 +10,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["index.ts", "ocr.ts", "worker-configuration.d.ts"]
+  "include": ["index.ts", "ocr.ts", "analysis.ts", "worker-configuration.d.ts"]
 }
