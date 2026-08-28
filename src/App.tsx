@@ -14,7 +14,7 @@ function App() {
           <NavLink to="/">Home</NavLink>
           <NavLink to="/scan">Scan</NavLink>
           <NavLink to="/add-product">Add Product</NavLink>
-          <NavLink to="/product">Product</NavLink>
+          <NavLink to="/product/sample-product">Product</NavLink>
         </nav>
       </header>
 
@@ -23,7 +23,7 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/scan" element={<Scan />} />
           <Route path="/add-product" element={<AddProduct />} />
-          <Route path="/product" element={<Product />} />
+          <Route path="/product/:id" element={<Product />} />
         </Routes>
       </main>
     </div>
