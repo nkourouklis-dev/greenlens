@@ -28,7 +28,7 @@ export default function ProductPhoto() {
         return;
       }
       clearCaptureDraft(barcode);
-      navigate(`/product/${scanId}`);
+      navigate(`/product/${scanId}/analysis`);
     } catch {
       setError("Δεν ήταν δυνατή η αποθήκευση της φωτογραφίας. Δοκίμασε ξανά.");
     } finally {

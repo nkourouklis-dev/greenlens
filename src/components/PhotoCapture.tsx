@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { safariPermissionMessage } from "../services/cameraSession";
 
 interface PhotoCaptureProps {
   inputId: string;
@@ -51,6 +52,7 @@ export default function PhotoCapture({
         </label>
       )}
       <input id={inputId} type="file" accept="image/*" capture="environment" className="sr-only" onChange={(event) => selectFile(event.target.files?.[0])} />
+      <p className="mt-3 text-xs leading-5 text-slate-500">{safariPermissionMessage}</p>
       {error && <p className="mt-4 rounded-xl border border-red-400/40 bg-red-950/40 p-3 text-sm text-red-100">{error}</p>}
       {previewUrl && <label htmlFor={inputId} className="mt-4 flex h-12 cursor-pointer items-center justify-center rounded-xl border border-slate-600 font-semibold text-slate-100">Λήψη ξανά</label>}
       <button type="button" disabled={!file || isSaving} onClick={() => file && onContinue(file)} className="mt-4 h-14 w-full rounded-xl bg-emerald-500 px-5 text-base font-bold text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400">

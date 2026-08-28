@@ -6,6 +6,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { findProductByBarcode } from "../data/productRepository";
 import { saveHistoryItem } from "../services/historyService";
+import { safariPermissionMessage, stopCameraStream } from "../services/cameraSession";
 
 export default function Scan() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -81,10 +82,7 @@ export default function Scan() {
     scannerStartingRef.current = false;
     controlsRef.current?.stop();
     controlsRef.current = null;
-    const stream = videoRef.current?.srcObject;
-    if (stream instanceof MediaStream) {
-      stream.getTracks().forEach((track) => track.stop());
-    }
+    stopCameraStream(videoRef.current);
     setIsScanning(false);
   }
 
@@ -174,6 +172,7 @@ export default function Scan() {
             {error}
           </div>
         )}
+        <p className="mt-3 text-xs leading-5 text-slate-500">{safariPermissionMessage}</p>
 
         {barcode && (
           <div className="mt-5 rounded-2xl border border-green-500/40 bg-green-950/40 p-5">

@@ -1,39 +1,33 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { DEMO_MODE } from "../config";
 import { findProductById } from "../data/productRepository";
+import { analysisClient, scoreIngredients } from "../services/analysisService";
+import { getProductAnalysis } from "../services/analysisStore";
 import { getHistoryItem } from "../services/historyService";
 
-const suggestedQuestions = ["Τι περιέχει αυτή η εγγραφή;", "Ποια είναι η πηγή των πληροφοριών;"];
+const suggestedQuestions = ["Τι περιέχει η ετικέτα;", "Γιατί έγινε αυτή η αφαίρεση;"];
 
 export default function Product() {
-	const navigate = useNavigate();
-	const { id = "" } = useParams();
-	const historyItem = getHistoryItem(id);
-	const product = findProductById(historyItem?.productId ?? id);
-	const [question, setQuestion] = useState("");
-	const [answer, setAnswer] = useState("");
+  const navigate = useNavigate();
+  const { id = "" } = useParams();
+  const historyItem = getHistoryItem(id);
+  const product = findProductById(historyItem?.productId ?? id);
+  const analysis = getProductAnalysis(id) ?? (product && DEMO_MODE ? scoreIngredients(product.id, product.ingredients.join(", ")) : undefined);
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
 
-	function respond(value: string) {
-		setQuestion(value);
-		setAnswer(product ? `Demo απάντηση: η εγγραφή περιέχει μόνο τα αποθηκευμένα στοιχεία για ${product.name}. ${product.description}` : "Η ανάλυση AI θα είναι διαθέσιμη όταν συνδεθεί εξαγωγή συστατικών. Δεν παρέχονται συμπεράσματα για αυτή τη φωτογραφία.");
-	}
+  if (!DEMO_MODE && !analysis) return <main className="min-h-screen bg-slate-950 px-5 py-6 text-white"><section className="mx-auto max-w-md"><button type="button" onClick={() => navigate("/history")} className="text-emerald-400">Ιστορικό</button><h1 className="mt-6 text-3xl font-bold">{product?.name || "Άγνωστο προϊόν"}</h1><p className="mt-5 rounded-xl border border-slate-700 bg-slate-900 p-5 leading-7 text-slate-300">Η ανάλυση AI δεν έχει συνδεθεί ακόμη</p></section></main>;
 
-	if (!historyItem && !product) {
-		return <main className="min-h-screen bg-slate-950 px-5 py-8 text-white"><section className="mx-auto max-w-md"><h1 className="text-2xl font-bold">Η σάρωση δεν βρέθηκε</h1><button type="button" onClick={() => navigate("/")} className="mt-6 text-emerald-400">Αρχική</button></section></main>;
-	}
+  async function respond(value: string) {
+    if (!value.trim()) return;
+    setQuestion(value);
+    setAnswer(await analysisClient.askProductQuestion(id, value));
+  }
 
-	return (
-		<main className="min-h-screen bg-slate-950 px-5 py-6 text-white">
-			<section className="mx-auto max-w-md">
-				<button type="button" onClick={() => navigate("/history")} className="text-sm font-semibold text-emerald-400">Ιστορικό</button>
-				{product?.isDemo && <p className="mt-6 inline-block rounded-full bg-amber-300 px-3 py-1 text-xs font-bold text-slate-950">Demo data</p>}
-				<h1 className="mt-4 text-3xl font-bold">{product?.name || "Άγνωστο προϊόν"}</h1>
-				{product && <p className="mt-2 text-slate-300">{product.brand}</p>}
-				<p className="mt-4 rounded-xl bg-slate-900 p-4 text-sm leading-6 text-slate-300">{product?.description || "Οι φωτογραφίες αποθηκεύτηκαν τοπικά. Δεν έχει συνδεθεί εξαγωγή ή αξιολόγηση συστατικών."}</p>
-				{(historyItem?.productPhoto || historyItem?.ingredientsPhoto) && <div className="mt-5 grid grid-cols-2 gap-3">{historyItem.ingredientsPhoto && <img src={historyItem.ingredientsPhoto} alt="Ετικέτα συστατικών" className="aspect-square w-full rounded-xl object-cover" />}{historyItem.productPhoto && <img src={historyItem.productPhoto} alt="Προϊόν" className="aspect-square w-full rounded-xl object-cover" />}</div>}
-				{product && <section className="mt-6 border-t border-slate-800 pt-6"><h2 className="text-lg font-bold">Συστατικά καταχώρισης</h2><ul className="mt-3 space-y-2 text-slate-300">{product.ingredients.map((ingredient) => <li key={ingredient}>{ingredient}</li>)}</ul></section>}
-				<section className="mt-8 border-t border-slate-800 pt-6"><p className="text-sm font-bold uppercase tracking-[0.14em] text-emerald-400">Demo συνομιλιακός βοηθός</p><div className="mt-4 flex flex-wrap gap-2">{suggestedQuestions.map((suggestedQuestion) => <button key={suggestedQuestion} type="button" onClick={() => respond(suggestedQuestion)} className="rounded-xl border border-slate-700 px-3 py-2 text-sm text-slate-200">{suggestedQuestion}</button>)}</div><div className="mt-4 flex gap-2"><input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Γράψε μια ερώτηση" className="min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-900 px-3 py-3" /><button type="button" onClick={() => respond(question)} disabled={!question.trim()} className="rounded-xl bg-emerald-500 px-4 font-bold text-slate-950 disabled:bg-slate-700">Αποστολή</button></div>{answer && <p className="mt-4 rounded-xl bg-emerald-500/10 p-4 text-sm leading-6 text-emerald-50">{answer}</p>}</section>
-			</section>
-		</main>
-	);
+  if (!historyItem && !product) return <main className="min-h-screen bg-slate-950 px-5 py-8 text-white"><section className="mx-auto max-w-md"><h1 className="text-2xl font-bold">Η σάρωση δεν βρέθηκε</h1><button type="button" onClick={() => navigate("/")} className="mt-6 text-emerald-400">Αρχική</button></section></main>;
+  if (!analysis) return <main className="min-h-screen bg-slate-950 px-5 py-6 text-white"><section className="mx-auto max-w-md"><button type="button" onClick={() => navigate("/history")} className="text-emerald-400">Ιστορικό</button><h1 className="mt-6 text-3xl font-bold">{product?.name || "Άγνωστο προϊόν"}</h1><p className="mt-5 rounded-xl border border-slate-700 bg-slate-900 p-5 leading-7 text-slate-300">AI analysis is not connected yet. Δεν εμφανίζεται βαθμολογία χωρίς επιβεβαιωμένη ανάλυση.</p>{historyItem?.ingredientsPhoto && <button type="button" onClick={() => navigate(`/product/${id}/analysis`)} className="mt-5 h-14 w-full rounded-xl bg-emerald-500 font-bold text-slate-950">Έλεγχος ετικέτας</button>}</section></main>;
+
+  const scoreColor = analysis.scoreBand === "green" ? "#34d399" : analysis.scoreBand === "yellow" ? "#facc15" : analysis.scoreBand === "orange" ? "#fb923c" : analysis.scoreBand === "red" ? "#f87171" : "#94a3b8";
+  return <main className="min-h-screen bg-slate-950 px-5 py-6 text-white"><section className="mx-auto max-w-md"><button type="button" onClick={() => navigate("/history")} className="text-sm font-semibold text-emerald-400">Ιστορικό</button>{DEMO_MODE && <p className="mt-5 inline-block rounded-full bg-amber-300 px-3 py-1 text-xs font-bold text-slate-950">Demo data</p>}<h1 className="mt-4 text-3xl font-bold">{product?.name || "Άγνωστο προϊόν"}</h1><p className="mt-2 text-slate-300">{product?.brand || "Τοπικά αποθηκευμένη σάρωση"}</p><div className="mt-7 flex items-center gap-6"><div className="flex h-32 w-32 shrink-0 items-center justify-center rounded-full" style={{ background: `conic-gradient(${scoreColor} ${analysis.score ?? 0}%, #1e293b 0)` }}><div className="flex h-24 w-24 flex-col items-center justify-center rounded-full bg-slate-950"><strong className="text-3xl">{analysis.score ?? "-"}</strong><span className="text-xs text-slate-400">βαθμοί</span></div></div><div><p className="font-bold text-emerald-300">Βαθμολογία με εξήγηση</p><p className="mt-2 text-sm leading-6 text-slate-300">{analysis.confidence.explanation}</p><span className="mt-3 inline-block rounded-full bg-slate-800 px-3 py-1 text-xs">Εμπιστοσύνη {Math.round(analysis.confidence.overall * 100)}%</span></div></div><section className="mt-8 grid gap-3 sm:grid-cols-2"><div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4"><h2 className="font-bold text-emerald-200">Θετικά</h2><p className="mt-2 text-sm leading-6">{analysis.positives.join(" ") || "Δεν υπάρχουν επαρκή στοιχεία."}</p></div><div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4"><h2 className="font-bold text-amber-100">Σημεία προσοχής</h2><p className="mt-2 text-sm leading-6">{analysis.attentionItems.join(" ") || "Δεν καταγράφηκαν."}</p></div></section>{analysis.allergens.length > 0 && <section className="mt-4 rounded-xl border border-orange-400/30 bg-orange-400/10 p-4"><h2 className="font-bold text-orange-100">Αλλεργιογόνα που δηλώνονται</h2><p className="mt-2 text-sm">{analysis.allergens.join(", ")}</p></section>}<section className="mt-7"><h2 className="text-lg font-bold">Συστατικά και πηγή</h2><div className="mt-3 space-y-2">{analysis.ingredients.map((ingredient) => <div key={ingredient.normalizedName} className="flex items-center justify-between rounded-xl bg-slate-900 px-4 py-3"><span>{ingredient.name}</span><span className="text-xs text-slate-400">{ingredient.evidence.source === "user_corrected" ? "Επιβεβαιώθηκε" : "Demo πηγή"}</span></div>)}</div></section><section className="mt-7"><h2 className="text-lg font-bold">Ανάλυση βαθμολογίας</h2><div className="mt-3 space-y-2">{analysis.scoreBreakdown.map((item) => <div key={item.factor} className="rounded-xl border border-slate-800 p-4"><div className="flex justify-between font-semibold"><span>{item.factor}</span><span className={item.deduction ? "text-amber-300" : "text-emerald-300"}>{item.deduction ? `-${item.deduction}` : "0"}</span></div><p className="mt-1 text-sm leading-6 text-slate-400">{item.reason}</p></div>)}</div></section><section className="mt-7 rounded-xl border border-slate-700 bg-slate-900 p-4"><h2 className="font-bold">Σύγκριση</h2><p className="mt-2 text-sm leading-6 text-slate-300">Δεν εμφανίζεται ποσοστό κατηγορίας χωρίς πραγματικά δεδομένα σύγκρισης.</p></section><section className="mt-7 border-t border-slate-800 pt-6"><p className="text-sm font-bold uppercase tracking-[0.14em] text-emerald-400">Demo συνομιλιακός βοηθός</p><div className="mt-4 flex flex-wrap gap-2">{suggestedQuestions.map((item) => <button key={item} type="button" onClick={() => respond(item)} className="rounded-xl border border-slate-700 px-3 py-2 text-sm">{item}</button>)}</div><div className="mt-4 flex gap-2"><input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Γράψε μια ερώτηση" className="min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-900 px-3 py-3" /><button type="button" onClick={() => respond(question)} className="rounded-xl bg-emerald-500 px-4 font-bold text-slate-950">Αποστολή</button></div>{answer && <p className="mt-4 rounded-xl bg-emerald-500/10 p-4 text-sm leading-6">{answer}</p>}</section><p className="mt-8 pb-4 text-xs leading-5 text-slate-400">Οι πληροφορίες είναι ενημερωτικές και δεν αποτελούν ιατρική συμβουλή.</p></section></main>;
 }

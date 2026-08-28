@@ -5,6 +5,7 @@ import ProductPhoto from "./pages/ProductPhoto";
 import IngredientsPhoto from "./pages/IngredientsPhoto";
 import Product from "./pages/Product";
 import History from "./pages/History";
+import Analysis from "./pages/Analysis";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/ingredients-photo" element={<IngredientsPhoto />} />
         <Route path="/product-photo" element={<ProductPhoto />} />
         <Route path="/product/:id" element={<Product />} />
+        <Route path="/product/:id/analysis" element={<Analysis />} />
         <Route path="/history" element={<History />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
