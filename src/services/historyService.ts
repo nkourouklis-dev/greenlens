@@ -1,7 +1,7 @@
 import type { ScanHistoryItem } from "../types";
 
 const HISTORY_KEY = "greenlens.scan-history.v1";
-const MAX_IMAGE_SIZE = 1_280;
+const MAX_IMAGE_SIZE = 800;
 
 function readHistory(): ScanHistoryItem[] {
   try {
@@ -27,12 +27,46 @@ export function getHistoryItem(id: string): ScanHistoryItem | undefined {
   return readHistory().find((item) => item.id === id);
 }
 
-export function saveHistoryItem(item: ScanHistoryItem): boolean {
+const MAX_HISTORY_ITEMS = 20;
+
+export function saveHistoryItem(
+  item: ScanHistoryItem,
+): boolean {
+  const history = [
+    item,
+    ...readHistory(),
+  ].slice(0, MAX_HISTORY_ITEMS);
+
   try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify([item, ...readHistory()]));
+    localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify(history),
+    );
+
     return true;
   } catch {
-    return false;
+    const trimmed = history
+      .slice(0, 5)
+      .map((entry, index) =>
+        index === 0
+          ? entry
+          : {
+              ...entry,
+              ingredientsPhoto: undefined,
+              productPhoto: undefined,
+            },
+      );
+
+    try {
+      localStorage.setItem(
+        HISTORY_KEY,
+        JSON.stringify(trimmed),
+      );
+
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -50,7 +84,7 @@ export async function compressImageForStorage(file: File): Promise<string> {
     if (!context) throw new Error("Image compression is unavailable.");
 
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.72);
+    return canvas.toDataURL("image/jpeg", 0.55);
   } finally {
     URL.revokeObjectURL(sourceUrl);
   }
