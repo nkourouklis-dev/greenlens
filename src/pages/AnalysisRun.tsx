@@ -1,14 +1,24 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { analysisVersion } from "../config";
+import {
+  useNavigate,
+  useParams,
+} from "react-router-dom";
+import {
+  analysisVersion,
+  apiBaseUrl,
+  apiConfigurationError,
+} from "../config";
 import { runAnalysis } from "../services/analysisClient";
 import { normalizeIngredients } from "../services/ingredientNormalizer";
-import { getHistoryItem, updateHistoryItem } from "../services/historyService";
+import {
+  getHistoryItem,
+  updateHistoryItem,
+} from "../services/historyService";
 import type { ScoreBreakdown } from "../types";
 
 const insufficientScore = (
   reason: string,
-  confidence: number
+  confidence: number,
 ): ScoreBreakdown => ({
   score: null,
   band: "insufficient_data",
@@ -22,41 +32,48 @@ const insufficientScore = (
 export default function AnalysisRun() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  const item = getHistoryItem(id);
-  const [message, setMessage] = useState("Προετοιμασία ανάλυσης...");
+
+  const [message, setMessage] = useState(
+    "Προετοιμασία ανάλυσης...",
+  );
   const [error, setError] = useState("");
+  const [debugInfo, setDebugInfo] = useState("");
 
   useEffect(() => {
+    const item = getHistoryItem(id);
+
     if (!item) {
       setError("Το προϊόν δεν βρέθηκε στη συσκευή.");
+      setDebugInfo("item=missing");
       return;
     }
-    const text = item.userCorrectedText || item.ocrRawText || "";
+
+    const text =
+      item.userCorrectedText ||
+      item.ocrRawText ||
+      "";
+
     const confidence = item.ocrConfidence ?? 0;
 
-    console.log("analysis_debug", {
-      id,
-      barcode: item.barcode,
-      textLength: text.length,
+    const ingredients = normalizeIngredients(
+      text,
       confidence,
-      preview: text.slice(0, 200),
-    });
+    );
 
-    const ingredients = normalizeIngredients(text, confidence);
+    setDebugInfo(
+      [
+        `text=${text.length}`,
+        `conf=${confidence}`,
+        `ingredients=${ingredients.length}`,
+        `api=${apiBaseUrl || "EMPTY"}`,
+        `cfgError=${apiConfigurationError ?? "none"}`,
+      ].join(" | "),
+    );
 
-    console.log("analysis_normalized", {
-      count: ingredients.length,
-      first: ingredients[0]?.originalName ?? null,
-      last: ingredients[ingredients.length - 1]?.originalName ?? null,
-    });
-
-    if (!text.trim() || ingredients.length === 0) {
-      console.warn("analysis_insufficient", {
-        reason: !text.trim() ? "empty_text" : "no_normalized_ingredients",
-        textLength: text.length,
-        normalizedCount: ingredients.length,
-      });
-
+    if (
+      !text.trim() ||
+      ingredients.length === 0
+    ) {
       updateHistoryItem(id, {
         analysis: {
           productId: id,
@@ -66,7 +83,8 @@ export default function AnalysisRun() {
           ocrConfidence: confidence,
           structured: {
             productType: "unknown",
-            summary: "Δεν υπάρχουν αρκετά στοιχεία για αξιόπιστη ανάλυση.",
+            summary:
+              "Δεν υπάρχουν αρκετά στοιχεία για αξιόπιστη ανάλυση.",
             positives: [],
             attentionItems: [],
             potentialAllergens: [],
@@ -78,7 +96,7 @@ export default function AnalysisRun() {
           },
           score: insufficientScore(
             "Δεν υπάρχει επιβεβαιωμένο κείμενο συστατικών.",
-            confidence
+            confidence,
           ),
           analyzedAt: new Date().toISOString(),
           analysisVersion,
@@ -92,14 +110,10 @@ export default function AnalysisRun() {
       return;
     }
 
-    console.log("analysis_request", {
-      productId: id,
-      barcode: item.barcode,
-      normalizedCount: ingredients.length,
-      confidence,
-    });
+    setMessage(
+      "Αναλύω τα επιβεβαιωμένα συστατικά...",
+    );
 
-    setMessage("Αναλύω τα επιβεβαιωμένα συστατικά...");
     runAnalysis({
       productId: id,
       barcode: item.barcode,
@@ -119,27 +133,44 @@ export default function AnalysisRun() {
           analyzedAt: new Date().toISOString(),
           analysisVersion: score.scoringVersion,
         };
-        if (
-          !updateHistoryItem(id, {
-            normalizedIngredients: ingredients,
-            analysis: record,
-          })
-        ) {
+
+        const wasSaved = updateHistoryItem(id, {
+          normalizedIngredients: ingredients,
+          analysis: record,
+        });
+
+        if (!wasSaved) {
           setError(
-            "Δεν ήταν δυνατή η αποθήκευση της ανάλυσης στη συσκευή."
+            "Δεν ήταν δυνατή η αποθήκευση της ανάλυσης στη συσκευή.",
           );
           return;
         }
-        navigate(`/product/${id}`, { replace: true });
+
+        navigate(`/product/${id}`, {
+          replace: true,
+        });
       })
-      .catch((caughtError) =>
+      .catch((caughtError) => {
         setError(
           caughtError instanceof Error
             ? caughtError.message
-            : "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά."
-        )
-      );
-  }, [id]);
+            : "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.",
+        );
+
+        setDebugInfo((previousInfo) =>
+          [
+            previousInfo,
+            `requestFailed=${
+              caughtError instanceof Error
+                ? caughtError.message
+                : "unknown"
+            }`,
+          ]
+            .filter(Boolean)
+            .join(" | "),
+        );
+      });
+  }, [id, navigate]);
 
   return (
     <main className="min-h-screen bg-slate-950 px-5 py-12 text-white">
@@ -147,7 +178,11 @@ export default function AnalysisRun() {
         <p className="text-sm font-bold uppercase tracking-[0.14em] text-emerald-400">
           GreenLens
         </p>
-        <h1 className="mt-3 text-2xl font-bold">Ανάλυση συστατικών</h1>
+
+        <h1 className="mt-3 text-2xl font-bold">
+          Ανάλυση συστατικών
+        </h1>
+
         {error ? (
           <>
             <p
@@ -156,9 +191,12 @@ export default function AnalysisRun() {
             >
               {error}
             </p>
+
             <button
               type="button"
-              onClick={() => navigate(`/product/${id}`)}
+              onClick={() =>
+                navigate(`/product/${id}`)
+              }
               className="mt-5 h-14 w-full rounded-xl bg-emerald-500 font-bold text-slate-950"
             >
               Πίσω στο προϊόν
@@ -170,12 +208,22 @@ export default function AnalysisRun() {
             className="mt-8 rounded-2xl border border-slate-800 bg-slate-900 p-6"
           >
             <span className="block h-3 w-3 animate-pulse rounded-full bg-emerald-400" />
-            <p className="mt-4 font-semibold">{message}</p>
+
+            <p className="mt-4 font-semibold">
+              {message}
+            </p>
+
             <p className="mt-2 text-sm leading-6 text-slate-400">
-              Η βαθμολογία υπολογίζεται από σταθερούς κανόνες αφού ολοκληρωθεί
-              η ερμηνεία.
+              Η βαθμολογία υπολογίζεται από σταθερούς
+              κανόνες αφού ολοκληρωθεί η ερμηνεία.
             </p>
           </div>
+        )}
+
+        {debugInfo && (
+          <pre className="mt-6 overflow-x-auto whitespace-pre-wrap break-all rounded-xl bg-slate-800 p-3 text-xs text-slate-200">
+            {debugInfo}
+          </pre>
         )}
       </section>
     </main>
