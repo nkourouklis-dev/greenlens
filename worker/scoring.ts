@@ -27,7 +27,7 @@ export interface WorkerScore {
 }
 
 const MIN_OCR_CONFIDENCE = 0.4;
-const MIN_INGREDIENT_TEXT_LENGTH = 30;
+const MIN_INGREDIENT_TEXT_LENGTH = 15;
 const MAX_DEDUCTIONS = 6;
 
 export function scoreInterpretation(

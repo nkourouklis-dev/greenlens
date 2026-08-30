@@ -544,14 +544,14 @@ function Result(props: {
                           : key,
                       )
                     }
-                    className="flex min-h-12 w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                  className="flex min-h-12 w-full items-start justify-between gap-2 px-4 py-3 text-left"
                   >
-                    <span className="min-w-0 flex-1 truncate font-semibold">
+                    <span className="min-w-0 flex-1 break-words pr-2 text-sm font-semibold leading-tight">
                       {finding.ingredientName}
                     </span>
 
                     <span
-                      className={`shrink-0 rounded-full px-2 py-1 text-xs ${severityClass}`}
+                      className={`mt-0.5 shrink-0 rounded-full px-2 py-1 text-[11px] ${severityClass}`}
                     >
                       {severityLabel}
                     </span>

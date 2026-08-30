@@ -17,6 +17,7 @@ import {
   parseProductIdentity,
   type ProductIdentity,
 } from "./identify";
+
 const visionModel =
   "@cf/moondream/moondream3.1-9B-A2B";
 
@@ -51,6 +52,9 @@ const ocrPrompt = [
   "}",
   "",
   "The labelType value must be exactly one of: ingredients, nutrition, mixed, unknown.",
+  "Never repeat the same ingredient more than once.",
+  "Include at most 40 ingredients.",
+  "Stop immediately after closing the JSON object.",
 ].join("\n");
 
 type JsonBody =
@@ -61,10 +65,10 @@ type JsonBody =
       status: "ok";
       service: "greenlens-ocr";
     }
-    | {
+  | {
       answer: string;
     }
-    | ProductIdentity;
+  | ProductIdentity;
 
 export default {
   async fetch(
@@ -103,7 +107,8 @@ export default {
         requestId,
       );
     }
-        if (
+
+    if (
       request.method === "POST" &&
       url.pathname === "/api/product/identify"
     ) {
@@ -114,6 +119,7 @@ export default {
         requestId,
       );
     }
+
     if (
       request.method === "POST" &&
       url.pathname === "/api/analysis/run"
@@ -250,10 +256,31 @@ async function runOcr(
         question: ocrPrompt,
         reasoning: false,
         temperature: 0,
-        max_tokens: 1536,
+        max_tokens: 1024,
         stream: false,
       },
     );
+
+    const rawModelText =
+      extractModelText(modelOutput);
+
+    if (
+      rawModelText &&
+      hasRepetitionLoop(rawModelText)
+    ) {
+      console.log("ocr_repetition_loop", {
+        requestId,
+        durationMs: Date.now() - startedAt,
+        rawLength: rawModelText.length,
+      });
+
+      return error(
+        "Η ανάγνωση της ετικέτας απέτυχε. Φωτογραφίστε ξανά πιο κοντά και με σταθερό χέρι.",
+        422,
+        origin,
+        requestId,
+      );
+    }
 
     const result =
       parseOcrModelOutput(modelOutput);
@@ -296,6 +323,27 @@ async function runOcr(
     if (result.labelType === "nutrition") {
       return error(
         "Εντοπίστηκε διατροφικός πίνακας, όχι λίστα συστατικών. Φωτογραφίστε και τη λίστα συστατικών.",
+        422,
+        origin,
+        requestId,
+      );
+    }
+
+    if (isNutritionTable(result.rawText)) {
+      return error(
+        "Φωτογραφήσατε τον διατροφικό πίνακα. Η λίστα συστατικών βρίσκεται συνήθως δίπλα ή κάτω από αυτόν, μετά τη λέξη «Συστατικά».",
+        422,
+        origin,
+        requestId,
+      );
+    }
+
+    if (
+      isHeadingOnlyText(result.rawText) ||
+      !looksLikeIngredientList(result.rawText)
+    ) {
+      return error(
+        "Δεν εντοπίστηκε λίστα συστατικών. Φωτογραφίστε την περιοχή κάτω από τη λέξη «Συστατικά» ή «Ingredients».",
         422,
         origin,
         requestId,
@@ -558,7 +606,9 @@ async function runAnalysis(
     looksLikeMojibake(confirmedText) ||
     looksLikeSyntheticNutritionText(
       confirmedText,
-    )
+    ) ||
+    isHeadingOnlyText(confirmedText) ||
+    !looksLikeIngredientList(confirmedText)
   ) {
     return json(
       insufficientAnalysis(),
@@ -573,7 +623,7 @@ async function runAnalysis(
     "",
     "Return ONLY this exact JSON structure:",
     "{",
-    '  "productType": "cosmetic",',
+    '  "productType": "food",',
     '  "summary": "short neutral summary in Greek",',
     '  "positives": ["short Greek phrase"],',
     '  "attentionItems": ["short Greek phrase"],',
@@ -597,12 +647,19 @@ async function runAnalysis(
     "",
     "Field rules:",
     "- productType must be exactly one of: food, cosmetic, unknown.",
+    "- Use food for anything edible or drinkable, including vinegar, oil, sauces, drinks and snacks.",
+    "- Use cosmetic for creams, lotions, shampoos, soaps and skincare.",
+    "- Use unknown only when the category is genuinely unclear.",
+    "- Determine productType from the actual ingredients, not from the example above.",
     "- severity must be exactly one of: positive, info, attention, high_attention, unknown.",
     "- evidenceType must be exactly one of: regulatory, scientific, label, none.",
     "- confidence must be a number between 0 and 1.",
     "- sourceName and sourceUrl must be null unless you have verified evidence.",
     "",
-        "Content rules:",
+    "Content rules:",
+    "- Only analyze ingredients that appear in the provided text.",
+    "- Never add ingredients that are not in the provided list.",
+    "- If the provided text contains no actual ingredient names, return empty arrays and explain in insufficientDataReasons.",
     "- Do not calculate a score.",
     "- Do not claim unconditional product safety.",
     "- Do not provide medical advice.",
@@ -645,7 +702,7 @@ async function runAnalysis(
       },
     );
 
-        const modelText =
+    const modelText =
       extractModelText(modelOutput);
 
     const cleanedText = modelText
@@ -684,6 +741,13 @@ async function runAnalysis(
         origin,
         requestId,
       );
+    }
+
+    const detectedType =
+      detectProductType(confirmedText);
+
+    if (detectedType !== "unknown") {
+      result.productType = detectedType;
     }
 
     const score = scoreInterpretation(
@@ -748,6 +812,137 @@ async function runChat(
     origin,
     requestId,
   );
+}
+
+async function runIdentify(
+  request: Request,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const contentType =
+    request.headers.get("content-type") ?? "";
+
+  if (
+    !contentType.includes("multipart/form-data")
+  ) {
+    return error(
+      "Απαιτείται multipart/form-data.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  let formData: FormData;
+
+  try {
+    formData = await request.formData();
+  } catch {
+    return error(
+      "Το multipart payload δεν είναι έγκυρο.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  const imageValue = formData.get("image");
+
+  const image =
+    imageValue instanceof File
+      ? imageValue
+      : null;
+
+  if (!image) {
+    return error(
+      "Λείπει η εικόνα του προϊόντος.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  if (
+    image.size === 0 ||
+    image.size > 5 * 1024 * 1024
+  ) {
+    return error(
+      "Το μέγεθος της εικόνας δεν επιτρέπεται.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  try {
+    const imageDataUri =
+      await fileToDataUri(image);
+
+    const startedAt = Date.now();
+
+    const modelOutput = await env.AI.run(
+      visionModel,
+      {
+        task: "query",
+        image: imageDataUri,
+        question: identifyPrompt,
+        reasoning: false,
+        temperature: 0,
+        max_tokens: 512,
+        stream: false,
+      },
+    );
+
+    const identity =
+      parseProductIdentity(modelOutput);
+
+    console.log("identify_completed", {
+      requestId,
+      endpoint: "/api/product/identify",
+      model: visionModel,
+      durationMs: Date.now() - startedAt,
+      found: identity !== null,
+      hasName: Boolean(identity?.productName),
+      hasBrand: Boolean(identity?.brand),
+      status: "success",
+    });
+
+    if (!identity) {
+      return error(
+        "Δεν αναγνωρίστηκε το όνομα του προϊόντος.",
+        422,
+        origin,
+        requestId,
+      );
+    }
+
+    return json(
+      identity,
+      200,
+      origin,
+      requestId,
+    );
+  } catch (caughtError) {
+    console.error("identify_failed", {
+      requestId,
+      name:
+        caughtError instanceof Error
+          ? caughtError.name
+          : "unknown",
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Δεν ήταν δυνατή η αναγνώριση του προϊόντος.",
+      502,
+      origin,
+      requestId,
+    );
+  }
 }
 
 async function fileToDataUri(
@@ -1003,6 +1198,7 @@ function looksLikeSyntheticNutritionText(
     matchedTerms >= 5 && hasHighlyRepeatedNumber
   );
 }
+
 function stripCodeFences(value: string): string {
   let text = value.trim();
 
@@ -1037,133 +1233,341 @@ function stripCodeFences(value: string): string {
 
   return text;
 }
-async function runIdentify(
-  request: Request,
-  env: Env,
-  origin: string | null,
-  requestId: string,
-): Promise<Response> {
-  const contentType =
-    request.headers.get("content-type") ?? "";
 
-  if (
-    !contentType.includes("multipart/form-data")
-  ) {
-    return error(
-      "Απαιτείται multipart/form-data.",
-      400,
-      origin,
-      requestId,
+function isHeadingOnlyText(
+  value: string,
+): boolean {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^\p{L}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const headingTerms = [
+    "συστατικα",
+    "συστατικά",
+    "ingredients",
+    "inci",
+    "ingredient list",
+  ];
+
+  const words = normalized
+    .split(" ")
+    .filter(Boolean);
+
+  if (words.length === 0) {
+    return true;
+  }
+
+  const nonHeadingWords = words.filter(
+    (word) =>
+      !headingTerms.some((term) =>
+        term.includes(word),
+      ),
+  );
+
+  return nonHeadingWords.length < 3;
+}
+
+function looksLikeIngredientList(
+  value: string,
+): boolean {
+  const normalized = value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (normalized.length < 15) {
+    return false;
+  }
+
+  const noiseTerms = [
+    "www.",
+    "http",
+    "cleanright",
+    "tel:",
+    "s.a.",
+    "a.b.e.e",
+    "ltd",
+    "gmbh",
+    "made in",
+    "distributed by",
+    "imported by",
+  ];
+
+  const noiseMatches = noiseTerms.filter(
+    (term) => normalized.includes(term),
+  ).length;
+
+  const letters =
+    normalized.match(/[\p{L}]/gu)?.length ?? 0;
+
+  if (noiseMatches >= 2 && letters < 60) {
+    return false;
+  }
+
+  const nutritionMarkers = [
+    "ενέργεια",
+    "energy",
+    "kcal",
+    "kj",
+    "λιπαρά",
+    "λιπαρα",
+    "υδατάνθρακες",
+    "υδατανθρακες",
+    "πρωτεΐνες",
+    "πρωτεινες",
+    "ανά 100",
+    "per 100",
+    "βιταμίνη",
+    "βιταμινη",
+    "vitamin",
+    "%rda",
+    "θιαμίνη",
+    "ριβοφλαβίνη",
+  ];
+
+  const nutritionMatches =
+    nutritionMarkers.filter((marker) =>
+      normalized.includes(marker),
+    ).length;
+
+  if (nutritionMatches >= 3) {
+    return false;
+  }
+
+  const parts = normalized
+    .split(/[,;:]/)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 3);
+
+  if (parts.length >= 3) {
+    return true;
+  }
+
+  const ingredientMarkers = [
+    "aqua",
+    "water",
+    "glycerin",
+    "alcohol",
+    "acid",
+    "sodium",
+    "potassium",
+    "calcium",
+    "oil",
+    "extract",
+    "parfum",
+    "fragrance",
+    "oxide",
+    "sulfate",
+    "sulphite",
+    "chloride",
+    "citrate",
+    "butter",
+    "cetearyl",
+    "phenoxyethanol",
+    "preservative",
+    "vinegar",
+    "νερό",
+    "νερο",
+    "έλαιο",
+    "ελαιο",
+    "οξύ",
+    "οξυ",
+    "άρωμα",
+    "αρωμα",
+    "ζάχαρη",
+    "ζαχαρη",
+    "αλάτι",
+    "αλατι",
+    "ξύδι",
+    "ξυδι",
+    "συντηρητικό",
+    "συντηρητικο",
+    "νάτριο",
+    "νατριο",
+    "οίνο",
+    "οινο",
+    "αλεύρι",
+    "αλευρι",
+    "γάλα",
+    "γαλα",
+  ];
+
+  return ingredientMarkers.some((marker) =>
+    normalized.includes(marker),
+  );
+}
+
+function isNutritionTable(
+  value: string,
+): boolean {
+  const normalized = value.toLowerCase();
+
+  const nutritionMarkers = [
+    "ενέργεια",
+    "ενεργεια",
+    "energy",
+    "kcal",
+    "kj",
+    "λιπαρά",
+    "λιπαρα",
+    "υδατάνθρακες",
+    "υδατανθρακες",
+    "carbohydrate",
+    "σάκχαρα",
+    "σακχαρα",
+    "sugars",
+    "πρωτεΐνες",
+    "πρωτεινες",
+    "protein",
+    "εδώδιμες ίνες",
+    "fibre",
+    "ανά 100",
+    "per 100",
+    "διατροφική δήλωση",
+    "nutrition declaration",
+    "βιταμίνη",
+    "βιταμινη",
+    "vitamin",
+    "θειαμίνη",
+    "ριβοφλαβίνη",
+    "νιασίνη",
+  ];
+
+  const matches = nutritionMarkers.filter(
+    (marker) => normalized.includes(marker),
+  ).length;
+
+  return matches >= 2;
+}
+
+function detectProductType(
+  text: string,
+): "food" | "cosmetic" | "unknown" {
+  const normalized = text.toLowerCase();
+
+  const foodMarkers = [
+    "ξύδι",
+    "ξυδι",
+    "vinegar",
+    "οίνο",
+    "οινο",
+    "wine",
+    "αλεύρι",
+    "αλευρι",
+    "flour",
+    "ζάχαρη",
+    "ζαχαρη",
+    "sugar",
+    "γάλα",
+    "γαλα",
+    "milk",
+    "τυρί",
+    "τυρι",
+    "cheese",
+    "ελαιόλαδο",
+    "ελαιολαδο",
+    "olive oil",
+    "ντομάτα",
+    "ντοματα",
+    "tomato",
+    "κρεμμύδι",
+    "κρεμμυδι",
+    "onion",
+    "σκόρδο",
+    "σκορδο",
+    "garlic",
+    "αλάτι",
+    "αλατι",
+    "salt",
+    "πιπέρι",
+    "πιπερι",
+    "pepper",
+    "κακάο",
+    "κακαο",
+    "cocoa",
+    "σιτάρι",
+    "σιταρι",
+    "wheat",
+    "βούτυρο",
+    "βουτυρο",
+    "yeast",
+    "μαγιά",
+    "μαγια",
+    "starch",
+    "άμυλο",
+    "αμυλο",
+  ];
+
+  const cosmeticMarkers = [
+    "aqua",
+    "cetearyl",
+    "phenoxyethanol",
+    "dimethicone",
+    "parfum",
+    "sodium laureth",
+    "sodium lauryl",
+    "panthenol",
+    "tocopheryl",
+    "butyrospermum",
+    "hyaluronic",
+    "niacinamide",
+    "isohexadecane",
+    "cocamidopropyl",
+    "benzyl alcohol",
+    "linalool",
+    "limonene",
+    "citronellol",
+  ];
+
+  const foodScore = foodMarkers.filter(
+    (marker) => normalized.includes(marker),
+  ).length;
+
+  const cosmeticScore = cosmeticMarkers.filter(
+    (marker) => normalized.includes(marker),
+  ).length;
+
+  if (foodScore === 0 && cosmeticScore === 0) {
+    return "unknown";
+  }
+
+  if (foodScore > cosmeticScore) {
+    return "food";
+  }
+
+  if (cosmeticScore > foodScore) {
+    return "cosmetic";
+  }
+
+  return "unknown";
+}
+
+function hasRepetitionLoop(
+  value: string,
+): boolean {
+  const items = value
+    .split(/[",\n]/)
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => item.length >= 3);
+
+  if (items.length < 10) {
+    return false;
+  }
+
+  const counts = new Map<string, number>();
+
+  for (const item of items) {
+    counts.set(
+      item,
+      (counts.get(item) ?? 0) + 1,
     );
   }
 
-  let formData: FormData;
+  const maxCount = Math.max(
+    ...Array.from(counts.values()),
+  );
 
-  try {
-    formData = await request.formData();
-  } catch {
-    return error(
-      "Το multipart payload δεν είναι έγκυρο.",
-      400,
-      origin,
-      requestId,
-    );
-  }
-
-  const imageValue = formData.get("image");
-
-  const image =
-    imageValue instanceof File
-      ? imageValue
-      : null;
-
-  if (!image) {
-    return error(
-      "Λείπει η εικόνα του προϊόντος.",
-      400,
-      origin,
-      requestId,
-    );
-  }
-
-  if (
-    image.size === 0 ||
-    image.size > 5 * 1024 * 1024
-  ) {
-    return error(
-      "Το μέγεθος της εικόνας δεν επιτρέπεται.",
-      400,
-      origin,
-      requestId,
-    );
-  }
-
-  try {
-    const imageDataUri =
-      await fileToDataUri(image);
-
-    const startedAt = Date.now();
-
-    const modelOutput = await env.AI.run(
-      visionModel,
-      {
-        task: "query",
-        image: imageDataUri,
-        question: identifyPrompt,
-        reasoning: false,
-        temperature: 0,
-        max_tokens: 512,
-        stream: false,
-      },
-    );
-
-    const identity =
-      parseProductIdentity(modelOutput);
-
-    console.log("identify_completed", {
-      requestId,
-      endpoint: "/api/product/identify",
-      model: visionModel,
-      durationMs: Date.now() - startedAt,
-      found: identity !== null,
-      hasName: Boolean(identity?.productName),
-      hasBrand: Boolean(identity?.brand),
-      status: "success",
-    });
-
-    if (!identity) {
-      return error(
-        "Δεν αναγνωρίστηκε το όνομα του προϊόντος.",
-        422,
-        origin,
-        requestId,
-      );
-    }
-
-    return json(
-      identity,
-      200,
-      origin,
-      requestId,
-    );
-  } catch (caughtError) {
-    console.error("identify_failed", {
-      requestId,
-      name:
-        caughtError instanceof Error
-          ? caughtError.name
-          : "unknown",
-      message:
-        caughtError instanceof Error
-          ? caughtError.message
-          : String(caughtError).slice(0, 300),
-    });
-
-    return error(
-      "Δεν ήταν δυνατή η αναγνώριση του προϊόντος.",
-      502,
-      origin,
-      requestId,
-    );
-  }
+  return maxCount >= 8;
 }

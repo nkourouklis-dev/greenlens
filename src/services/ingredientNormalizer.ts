@@ -47,6 +47,12 @@ const aliasGroups: Record<string, string[]> = {
     "πανθενόλη",
     "πανθενολη",
   ],
+  "sodium metabisulphite": [
+    "sodium metabisulphite",
+    "sodium metabisulfite",
+    "μεταδιθειώδες νάτριο",
+    "μεταδιθειωδες νατριο",
+  ],
 };
 
 const aliasLookup = buildAliasLookup();
@@ -75,9 +81,8 @@ export function normalizeIngredients(
     const percentage =
       readPercentage(originalName);
 
-    const normalizedName = canonicalName(
-      originalName,
-    );
+    const normalizedName =
+      canonicalName(originalName);
 
     if (!normalizedName) {
       continue;
@@ -93,9 +98,8 @@ export function normalizeIngredients(
       id: crypto.randomUUID(),
       originalName,
       normalizedName,
-      displayName: formatDisplayName(
-        originalName,
-      ),
+      displayName:
+        formatDisplayName(originalName),
       percentage,
       category: categoryFor(normalizedName),
       aliases:
@@ -137,7 +141,36 @@ function isPlausibleIngredient(
 
   const lowered = trimmed.toLowerCase();
 
-  const noiseTerms = [
+  if (
+    /^\d+\s*(ml|l|g|kg|mg|cl|oz|τεμ)\b/i.test(
+      lowered,
+    )
+  ) {
+    return false;
+  }
+
+  const exactNoise = [
+    "χωρίς",
+    "χωρις",
+    "χωριζ",
+    "without",
+    "zero",
+    "light",
+    "διαίτης",
+    "διαιτης",
+    "net",
+    "e",
+    "και",
+    "and",
+    "or",
+    "ή",
+  ];
+
+  if (exactNoise.includes(lowered)) {
+    return false;
+  }
+
+  const prefixNoise = [
     "ingredients",
     "συστατικά",
     "συστατικα",
@@ -146,9 +179,33 @@ function isPlausibleIngredient(
     "made in",
     "www.",
     "http",
+    "best before",
+    "ανάλωση",
+    "αναλωση",
+    "καθαρό βάρος",
+    "καθαρο βαρος",
+    "net weight",
+    "διατροφική",
+    "διατροφικη",
+    "nutrition",
+    "ενέργεια",
+    "ενεργεια",
+    "energy",
+    "λιπαρά",
+    "λιπαρα",
+    "υδατάνθρακες",
+    "υδατανθρακες",
+    "πρωτεΐνες",
+    "πρωτεινες",
+    "εδώδιμες",
+    "εδωδιμες",
+    "ανά 100",
+    "per 100",
+    "tel",
+    "τηλ",
   ];
 
-  return !noiseTerms.some((term) =>
+  return !prefixNoise.some((term) =>
     lowered.startsWith(term),
   );
 }
@@ -208,9 +265,10 @@ function buildAliasLookup(): Map<
 > {
   const lookup = new Map<string, string>();
 
-  for (const [canonical, aliases] of Object.entries(
-    aliasGroups,
-  )) {
+  for (const [
+    canonical,
+    aliases,
+  ] of Object.entries(aliasGroups)) {
     lookup.set(canonical, canonical);
 
     for (const alias of aliases) {
@@ -229,7 +287,7 @@ function categoryFor(
   }
 
   if (
-    /(paraben|phenoxyethanol|benzoate|sorbate|sodium benzoate|συντηρητικ)/.test(
+    /(paraben|phenoxyethanol|benzoate|sorbate|metabisulph|metabisulf|συντηρητικ|μεταδιθειωδ)/.test(
       name,
     )
   ) {
@@ -269,7 +327,7 @@ function categoryFor(
   }
 
   if (
-    /(aqua|water|alcohol|glycerin|oil|butter|έλαιο|ελαιο|νερό|νερο)/.test(
+    /(aqua|water|alcohol|glycerin|oil|butter|vinegar|ξύδι|ξυδι|έλαιο|ελαιο|νερό|νερο)/.test(
       name,
     )
   ) {
