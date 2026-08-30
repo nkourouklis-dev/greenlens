@@ -227,3 +227,16 @@ function loadImage(
     image.src = source;
   });
 }
+export function findByBarcode(
+  barcode: string,
+): ScanHistoryItem | undefined {
+  const normalized = barcode.trim();
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  return getHistory().find(
+    (item) => item.barcode === normalized,
+  );
+}
