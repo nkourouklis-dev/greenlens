@@ -626,13 +626,17 @@ async function runAnalysis(
       },
     );
 
-    const modelText =
+        const modelText =
       extractModelText(modelOutput);
+
+    const cleanedText = modelText
+      ? stripCodeFences(modelText)
+      : null;
 
     const result =
       parseAnalysis(modelOutput) ??
-      (modelText
-        ? parseAnalysis(modelText)
+      (cleanedText
+        ? parseAnalysis(cleanedText)
         : null);
 
     console.log("analysis_model_completed", {
@@ -979,4 +983,38 @@ function looksLikeSyntheticNutritionText(
   return (
     matchedTerms >= 5 && hasHighlyRepeatedNumber
   );
+}
+function stripCodeFences(value: string): string {
+  let text = value.trim();
+
+  if (text.startsWith("```")) {
+    const firstNewline = text.indexOf("\n");
+
+    if (firstNewline >= 0) {
+      text = text.slice(firstNewline + 1);
+    } else {
+      text = text.slice(3);
+    }
+  }
+
+  if (text.endsWith("```")) {
+    text = text.slice(0, -3);
+  }
+
+  text = text.trim();
+
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+
+  if (
+    firstBrace >= 0 &&
+    lastBrace > firstBrace
+  ) {
+    return text.slice(
+      firstBrace,
+      lastBrace + 1,
+    );
+  }
+
+  return text;
 }
