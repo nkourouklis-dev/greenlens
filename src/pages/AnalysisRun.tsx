@@ -3,11 +3,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
-import {
-  analysisVersion,
-  apiBaseUrl,
-  apiConfigurationError,
-} from "../config";
+import { analysisVersion } from "../config";
 import { runAnalysis } from "../services/analysisClient";
 import { normalizeIngredients } from "../services/ingredientNormalizer";
 import {
@@ -36,15 +32,16 @@ export default function AnalysisRun() {
   const [message, setMessage] = useState(
     "Προετοιμασία ανάλυσης...",
   );
+
   const [error, setError] = useState("");
-  const [debugInfo, setDebugInfo] = useState("");
 
   useEffect(() => {
     const item = getHistoryItem(id);
 
     if (!item) {
-      setError("Το προϊόν δεν βρέθηκε στη συσκευή.");
-      setDebugInfo("item=missing");
+      setError(
+        "Το προϊόν δεν βρέθηκε στη συσκευή.",
+      );
       return;
     }
 
@@ -58,16 +55,6 @@ export default function AnalysisRun() {
     const ingredients = normalizeIngredients(
       text,
       confidence,
-    );
-
-    setDebugInfo(
-      [
-        `text=${text.length}`,
-        `conf=${confidence}`,
-        `ingredients=${ingredients.length}`,
-        `api=${apiBaseUrl || "EMPTY"}`,
-        `cfgError=${apiConfigurationError ?? "none"}`,
-      ].join(" | "),
     );
 
     if (
@@ -111,7 +98,7 @@ export default function AnalysisRun() {
       return;
     }
 
-        setMessage(
+    setMessage(
       "Αναλύω τα επιβεβαιωμένα συστατικά. Μπορεί να διαρκέσει έως 30 δευτερόλεπτα.",
     );
 
@@ -156,19 +143,6 @@ export default function AnalysisRun() {
           caughtError instanceof Error
             ? caughtError.message
             : "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.",
-        );
-
-        setDebugInfo((previousInfo) =>
-          [
-            previousInfo,
-            `requestFailed=${
-              caughtError instanceof Error
-                ? caughtError.message
-                : "unknown"
-            }`,
-          ]
-            .filter(Boolean)
-            .join(" | "),
         );
       });
   }, [id, navigate]);
@@ -215,16 +189,11 @@ export default function AnalysisRun() {
             </p>
 
             <p className="mt-2 text-sm leading-6 text-slate-400">
-              Η βαθμολογία υπολογίζεται από σταθερούς
-              κανόνες αφού ολοκληρωθεί η ερμηνεία.
+              Η βαθμολογία υπολογίζεται από
+              σταθερούς κανόνες αφού ολοκληρωθεί η
+              ερμηνεία.
             </p>
           </div>
-        )}
-
-        {debugInfo && (
-          <pre className="mt-6 overflow-x-auto whitespace-pre-wrap break-all rounded-xl bg-slate-800 p-3 text-xs text-slate-200">
-            {debugInfo}
-          </pre>
         )}
       </section>
     </main>
