@@ -3,12 +3,25 @@ export type ScanStatus = "known" | "unknown";
 export interface OcrResult {
   rawText: string;
   confidence: number;
-  labelType: "ingredients" | "nutrition" | "mixed" | "unknown";
+  labelType:
+    | "ingredients"
+    | "nutrition"
+    | "mixed"
+    | "unknown";
   unreadableSegments: string[];
 }
 
-export type ProductType = "food" | "cosmetic" | "unknown";
-export type FindingSeverity = "positive" | "info" | "attention" | "high_attention" | "unknown";
+export type ProductType =
+  | "food"
+  | "cosmetic"
+  | "unknown";
+
+export type FindingSeverity =
+  | "positive"
+  | "info"
+  | "attention"
+  | "high_attention"
+  | "unknown";
 
 export interface NormalizedIngredient {
   id: string;
@@ -16,7 +29,16 @@ export interface NormalizedIngredient {
   normalizedName: string;
   displayName: string;
   percentage: number | null;
-  category: "base" | "additive" | "preservative" | "sweetener" | "colorant" | "fragrance" | "allergen" | "other" | "unknown";
+  category:
+    | "base"
+    | "additive"
+    | "preservative"
+    | "sweetener"
+    | "colorant"
+    | "fragrance"
+    | "allergen"
+    | "other"
+    | "unknown";
   aliases: string[];
   confidence: number;
 }
@@ -27,7 +49,11 @@ export interface IngredientFinding {
   severity: FindingSeverity;
   title: string;
   explanation: string;
-  evidenceType: "regulatory" | "scientific" | "label" | "none";
+  evidenceType:
+    | "regulatory"
+    | "scientific"
+    | "label"
+    | "none";
   sourceName: string | null;
   sourceUrl: string | null;
   confidence: number;
@@ -56,7 +82,13 @@ export interface ScoreDeduction {
 
 export interface ScoreBreakdown {
   score: number | null;
-  band: "excellent" | "good" | "moderate" | "attention" | "high_attention" | "insufficient_data";
+  band:
+    | "excellent"
+    | "good"
+    | "moderate"
+    | "attention"
+    | "high_attention"
+    | "insufficient_data";
   deductions: ScoreDeduction[];
   bonuses: string[];
   confidence: number;
@@ -67,6 +99,7 @@ export interface ScoreBreakdown {
 export interface ProductAnalysisRecord {
   productId: string;
   barcode: string;
+  productType: ProductType;
   confirmedIngredientText: string;
   normalizedIngredients: NormalizedIngredient[];
   ocrConfidence: number;

@@ -78,6 +78,7 @@ export default function AnalysisRun() {
         analysis: {
           productId: id,
           barcode: item.barcode,
+          productType: "unknown",
           confirmedIngredientText: text,
           normalizedIngredients: ingredients,
           ocrConfidence: confidence,
@@ -117,26 +118,26 @@ export default function AnalysisRun() {
     runAnalysis({
       productId: id,
       barcode: item.barcode,
+      productType: "unknown",
       confirmedIngredientText: text,
       normalizedIngredients: ingredients,
       ocrConfidence: confidence,
     })
       .then(({ structured, score }) => {
-        const record = {
-          productId: id,
-          barcode: item.barcode,
-          confirmedIngredientText: text,
-          normalizedIngredients: ingredients,
-          ocrConfidence: confidence,
-          structured,
-          score,
-          analyzedAt: new Date().toISOString(),
-          analysisVersion: score.scoringVersion,
-        };
-
         const wasSaved = updateHistoryItem(id, {
           normalizedIngredients: ingredients,
-          analysis: record,
+          analysis: {
+            productId: id,
+            barcode: item.barcode,
+            productType: structured.productType,
+            confirmedIngredientText: text,
+            normalizedIngredients: ingredients,
+            ocrConfidence: confidence,
+            structured,
+            score,
+            analyzedAt: new Date().toISOString(),
+            analysisVersion: score.scoringVersion,
+          },
         });
 
         if (!wasSaved) {
