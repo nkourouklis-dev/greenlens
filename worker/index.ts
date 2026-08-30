@@ -17,35 +17,37 @@ const visionModel =
   "@cf/moondream/moondream3.1-9B-A2B";
 
 const textModel =
-  "@cf/meta/llama-3.1-8b-instruct";
+  "@cf/meta/llama-4-scout-17b-16e-instruct";
 
-const ocrPrompt = `
-Read literal visible text on the product label.
-
-Rules:
-- Prioritize headings: Συστατικά, Ingredients, INGREDIENTS, INCI.
-- Read nutrition separately when visible.
-- Never label nutrition fields as ingredients.
-- Never invent missing words, ingredients, vitamins or quantities.
-- Never complete partially visible text.
-- Use [unreadable] when text is unclear.
-- Do not describe packaging.
-- Do not provide analysis.
-- Do not provide medical advice.
-- Do not provide safety conclusions.
-- Do not calculate a score.
-- Return ONLY a valid JSON object. Do not add any text before or after the JSON.
-- Do not use Markdown formatting (like \`\`\`json).
-- If the label is completely unreadable, return EXACTLY this JSON: {"labelType": "unknown", "ingredients": [], "nutritionText": "", "unreadableSegments": ["UNREADABLE_INGREDIENTS_LABEL"]}
-
-Required JSON structure:
-{
-  "labelType": "ingredients | nutrition | mixed | unknown",
-  "ingredients": ["item1", "item2"],
-  "nutritionText": "raw nutrition text here if any",
-  "unreadableSegments": ["segment1"]
-}
-`.trim();
+const ocrPrompt = [
+  "Read literal visible text on the product label.",
+  "",
+  "Rules:",
+  "- Prioritize headings: Συστατικά, Ingredients, INGREDIENTS, INCI.",
+  "- Read nutrition separately when visible.",
+  "- Never label nutrition fields as ingredients.",
+  "- Never invent missing words, ingredients, vitamins or quantities.",
+  "- Never complete partially visible text.",
+  "- Use [unreadable] when text is unclear.",
+  "- Do not describe packaging.",
+  "- Do not provide analysis.",
+  "- Do not provide medical advice.",
+  "- Do not provide safety conclusions.",
+  "- Do not calculate a score.",
+  "- Return ONLY a valid JSON object. Do not add any text before or after the JSON.",
+  "- Do not use Markdown code fences.",
+  '- If the label is completely unreadable, return EXACTLY this JSON: {"labelType": "unknown", "ingredients": [], "nutritionText": "", "unreadableSegments": ["UNREADABLE_INGREDIENTS_LABEL"]}',
+  "",
+  "Required JSON structure:",
+  "{",
+  '  "labelType": "ingredients",',
+  '  "ingredients": ["item1", "item2"],',
+  '  "nutritionText": "raw nutrition text here if any",',
+  '  "unreadableSegments": []',
+  "}",
+  "",
+  "The labelType value must be exactly one of: ingredients, nutrition, mixed, unknown.",
+].join("\n");
 
 type JsonBody =
   | OcrResponse
@@ -101,14 +103,17 @@ export default {
       request.method === "POST" &&
       url.pathname === "/api/analysis/run"
     ) {
-      return runAnalysis(request, env, origin, requestId);
+      return runAnalysis(
+        request,
+        env,
+        origin,
+        requestId,
+      );
     }
 
     if (
       request.method === "POST" &&
-      /^\/api\/products\/[^/]+\/chat$/.test(
-        url.pathname,
-      )
+      isChatPath(url.pathname)
     ) {
       return runChat(request, origin, requestId);
     }
@@ -129,6 +134,19 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+function isChatPath(pathname: string): boolean {
+  const segments = pathname.split("/");
+
+  return (
+    segments.length === 5 &&
+    segments[0] === "" &&
+    segments[1] === "api" &&
+    segments[2] === "products" &&
+    segments[3].length > 0 &&
+    segments[4] === "chat"
+  );
+}
+
 async function runOcr(
   request: Request,
   env: Env,
@@ -138,7 +156,9 @@ async function runOcr(
   const contentType =
     request.headers.get("content-type") ?? "";
 
-  if (!contentType.includes("multipart/form-data")) {
+  if (
+    !contentType.includes("multipart/form-data")
+  ) {
     return error(
       "Απαιτείται multipart/form-data.",
       400,
@@ -163,7 +183,9 @@ async function runOcr(
   const imageValue = formData.get("image");
 
   const image =
-    imageValue instanceof File ? imageValue : null;
+    imageValue instanceof File
+      ? imageValue
+      : null;
 
   const barcode = readTextField(
     formData,
@@ -218,7 +240,8 @@ async function runOcr(
       },
     );
 
-    const result = parseOcrModelOutput(modelOutput);
+    const result =
+      parseOcrModelOutput(modelOutput);
 
     console.log("ocr_model_completed", {
       requestId,
@@ -227,17 +250,14 @@ async function runOcr(
       durationMs: Date.now() - startedAt,
       outputType: typeof modelOutput,
       outputKeys:
-        typeof modelOutput === "object" && modelOutput !== null
+        typeof modelOutput === "object" &&
+        modelOutput !== null
           ? Object.keys(modelOutput)
           : [],
-      parsedLabelType: result?.labelType,
-      parsedTextLength: result?.rawText?.length ?? 0,
+      parsedLabelType: result?.labelType ?? null,
+      parsedTextLength:
+        result?.rawText?.length ?? 0,
       status: "success",
-    });
-    
-    console.log("ocr_unreadable_check", {
-      unreadable: isUnreadableModelOutput(modelOutput),
-      extracted: extractModelText(modelOutput)?.slice(0, 200),
     });
 
     if (isUnreadableModelOutput(modelOutput)) {
@@ -267,7 +287,11 @@ async function runOcr(
       );
     }
 
-    if (looksLikeSyntheticNutritionText(result.rawText)) {
+    if (
+      looksLikeSyntheticNutritionText(
+        result.rawText,
+      )
+    ) {
       return error(
         "Η ανάγνωση δεν ήταν αρκετά αξιόπιστη. Φωτογραφίστε ξανά τη λίστα συστατικών με καλύτερο φωτισμό.",
         422,
@@ -280,10 +304,14 @@ async function runOcr(
   } catch (caughtError) {
     console.error("ocr_extract_failed", {
       requestId,
+      name:
+        caughtError instanceof Error
+          ? caughtError.name
+          : "unknown",
       message:
         caughtError instanceof Error
           ? caughtError.message
-          : "unknown",
+          : String(caughtError).slice(0, 300),
     });
 
     return error(
@@ -330,18 +358,17 @@ function json(
   origin: string | null,
   requestId?: string,
 ): Response {
-  return new Response(
-    JSON.stringify(body),
-    {
-      status,
-      headers: {
-        "content-type":
-          "application/json; charset=utf-8",
-        ...corsHeaders(origin),
-        ...(requestId ? { "x-request-id": requestId } : {}),
-      },
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type":
+        "application/json; charset=utf-8",
+      ...corsHeaders(origin),
+      ...(requestId
+        ? { "x-request-id": requestId }
+        : {}),
     },
-  );
+  });
 }
 
 function error(
@@ -360,7 +387,9 @@ function error(
         "content-type":
           "application/json; charset=utf-8",
         ...corsHeaders(origin),
-        ...(requestId ? { "x-request-id": requestId } : {}),
+        ...(requestId
+          ? { "x-request-id": requestId }
+          : {}),
       },
     },
   );
@@ -374,9 +403,12 @@ function corsHeaders(
   };
 
   if (origin && isAllowedOrigin(origin)) {
-    headers["Access-Control-Allow-Origin"] = origin;
-    headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
-    headers["Access-Control-Allow-Headers"] = "Content-Type";
+    headers["Access-Control-Allow-Origin"] =
+      origin;
+    headers["Access-Control-Allow-Methods"] =
+      "GET, POST, OPTIONS";
+    headers["Access-Control-Allow-Headers"] =
+      "Content-Type";
   }
 
   return headers;
@@ -409,18 +441,14 @@ function isAnalysisRequest(
     isRecord(value) &&
     isText(value.productId) &&
     isText(value.barcode) &&
-    (
-      value.productType === "food" ||
+    (value.productType === "food" ||
       value.productType === "cosmetic" ||
-      value.productType === "unknown"
-    ) &&
+      value.productType === "unknown") &&
     typeof value.confirmedIngredientText ===
       "string" &&
     value.confirmedIngredientText.length <=
       12_000 &&
-    Array.isArray(
-      value.normalizedIngredients,
-    ) &&
+    Array.isArray(value.normalizedIngredients) &&
     value.normalizedIngredients.length <= 200 &&
     typeof value.ocrConfidence === "number" &&
     value.ocrConfidence >= 0 &&
@@ -440,9 +468,7 @@ function isChatRequest(
     isRecord(value) &&
     isText(value.question) &&
     value.question.length <= 2_000 &&
-    Array.isArray(
-      value.conversationHistory,
-    ) &&
+    Array.isArray(value.conversationHistory) &&
     value.conversationHistory.length <= 20
   );
 }
@@ -467,8 +493,7 @@ function isRecord(
   value: unknown,
 ): value is Record<string, unknown> {
   return (
-    typeof value === "object" &&
-    value !== null
+    typeof value === "object" && value !== null
   );
 }
 
@@ -516,7 +541,9 @@ async function runAnalysis(
   if (
     looksLikeJsonWrapper(confirmedText) ||
     looksLikeMojibake(confirmedText) ||
-    looksLikeSyntheticNutritionText(confirmedText)
+    looksLikeSyntheticNutritionText(
+      confirmedText,
+    )
   ) {
     return json(
       insufficientAnalysis(),
@@ -526,25 +553,56 @@ async function runAnalysis(
     );
   }
 
-  const prompt = `
-Interpret only the following user-confirmed ingredient context.
-
-Return valid JSON matching the expected analysis structure.
-
-Rules:
-- Do not calculate a score.
-- Do not claim unconditional product safety.
-- Do not provide medical advice.
-- Do not make pregnancy or child-safety conclusions.
-- Do not claim that an ingredient is toxic or carcinogenic without verified evidence.
-- Do not invent regulatory status.
-- Do not invent source names or URLs.
-- If evidence is unavailable, use severity "unknown", evidenceType "none", sourceName null, and sourceUrl null.
-- If the provided information is insufficient, populate insufficientDataReasons.
-
-Confirmed context:
-${JSON.stringify(requestBody)}
-`.trim();
+  const prompt = [
+    "Analyze the confirmed ingredient list below.",
+    "",
+    "Return ONLY this exact JSON structure:",
+    "{",
+    '  "productType": "cosmetic",',
+    '  "summary": "short neutral summary in Greek",',
+    '  "positives": ["short Greek phrase"],',
+    '  "attentionItems": ["short Greek phrase"],',
+    '  "potentialAllergens": ["ingredient name"],',
+    '  "ingredientFindings": [',
+    "    {",
+    '      "ingredientName": "AQUA",',
+    '      "normalizedName": "aqua",',
+    '      "severity": "info",',
+    '      "title": "short Greek title",',
+    '      "explanation": "short Greek explanation",',
+    '      "evidenceType": "none",',
+    '      "sourceName": null,',
+    '      "sourceUrl": null,',
+    '      "confidence": 0.5',
+    "    }",
+    "  ],",
+    '  "insufficientDataReasons": [],',
+    '  "confidence": 0.6',
+    "}",
+    "",
+    "Field rules:",
+    "- productType must be exactly one of: food, cosmetic, unknown.",
+    "- severity must be exactly one of: positive, info, attention, high_attention, unknown.",
+    "- evidenceType must be exactly one of: regulatory, scientific, label, none.",
+    "- confidence must be a number between 0 and 1.",
+    "- sourceName and sourceUrl must be null unless you have verified evidence.",
+    "",
+    "Content rules:",
+    "- Do not calculate a score.",
+    "- Do not claim unconditional product safety.",
+    "- Do not provide medical advice.",
+    "- Do not make pregnancy or child-safety conclusions.",
+    "- Do not claim toxicity or carcinogenicity without verified evidence.",
+    "- Do not invent regulatory status.",
+    "- Do not invent source names or URLs.",
+    '- Use severity "unknown" and evidenceType "none" when evidence is unavailable.',
+    "- Write summary, title and explanation in Greek.",
+    "- Include at most 15 entries in ingredientFindings.",
+    "- Return ONLY the JSON object. No commentary. No Markdown. No code fences.",
+    "",
+    "Confirmed ingredients:",
+    confirmedText,
+  ].join("\n");
 
   try {
     const startedAt = Date.now();
@@ -552,11 +610,30 @@ ${JSON.stringify(requestBody)}
     const modelOutput = await env.AI.run(
       textModel,
       {
-        prompt,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are an ingredient analysis assistant. You always return a single valid JSON object and nothing else.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        max_tokens: 4096,
+        temperature: 0.2,
       },
     );
 
-    const result = parseAnalysis(modelOutput);
+    const modelText =
+      extractModelText(modelOutput);
+
+    const result =
+      parseAnalysis(modelOutput) ??
+      (modelText
+        ? parseAnalysis(modelText)
+        : null);
 
     console.log("analysis_model_completed", {
       requestId,
@@ -565,9 +642,15 @@ ${JSON.stringify(requestBody)}
       durationMs: Date.now() - startedAt,
       outputType: typeof modelOutput,
       outputKeys:
-        typeof modelOutput === "object" && modelOutput !== null
+        typeof modelOutput === "object" &&
+        modelOutput !== null
           ? Object.keys(modelOutput)
           : [],
+      parsed: result !== null,
+      findings:
+        result?.ingredientFindings?.length ?? 0,
+      extractedLength: modelText?.length ?? 0,
+      sample: modelText?.slice(0, 400) ?? null,
       status: "success",
     });
 
@@ -598,10 +681,14 @@ ${JSON.stringify(requestBody)}
   } catch (caughtError) {
     console.error("analysis_run_failed", {
       requestId,
+      name:
+        caughtError instanceof Error
+          ? caughtError.name
+          : "unknown",
       message:
         caughtError instanceof Error
           ? caughtError.message
-          : "unknown",
+          : String(caughtError).slice(0, 300),
     });
 
     return error(
@@ -640,29 +727,43 @@ async function runChat(
   );
 }
 
-async function fileToDataUri(file: File): Promise<string> {
+async function fileToDataUri(
+  file: File,
+): Promise<string> {
   const mimeType = file.type || "image/jpeg";
   const arrayBuffer = await file.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
+
   let binary = "";
   const chunkSize = 8192;
 
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    const end = Math.min(offset + chunkSize, bytes.length);
+  for (
+    let offset = 0;
+    offset < bytes.length;
+    offset += chunkSize
+  ) {
+    const end = Math.min(
+      offset + chunkSize,
+      bytes.length,
+    );
+
     const chunk = bytes.subarray(offset, end);
-    binary += String.fromCharCode(...Array.from(chunk));
+
+    binary += String.fromCharCode(
+      ...Array.from(chunk),
+    );
   }
 
   const base64 = btoa(binary);
 
-  return `data:${mimeType};base64,${base64}`;
+  return "data:" + mimeType + ";base64," + base64;
 }
 
 function extractModelText(
   value: unknown,
   depth: number = 0,
 ): string | null {
-  if (depth > 3) {
+  if (depth > 4) {
     return null;
   }
 
@@ -674,10 +775,65 @@ function extractModelText(
     return null;
   }
 
-  if (isRecord(value.result)) {
-    const nested = extractModelText(value.result, depth + 1);
-    if (nested) {
-      return nested;
+  if (Array.isArray(value.choices)) {
+    for (const choice of value.choices) {
+      if (!isRecord(choice)) {
+        continue;
+      }
+
+      if (isRecord(choice.message)) {
+        const message = choice.message;
+
+        if (
+          typeof message.content === "string" &&
+          message.content.trim()
+        ) {
+          return message.content.trim();
+        }
+
+        if (Array.isArray(message.content)) {
+          for (const part of message.content) {
+            if (
+              isRecord(part) &&
+              typeof part.text === "string" &&
+              part.text.trim()
+            ) {
+              return part.text.trim();
+            }
+          }
+        }
+
+        if (
+          typeof message.reasoning_content ===
+            "string" &&
+          message.reasoning_content.trim()
+        ) {
+          return message.reasoning_content.trim();
+        }
+
+        if (
+          typeof message.reasoning === "string" &&
+          message.reasoning.trim()
+        ) {
+          return message.reasoning.trim();
+        }
+      }
+
+      if (
+        typeof choice.text === "string" &&
+        choice.text.trim()
+      ) {
+        return choice.text.trim();
+      }
+
+      if (
+        isRecord(choice.delta) &&
+        typeof choice.delta.content ===
+          "string" &&
+        choice.delta.content.trim()
+      ) {
+        return choice.delta.content.trim();
+      }
     }
   }
 
@@ -687,17 +843,26 @@ function extractModelText(
     value.description,
     value.text,
     value.output,
-    value.result,
+    value.content,
   ];
 
   for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) {
+    if (
+      typeof candidate === "string" &&
+      candidate.trim()
+    ) {
       return candidate.trim();
-    } else if (isRecord(candidate)) {
-      const nested = extractModelText(candidate, depth + 1);
-      if (nested) {
-        return nested;
-      }
+    }
+  }
+
+  if ("result" in value) {
+    const nested = extractModelText(
+      value.result,
+      depth + 1,
+    );
+
+    if (nested) {
+      return nested;
     }
   }
 
@@ -716,7 +881,9 @@ function isUnreadableModelOutput(
   const upper = text.toUpperCase();
 
   return (
-    upper.includes("UNREADABLE_INGREDIENTS_LABEL") ||
+    upper.includes(
+      "UNREADABLE_INGREDIENTS_LABEL",
+    ) ||
     upper.split("CARBOHYDRATE").length > 10 ||
     upper.split("ENERGY").length > 10
   );
@@ -738,14 +905,17 @@ function looksLikeJsonWrapper(
 function looksLikeMojibake(
   value: string,
 ): boolean {
-  const mojibakeRegex = /\u00CE[\u0080-\u00BF]|\u00CF[\u0080-\u00BF]|\u00C2[\u0080-\u00BF]|\u00C3[\u0080-\u00BF]|\uFFFD|\u00E2\u20AC/;
+  const mojibakeRegex =
+    /\u00CE[\u0080-\u00BF]|\u00CF[\u0080-\u00BF]|\u00C2[\u0080-\u00BF]|\u00C3[\u0080-\u00BF]|\uFFFD|\u00E2\u20AC/;
+
   return mojibakeRegex.test(value);
 }
 
 function looksLikeSyntheticNutritionText(
   value: string,
 ): boolean {
-  const normalizedValue = value.toLocaleLowerCase("el-GR");
+  const normalizedValue =
+    value.toLocaleLowerCase("el-GR");
 
   const suspiciousTerms = [
     "niacin",
@@ -774,21 +944,31 @@ function looksLikeSyntheticNutritionText(
     "βιταμινη d",
   ];
 
-  const matchedTerms = suspiciousTerms.filter((term) =>
-    normalizedValue.includes(term),
+  const matchedTerms = suspiciousTerms.filter(
+    (term) => normalizedValue.includes(term),
   ).length;
 
   const numbers =
-    normalizedValue.match(/\b\d+(?:[.,]\d+)?\b/g) ?? [];
+    normalizedValue.match(
+      /\b\d+(?:[.,]\d+)?\b/g,
+    ) ?? [];
 
-  const repeatedNumberCounts = new Map<string, number>();
+  const repeatedNumberCounts = new Map<
+    string,
+    number
+  >();
 
   for (const number of numbers) {
-    const normalizedNumber = number.replace(",", ".");
+    const normalizedNumber = number.replace(
+      ",",
+      ".",
+    );
 
     repeatedNumberCounts.set(
       normalizedNumber,
-      (repeatedNumberCounts.get(normalizedNumber) ?? 0) + 1,
+      (repeatedNumberCounts.get(
+        normalizedNumber,
+      ) ?? 0) + 1,
     );
   }
 
@@ -796,5 +976,7 @@ function looksLikeSyntheticNutritionText(
     repeatedNumberCounts.values(),
   ).some((count) => count >= 5);
 
-  return matchedTerms >= 5 && hasHighlyRepeatedNumber;
+  return (
+    matchedTerms >= 5 && hasHighlyRepeatedNumber
+  );
 }
