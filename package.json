@@ -9,7 +9,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "worker:typecheck": "wrangler types worker/worker-configuration.d.ts && tsc -p worker/tsconfig.json",
-    "worker:test": "tsx --test worker/*.test.ts src/services/scoring.test.ts"
+    "worker:test": "tsx --test worker/*.test.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

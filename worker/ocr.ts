@@ -1,4 +1,4 @@
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+﻿export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export interface OcrResponse {
@@ -18,9 +18,64 @@ export function validateOcrRequest(image: File | null, barcode: string | null, p
 }
 
 export function parseOcrModelOutput(value: unknown): OcrResponse | null {
-  const candidate = typeof value === "string" ? parseJson(value) : isRecord(value) && typeof value.description === "string" ? parseJson(value.description) : null;
-  if (!isRecord(candidate) || typeof candidate.rawText !== "string" || !candidate.rawText.trim() || typeof candidate.confidence !== "number" || !Number.isFinite(candidate.confidence) || candidate.confidence < 0 || candidate.confidence > 1 || !isLabelType(candidate.labelType) || !isStringArray(candidate.unreadableSegments)) return null;
-  return { rawText: candidate.rawText.trim(), confidence: candidate.confidence, labelType: candidate.labelType, unreadableSegments: candidate.unreadableSegments };
+  const candidate =
+    typeof value === "string"
+      ? parseJson(value)
+      : isRecord(value) &&
+        typeof value.description === "string"
+      ? parseJson(value.description)
+      : isRecord(value) &&
+        isRecord(value.result) &&
+        typeof value.result.answer === "string"
+      ? parseJson(value.result.answer)
+      : null;
+
+  if (!isRecord(candidate)) {
+    return null;
+  }
+  if (
+  isRecord(candidate) &&
+  Array.isArray(candidate.ingredients)
+) {
+  const ingredientsText = candidate.ingredients
+    .filter(
+      (item): item is string =>
+        typeof item === "string" &&
+        item.trim().length > 0,
+    )
+    .join(", ");
+
+  if (!ingredientsText.trim()) {
+    return null;
+  }
+
+  return {
+    rawText: ingredientsText,
+    confidence: 0.5,
+    labelType: "ingredients",
+    unreadableSegments: [],
+  };
+}
+
+  if (
+    typeof candidate.rawText !== "string" ||
+    !candidate.rawText.trim() ||
+    typeof candidate.confidence !== "number" ||
+    !Number.isFinite(candidate.confidence) ||
+    candidate.confidence < 0 ||
+    candidate.confidence > 1 ||
+    !isLabelType(candidate.labelType) ||
+    !isStringArray(candidate.unreadableSegments)
+    ) {
+    return null;
+    }
+
+  return {
+    rawText: candidate.rawText,
+    confidence: candidate.confidence,
+    labelType: candidate.labelType,
+    unreadableSegments: candidate.unreadableSegments,
+  };
 }
 
 function parseJson(value: string): unknown {

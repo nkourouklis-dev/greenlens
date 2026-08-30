@@ -1,123 +1,800 @@
-import { parseOcrModelOutput, validateOcrRequest, type OcrResponse } from "./ocr";
-import { parseAnalysis, type WorkerAnalysisResult } from "./analysis";
+﻿import {
+  parseOcrModelOutput,
+  validateOcrRequest,
+  type OcrResponse,
+} from "./ocr";
+import {
+  parseAnalysis,
+  type WorkerAnalysisResult,
+} from "./analysis";
+import { isAllowedOrigin } from "./cors";
+import {
+  scoreInterpretation,
+  type WorkerScore,
+} from "./scoring";
 
-const allowedOrigins = new Set(["http://localhost:5173", "http://127.0.0.1:5173", "https://greenlens.pages.dev"]);
-const visionModel = "@cf/llava-hf/llava-1.5-7b-hf";
-const textModel = "@cf/meta/llama-3.1-8b-instruct";
-const ocrPrompt = "Transcribe visible label text. Prioritize text headed Συστατικά, Ingredients, INGREDIENTS, or INCI. Preserve commas, percentages, parentheses, E-numbers, INCI terms, and emphasized allergens when visible. Return only JSON: {\"rawText\":string,\"confidence\":number,\"labelType\":\"ingredients|nutrition|mixed|unknown\",\"unreadableSegments\":string[]}. Transcription only: no health, medical, regulatory, safety conclusions or score.";
+const visionModel =
+  "@cf/moondream/moondream3.1-9B-A2B";
+
+const textModel =
+  "@cf/meta/llama-3.1-8b-instruct";
+
+const ocrPrompt = `
+Read literal visible text on the product label.
+
+Rules:
+- Prioritize headings: Συστατικά, Ingredients, INGREDIENTS, INCI.
+- Read nutrition separately when visible.
+- Never label nutrition fields as ingredients.
+- Never invent missing words, ingredients, vitamins or quantities.
+- Never complete partially visible text.
+- Use [unreadable] when text is unclear.
+- Do not describe packaging.
+- Do not provide analysis.
+- Do not provide medical advice.
+- Do not provide safety conclusions.
+- Do not calculate a score.
+- Return ONLY a valid JSON object. Do not add any text before or after the JSON.
+- Do not use Markdown formatting (like \`\`\`json).
+- If the label is completely unreadable, return EXACTLY this JSON: {"labelType": "unknown", "ingredients": [], "nutritionText": "", "unreadableSegments": ["UNREADABLE_INGREDIENTS_LABEL"]}
+
+Required JSON structure:
+{
+  "labelType": "ingredients | nutrition | mixed | unknown",
+  "ingredients": ["item1", "item2"],
+  "nutritionText": "raw nutrition text here if any",
+  "unreadableSegments": ["segment1"]
+}
+`.trim();
+
+type JsonBody =
+  | OcrResponse
+  | WorkerAnalysisResult
+  | (WorkerAnalysisResult & { score: WorkerScore })
+  | {
+      status: "ok";
+      service: "greenlens-ocr";
+    }
+  | {
+      answer: string;
+    };
 
 export default {
-  async fetch(request, env): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+  ): Promise<Response> {
     const origin = request.headers.get("Origin");
-    if (request.method === "OPTIONS") return handleOptions(origin);
+    const requestId = crypto.randomUUID();
+
+    if (origin && !isAllowedOrigin(origin)) {
+      return error(
+        "Η προέλευση του αιτήματος δεν επιτρέπεται.",
+        403,
+        origin,
+        requestId,
+      );
+    }
+
+    if (request.method === "OPTIONS") {
+      return handleOptions(origin);
+    }
 
     const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/api/health") return json({ status: "ok", service: "greenlens-ocr" }, 200, origin);
-    if (request.method === "POST" && url.pathname === "/api/analysis/run") return runAnalysis(request, env, origin);
-    if (request.method === "POST" && /^\/api\/products\/[^/]+\/chat$/.test(url.pathname)) return runChat(request, env, origin);
-    if (request.method !== "POST" || url.pathname !== "/api/ocr/extract") return error("Η διαδρομή δεν βρέθηκε.", 404, origin);
-    if (!request.headers.get("content-type")?.includes("multipart/form-data")) return error("Απαιτείται multipart/form-data.", 400, origin);
 
-    let formData: FormData;
-    try {
-      formData = await request.formData();
-    } catch {
-      return error("Το multipart payload δεν είναι έγκυρο.", 400, origin);
+    if (
+      request.method === "GET" &&
+      url.pathname === "/api/health"
+    ) {
+      return json(
+        {
+          status: "ok",
+          service: "greenlens-ocr",
+        },
+        200,
+        origin,
+        requestId,
+      );
     }
 
-    const imageValue = formData.get("image");
-    const image = imageValue instanceof File ? imageValue : null;
-    const barcode = readTextField(formData, "barcode");
-    const productId = readTextField(formData, "productId");
-    const validationError = validateOcrRequest(image, barcode, productId);
-    if (validationError) return error(validationError, 400, origin);
-    if (!image) return error("Λείπει η εικόνα της ετικέτας.", 400, origin);
-
-    try {
-      const imageBytes = Array.from(new Uint8Array(await image.arrayBuffer()));
-      const modelOutput = await env.AI.run(visionModel, { image: imageBytes, prompt: ocrPrompt });
-      const result = parseOcrModelOutput(modelOutput);
-      if (!result) return error("Η ανάγνωση της ετικέτας δεν επέστρεψε έγκυρα δεδομένα.", 502, origin);
-      return json(result, 200, origin);
-    } catch (caughtError) {
-      console.error("ocr_extract_failed", { message: caughtError instanceof Error ? caughtError.message : "unknown" });
-      return error("Δεν ήταν δυνατή η ανάγνωση της ετικέτας.", 502, origin);
+    if (
+      request.method === "POST" &&
+      url.pathname === "/api/analysis/run"
+    ) {
+      return runAnalysis(request, env, origin, requestId);
     }
+
+    if (
+      request.method === "POST" &&
+      /^\/api\/products\/[^/]+\/chat$/.test(
+        url.pathname,
+      )
+    ) {
+      return runChat(request, origin, requestId);
+    }
+
+    if (
+      request.method !== "POST" ||
+      url.pathname !== "/api/ocr/extract"
+    ) {
+      return error(
+        "Η διαδρομή δεν βρέθηκε.",
+        404,
+        origin,
+        requestId,
+      );
+    }
+
+    return runOcr(request, env, origin, requestId);
   },
 } satisfies ExportedHandler<Env>;
 
-function handleOptions(origin: string | null): Response {
-  if (!origin || !allowedOrigins.has(origin)) return new Response(null, { status: 403, headers: { Vary: "Origin" } });
-  return new Response(null, { status: 204, headers: corsHeaders(origin) });
+async function runOcr(
+  request: Request,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const contentType =
+    request.headers.get("content-type") ?? "";
+
+  if (!contentType.includes("multipart/form-data")) {
+    return error(
+      "Απαιτείται multipart/form-data.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  let formData: FormData;
+
+  try {
+    formData = await request.formData();
+  } catch {
+    return error(
+      "Το multipart payload δεν είναι έγκυρο.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  const imageValue = formData.get("image");
+
+  const image =
+    imageValue instanceof File ? imageValue : null;
+
+  const barcode = readTextField(
+    formData,
+    "barcode",
+  );
+
+  const productId = readTextField(
+    formData,
+    "productId",
+  );
+
+  const validationError = validateOcrRequest(
+    image,
+    barcode,
+    productId,
+  );
+
+  if (validationError) {
+    return error(
+      validationError,
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  if (!image) {
+    return error(
+      "Λείπει η εικόνα της ετικέτας.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  try {
+    const imageDataUri =
+      await fileToDataUri(image);
+
+    const startedAt = Date.now();
+
+    const modelOutput = await env.AI.run(
+      visionModel,
+      {
+        task: "query",
+        image: imageDataUri,
+        question: ocrPrompt,
+        reasoning: false,
+        temperature: 0,
+        max_tokens: 1536,
+        stream: false,
+      },
+    );
+
+    const result = parseOcrModelOutput(modelOutput);
+
+    console.log("ocr_model_completed", {
+      requestId,
+      endpoint: "/api/ocr/extract",
+      model: visionModel,
+      durationMs: Date.now() - startedAt,
+      outputType: typeof modelOutput,
+      outputKeys:
+        typeof modelOutput === "object" && modelOutput !== null
+          ? Object.keys(modelOutput)
+          : [],
+      parsedLabelType: result?.labelType,
+      parsedTextLength: result?.rawText?.length ?? 0,
+      status: "success",
+    });
+    
+    console.log("ocr_unreadable_check", {
+      unreadable: isUnreadableModelOutput(modelOutput),
+      extracted: extractModelText(modelOutput)?.slice(0, 200),
+    });
+
+    if (isUnreadableModelOutput(modelOutput)) {
+      return error(
+        "Δεν εντοπίστηκε καθαρή λίστα συστατικών. Φωτογραφίστε κοντά και κάθετα μόνο την περιοχή που γράφει «Συστατικά», «Ingredients» ή «INCI».",
+        422,
+        origin,
+        requestId,
+      );
+    }
+
+    if (!result) {
+      return error(
+        "Η ανάγνωση της ετικέτας δεν επέστρεψε έγκυρα δεδομένα.",
+        502,
+        origin,
+        requestId,
+      );
+    }
+
+    if (result.labelType === "nutrition") {
+      return error(
+        "Εντοπίστηκε διατροφικός πίνακας, όχι λίστα συστατικών. Φωτογραφίστε και τη λίστα συστατικών.",
+        422,
+        origin,
+        requestId,
+      );
+    }
+
+    if (looksLikeSyntheticNutritionText(result.rawText)) {
+      return error(
+        "Η ανάγνωση δεν ήταν αρκετά αξιόπιστη. Φωτογραφίστε ξανά τη λίστα συστατικών με καλύτερο φωτισμό.",
+        422,
+        origin,
+        requestId,
+      );
+    }
+
+    return json(result, 200, origin, requestId);
+  } catch (caughtError) {
+    console.error("ocr_extract_failed", {
+      requestId,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : "unknown",
+    });
+
+    return error(
+      "Δεν ήταν δυνατή η ανάγνωση της ετικέτας.",
+      502,
+      origin,
+      requestId,
+    );
+  }
 }
 
-function readTextField(formData: FormData, name: string): string | null {
+function handleOptions(
+  origin: string | null,
+): Response {
+  if (!origin || !isAllowedOrigin(origin)) {
+    return new Response(null, {
+      status: 403,
+      headers: {
+        Vary: "Origin",
+      },
+    });
+  }
+
+  return new Response(null, {
+    status: 204,
+    headers: corsHeaders(origin),
+  });
+}
+
+function readTextField(
+  formData: FormData,
+  name: string,
+): string | null {
   const value = formData.get(name);
-  return typeof value === "string" ? value : null;
+
+  return typeof value === "string"
+    ? value
+    : null;
 }
 
-function json(body: OcrResponse | WorkerAnalysisResult | { status: "ok"; service: "greenlens-ocr" } | { answer: string }, status: number, origin: string | null): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", ...corsHeaders(origin) } });
+function json(
+  body: JsonBody,
+  status: number,
+  origin: string | null,
+  requestId?: string,
+): Response {
+  return new Response(
+    JSON.stringify(body),
+    {
+      status,
+      headers: {
+        "content-type":
+          "application/json; charset=utf-8",
+        ...corsHeaders(origin),
+        ...(requestId ? { "x-request-id": requestId } : {}),
+      },
+    },
+  );
 }
 
-function error(message: string, status: number, origin: string | null): Response {
-  return new Response(JSON.stringify({ error: message }), { status, headers: { "content-type": "application/json; charset=utf-8", ...corsHeaders(origin) } });
+function error(
+  message: string,
+  status: number,
+  origin: string | null,
+  requestId?: string,
+): Response {
+  return new Response(
+    JSON.stringify({
+      error: message,
+    }),
+    {
+      status,
+      headers: {
+        "content-type":
+          "application/json; charset=utf-8",
+        ...corsHeaders(origin),
+        ...(requestId ? { "x-request-id": requestId } : {}),
+      },
+    },
+  );
 }
 
-function corsHeaders(origin: string | null): Record<string, string> {
-  const headers: Record<string, string> = { Vary: "Origin" };
-  if (origin && allowedOrigins.has(origin)) {
+function corsHeaders(
+  origin: string | null,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    Vary: "Origin",
+  };
+
+  if (origin && isAllowedOrigin(origin)) {
     headers["Access-Control-Allow-Origin"] = origin;
     headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
     headers["Access-Control-Allow-Headers"] = "Content-Type";
   }
+
   return headers;
 }
 
-async function readJson(request: Request): Promise<unknown> {
-  try { return await request.json() as unknown; } catch { return null; }
+async function readJson(
+  request: Request,
+): Promise<unknown> {
+  try {
+    return (await request.json()) as unknown;
+  } catch {
+    return null;
+  }
 }
 
-function isAnalysisRequest(value: unknown): value is { productId: string; barcode: string; productType: "food" | "cosmetic" | "unknown"; confirmedIngredientText: string; normalizedIngredients: unknown[] } {
-  return isRecord(value) && isText(value.productId) && isText(value.barcode) && (value.productType === "food" || value.productType === "cosmetic" || value.productType === "unknown") && typeof value.confirmedIngredientText === "string" && Array.isArray(value.normalizedIngredients);
+function isAnalysisRequest(
+  value: unknown,
+): value is {
+  productId: string;
+  barcode: string;
+  productType:
+    | "food"
+    | "cosmetic"
+    | "unknown";
+  confirmedIngredientText: string;
+  normalizedIngredients: unknown[];
+  ocrConfidence: number;
+} {
+  return (
+    isRecord(value) &&
+    isText(value.productId) &&
+    isText(value.barcode) &&
+    (
+      value.productType === "food" ||
+      value.productType === "cosmetic" ||
+      value.productType === "unknown"
+    ) &&
+    typeof value.confirmedIngredientText ===
+      "string" &&
+    value.confirmedIngredientText.length <=
+      12_000 &&
+    Array.isArray(
+      value.normalizedIngredients,
+    ) &&
+    value.normalizedIngredients.length <= 200 &&
+    typeof value.ocrConfidence === "number" &&
+    value.ocrConfidence >= 0 &&
+    value.ocrConfidence <= 1
+  );
 }
 
-function isChatRequest(value: unknown): value is { question: string; conversationHistory: Array<{ context?: unknown }> } {
-  return isRecord(value) && isText(value.question) && Array.isArray(value.conversationHistory);
+function isChatRequest(
+  value: unknown,
+): value is {
+  question: string;
+  conversationHistory: Array<{
+    context?: unknown;
+  }>;
+} {
+  return (
+    isRecord(value) &&
+    isText(value.question) &&
+    value.question.length <= 2_000 &&
+    Array.isArray(
+      value.conversationHistory,
+    ) &&
+    value.conversationHistory.length <= 20
+  );
 }
 
 function insufficientAnalysis(): WorkerAnalysisResult {
-  return { productType: "unknown", summary: "Δεν υπάρχουν αρκετά στοιχεία για αξιόπιστη ανάλυση.", positives: [], attentionItems: [], potentialAllergens: [], ingredientFindings: [], insufficientDataReasons: ["Λείπει επιβεβαιωμένη και επαρκής λίστα συστατικών."], confidence: 0 };
+  return {
+    productType: "unknown",
+    summary:
+      "Δεν υπάρχουν αρκετά στοιχεία για αξιόπιστη ανάλυση.",
+    positives: [],
+    attentionItems: [],
+    potentialAllergens: [],
+    ingredientFindings: [],
+    insufficientDataReasons: [
+      "Λείπει επιβεβαιωμένη και επαρκής λίστα συστατικών.",
+    ],
+    confidence: 0,
+  };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null; }
-function isText(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
+function isRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null
+  );
+}
 
-async function runAnalysis(request: Request, env: Env, origin: string | null): Promise<Response> {
+function isText(
+  value: unknown,
+): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0
+  );
+}
+
+async function runAnalysis(
+  request: Request,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
   const requestBody = await readJson(request);
-  if (!isAnalysisRequest(requestBody)) return error("Το αίτημα ανάλυσης δεν είναι έγκυρο.", 400, origin);
-  if (!requestBody.confirmedIngredientText.trim() || requestBody.normalizedIngredients.length === 0) return json(insufficientAnalysis(), 200, origin);
-  const prompt = `Interpret only this confirmed ingredient context as JSON. Do not calculate a score, do not claim safety, health, medical or regulatory conclusions, and do not invent source URLs. If evidence is unavailable use severity unknown, evidenceType none, sourceName null, sourceUrl null. Context: ${JSON.stringify(requestBody)}`;
+
+  if (!isAnalysisRequest(requestBody)) {
+    return error(
+      "Το αίτημα ανάλυσης δεν είναι έγκυρο.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  const confirmedText =
+    requestBody.confirmedIngredientText.trim();
+
+  if (
+    !confirmedText ||
+    requestBody.normalizedIngredients.length === 0
+  ) {
+    return json(
+      insufficientAnalysis(),
+      200,
+      origin,
+      requestId,
+    );
+  }
+
+  if (
+    looksLikeJsonWrapper(confirmedText) ||
+    looksLikeMojibake(confirmedText) ||
+    looksLikeSyntheticNutritionText(confirmedText)
+  ) {
+    return json(
+      insufficientAnalysis(),
+      200,
+      origin,
+      requestId,
+    );
+  }
+
+  const prompt = `
+Interpret only the following user-confirmed ingredient context.
+
+Return valid JSON matching the expected analysis structure.
+
+Rules:
+- Do not calculate a score.
+- Do not claim unconditional product safety.
+- Do not provide medical advice.
+- Do not make pregnancy or child-safety conclusions.
+- Do not claim that an ingredient is toxic or carcinogenic without verified evidence.
+- Do not invent regulatory status.
+- Do not invent source names or URLs.
+- If evidence is unavailable, use severity "unknown", evidenceType "none", sourceName null, and sourceUrl null.
+- If the provided information is insufficient, populate insufficientDataReasons.
+
+Confirmed context:
+${JSON.stringify(requestBody)}
+`.trim();
+
   try {
-    const modelOutput = await env.AI.run(textModel, { prompt });
+    const startedAt = Date.now();
+
+    const modelOutput = await env.AI.run(
+      textModel,
+      {
+        prompt,
+      },
+    );
+
     const result = parseAnalysis(modelOutput);
-    return result ? json(result, 200, origin) : error("Η ανάλυση επέστρεψε μη έγκυρα δεδομένα.", 502, origin);
-  } catch {
-    return error("Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.", 502, origin);
+
+    console.log("analysis_model_completed", {
+      requestId,
+      endpoint: "/api/analysis/run",
+      model: textModel,
+      durationMs: Date.now() - startedAt,
+      outputType: typeof modelOutput,
+      outputKeys:
+        typeof modelOutput === "object" && modelOutput !== null
+          ? Object.keys(modelOutput)
+          : [],
+      status: "success",
+    });
+
+    if (!result) {
+      return error(
+        "Η ανάλυση δεν ολοκληρώθηκε αξιόπιστα. Δοκιμάστε ξανά.",
+        502,
+        origin,
+        requestId,
+      );
+    }
+
+    const score = scoreInterpretation(
+      confirmedText,
+      requestBody.ocrConfidence,
+      result,
+    );
+
+    return json(
+      {
+        ...result,
+        score,
+      },
+      200,
+      origin,
+      requestId,
+    );
+  } catch (caughtError) {
+    console.error("analysis_run_failed", {
+      requestId,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : "unknown",
+    });
+
+    return error(
+      "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.",
+      502,
+      origin,
+      requestId,
+    );
   }
 }
 
-async function runChat(request: Request, env: Env, origin: string | null): Promise<Response> {
+async function runChat(
+  request: Request,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
   const requestBody = await readJson(request);
-  if (!isChatRequest(requestBody)) return error("Το αίτημα συνομιλίας δεν είναι έγκυρο.", 400, origin);
-  const context = requestBody.conversationHistory.at(-1)?.context;
-  if (!context) return json({ answer: "Δεν υπάρχουν αρκετά στοιχεία για αξιόπιστη απάντηση." }, 200, origin);
-  const prompt = `Answer in Greek, briefly, using only this product context: ${JSON.stringify(context)}. Do not give medical advice or make claims beyond context. If context is insufficient, say exactly: Δεν υπάρχουν αρκετά στοιχεία για αξιόπιστη απάντηση.`;
-  try {
-    const output = await env.AI.run(textModel, { prompt: `${prompt}\nQuestion: ${requestBody.question}` });
-    const answer = isRecord(output) && typeof output.response === "string" ? output.response.trim() : "Δεν υπάρχουν αρκετά στοιχεία για αξιόπιστη απάντηση.";
-    return json({ answer }, 200, origin);
-  } catch {
-    return error("Η υπηρεσία ερωτήσεων δεν είναι διαθέσιμη.", 502, origin);
+
+  if (!isChatRequest(requestBody)) {
+    return error(
+      "Το αίτημα συνομιλίας δεν είναι έγκυρο.",
+      400,
+      origin,
+      requestId,
+    );
   }
+
+  return json(
+    {
+      answer:
+        "Η συνομιλία θα είναι διαθέσιμη όταν αποθηκευτεί με ασφάλεια η ανάλυση του προϊόντος.",
+    },
+    200,
+    origin,
+    requestId,
+  );
+}
+
+async function fileToDataUri(file: File): Promise<string> {
+  const mimeType = file.type || "image/jpeg";
+  const arrayBuffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary = "";
+  const chunkSize = 8192;
+
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const end = Math.min(offset + chunkSize, bytes.length);
+    const chunk = bytes.subarray(offset, end);
+    binary += String.fromCharCode(...Array.from(chunk));
+  }
+
+  const base64 = btoa(binary);
+
+  return `data:${mimeType};base64,${base64}`;
+}
+
+function extractModelText(
+  value: unknown,
+  depth: number = 0,
+): string | null {
+  if (depth > 3) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    return value.trim() || null;
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (isRecord(value.result)) {
+    const nested = extractModelText(value.result, depth + 1);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  const candidates = [
+    value.answer,
+    value.response,
+    value.description,
+    value.text,
+    value.output,
+    value.result,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    } else if (isRecord(candidate)) {
+      const nested = extractModelText(candidate, depth + 1);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+
+  return null;
+}
+
+function isUnreadableModelOutput(
+  value: unknown,
+): boolean {
+  const text = extractModelText(value);
+
+  if (!text) {
+    return true;
+  }
+
+  const upper = text.toUpperCase();
+
+  return (
+    upper.includes("UNREADABLE_INGREDIENTS_LABEL") ||
+    upper.split("CARBOHYDRATE").length > 10 ||
+    upper.split("ENERGY").length > 10
+  );
+}
+
+function looksLikeJsonWrapper(
+  value: string,
+): boolean {
+  const trimmedValue = value.trim();
+
+  return (
+    trimmedValue.startsWith('{"rawText"') ||
+    trimmedValue.startsWith("{'rawText'") ||
+    trimmedValue.includes('"labelType"') ||
+    trimmedValue.includes('"unreadableSegments"')
+  );
+}
+
+function looksLikeMojibake(
+  value: string,
+): boolean {
+  const mojibakeRegex = /\u00CE[\u0080-\u00BF]|\u00CF[\u0080-\u00BF]|\u00C2[\u0080-\u00BF]|\u00C3[\u0080-\u00BF]|\uFFFD|\u00E2\u20AC/;
+  return mojibakeRegex.test(value);
+}
+
+function looksLikeSyntheticNutritionText(
+  value: string,
+): boolean {
+  const normalizedValue = value.toLocaleLowerCase("el-GR");
+
+  const suspiciousTerms = [
+    "niacin",
+    "νιασίνη",
+    "νιασινη",
+    "vitamin a",
+    "βιταμίνη α",
+    "βιταμινη α",
+    "thiamine",
+    "θειαμίνη",
+    "θειαμινη",
+    "riboflavin",
+    "ριβοφλαβίνη",
+    "ριβοφλαβινη",
+    "pantothenic acid",
+    "παντοθενικό οξύ",
+    "παντοθενικο οξυ",
+    "biotin",
+    "βιοτίνη",
+    "βιοτινη",
+    "vitamin k",
+    "βιταμίνη κ",
+    "βιταμινη κ",
+    "vitamin d",
+    "βιταμίνη d",
+    "βιταμινη d",
+  ];
+
+  const matchedTerms = suspiciousTerms.filter((term) =>
+    normalizedValue.includes(term),
+  ).length;
+
+  const numbers =
+    normalizedValue.match(/\b\d+(?:[.,]\d+)?\b/g) ?? [];
+
+  const repeatedNumberCounts = new Map<string, number>();
+
+  for (const number of numbers) {
+    const normalizedNumber = number.replace(",", ".");
+
+    repeatedNumberCounts.set(
+      normalizedNumber,
+      (repeatedNumberCounts.get(normalizedNumber) ?? 0) + 1,
+    );
+  }
+
+  const hasHighlyRepeatedNumber = Array.from(
+    repeatedNumberCounts.values(),
+  ).some((count) => count >= 5);
+
+  return matchedTerms >= 5 && hasHighlyRepeatedNumber;
 }

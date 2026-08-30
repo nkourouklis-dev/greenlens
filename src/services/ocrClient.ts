@@ -9,7 +9,10 @@ export async function extractOcr(image: string, barcode: string, productId: stri
   formData.append("barcode", barcode);
   formData.append("productId", productId);
 
-  const response = await fetch(`${apiBaseUrl}/api/ocr/extract`, { method: "POST", body: formData });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  let response: Response;
+  try { response = await fetch(`${apiBaseUrl}/api/ocr/extract`, { method: "POST", body: formData, signal: controller.signal }); } catch (error) { throw new Error(error instanceof DOMException && error.name === "AbortError" ? "Η υπηρεσία ανάλυσης δεν είναι προσωρινά διαθέσιμη." : "Δεν ήταν δυνατή η σύνδεση με την υπηρεσία ανάλυσης."); } finally { clearTimeout(timeout); }
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) throw new Error(readError(body));
   if (!isOcrResult(body)) throw new Error("Η υπηρεσία επέστρεψε μη έγκυρη ανάγνωση ετικέτας.");
@@ -21,5 +24,6 @@ function isOcrResult(value: unknown): value is OcrResult {
 }
 
 function readError(value: unknown): string {
-  return typeof value === "object" && value !== null && "error" in value && typeof value.error === "string" ? value.error : "Δεν ήταν δυνατή η ανάγνωση της ετικέτας.";
+  const message = typeof value === "object" && value !== null && "error" in value && typeof value.error === "string" ? value.error : "";
+  return message || "Δεν μπορέσαμε να διαβάσουμε καθαρά την ετικέτα. Δοκιμάστε ξανά με καλύτερο φωτισμό.";
 }

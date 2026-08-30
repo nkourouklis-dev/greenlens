@@ -69,7 +69,7 @@ export interface ProductAnalysisRecord {
   barcode: string;
   confirmedIngredientText: string;
   normalizedIngredients: NormalizedIngredient[];
-  extractionConfidence: number;
+  ocrConfidence: number;
   structured: StructuredAnalysis;
   score: ScoreBreakdown;
   analyzedAt: string;
