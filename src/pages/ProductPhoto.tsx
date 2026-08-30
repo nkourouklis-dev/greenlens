@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import PhotoCapture from "../components/PhotoCapture";
 import { clearCaptureDraft, clearOcrDraft, getIngredientsDraft, getOcrDraft } from "../services/captureDraftService";
 import { compressImageForStorage, saveHistoryItem } from "../services/historyService";
+import { identifyProduct } from "../services/identifyClient";
 
 export default function ProductPhoto() {
   const [searchParams] = useSearchParams();
@@ -23,8 +24,22 @@ export default function ProductPhoto() {
     const scanId = productId ?? crypto.randomUUID();
     const ocrDraft = productId ? getOcrDraft(productId) : null;
     try {
-      const productPhoto = await compressImageForStorage(file);
-      const wasSaved = saveHistoryItem({ id: scanId, barcode, status: "unknown", scannedAt: new Date().toISOString(), ingredientsPhoto, productPhoto, ocrRawText: ocrDraft?.result.rawText, ocrConfidence: ocrDraft?.result.confidence });
+            const productPhoto =
+        await compressImageForStorage(file);
+
+      setIsSaving(true);
+
+      const identity =
+        await identifyProduct(productPhoto);
+
+      const displayName = identity
+        ? [identity.brand, identity.productName]
+            .filter(Boolean)
+            .join(" ")
+            .trim()
+        : "";
+
+      const wasSaved = saveHistoryItem({ id: scanId, barcode, status: "unknown", scannedAt: new Date().toISOString(), ingredientsPhoto, productPhoto,productName: displayName || undefined,ocrRawText: ocrDraft?.result.rawText, ocrConfidence: ocrDraft?.result.confidence });
       if (!wasSaved) {
         setError("Ο χώρος αποθήκευσης της συσκευής δεν επαρκεί. Δοκίμασε μικρότερη φωτογραφία.");
         return;

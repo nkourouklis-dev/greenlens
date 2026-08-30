@@ -12,7 +12,11 @@ import {
   scoreInterpretation,
   type WorkerScore,
 } from "./scoring";
-
+import {
+  identifyPrompt,
+  parseProductIdentity,
+  type ProductIdentity,
+} from "./identify";
 const visionModel =
   "@cf/moondream/moondream3.1-9B-A2B";
 
@@ -57,9 +61,10 @@ type JsonBody =
       status: "ok";
       service: "greenlens-ocr";
     }
-  | {
+    | {
       answer: string;
-    };
+    }
+    | ProductIdentity;
 
 export default {
   async fetch(
@@ -98,7 +103,17 @@ export default {
         requestId,
       );
     }
-
+        if (
+      request.method === "POST" &&
+      url.pathname === "/api/product/identify"
+    ) {
+      return runIdentify(
+        request,
+        env,
+        origin,
+        requestId,
+      );
+    }
     if (
       request.method === "POST" &&
       url.pathname === "/api/analysis/run"
@@ -1021,4 +1036,134 @@ function stripCodeFences(value: string): string {
   }
 
   return text;
+}
+async function runIdentify(
+  request: Request,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const contentType =
+    request.headers.get("content-type") ?? "";
+
+  if (
+    !contentType.includes("multipart/form-data")
+  ) {
+    return error(
+      "Απαιτείται multipart/form-data.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  let formData: FormData;
+
+  try {
+    formData = await request.formData();
+  } catch {
+    return error(
+      "Το multipart payload δεν είναι έγκυρο.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  const imageValue = formData.get("image");
+
+  const image =
+    imageValue instanceof File
+      ? imageValue
+      : null;
+
+  if (!image) {
+    return error(
+      "Λείπει η εικόνα του προϊόντος.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  if (
+    image.size === 0 ||
+    image.size > 5 * 1024 * 1024
+  ) {
+    return error(
+      "Το μέγεθος της εικόνας δεν επιτρέπεται.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  try {
+    const imageDataUri =
+      await fileToDataUri(image);
+
+    const startedAt = Date.now();
+
+    const modelOutput = await env.AI.run(
+      visionModel,
+      {
+        task: "query",
+        image: imageDataUri,
+        question: identifyPrompt,
+        reasoning: false,
+        temperature: 0,
+        max_tokens: 512,
+        stream: false,
+      },
+    );
+
+    const identity =
+      parseProductIdentity(modelOutput);
+
+    console.log("identify_completed", {
+      requestId,
+      endpoint: "/api/product/identify",
+      model: visionModel,
+      durationMs: Date.now() - startedAt,
+      found: identity !== null,
+      hasName: Boolean(identity?.productName),
+      hasBrand: Boolean(identity?.brand),
+      status: "success",
+    });
+
+    if (!identity) {
+      return error(
+        "Δεν αναγνωρίστηκε το όνομα του προϊόντος.",
+        422,
+        origin,
+        requestId,
+      );
+    }
+
+    return json(
+      identity,
+      200,
+      origin,
+      requestId,
+    );
+  } catch (caughtError) {
+    console.error("identify_failed", {
+      requestId,
+      name:
+        caughtError instanceof Error
+          ? caughtError.name
+          : "unknown",
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Δεν ήταν δυνατή η αναγνώριση του προϊόντος.",
+      502,
+      origin,
+      requestId,
+    );
+  }
 }
