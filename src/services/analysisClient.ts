@@ -13,8 +13,8 @@ export async function askProductQuestion(_productId: string, _question: string):
 async function requestJson<T>(path: string, body: unknown): Promise<T> {
   let response: Response;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
-  try { response = await fetch(`${apiBaseUrl}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: controller.signal }); } catch (error) { throw new Error(error instanceof DOMException && error.name === "AbortError" ? "Η υπηρεσία ανάλυσης δεν είναι προσωρινά διαθέσιμη." : "Δεν ήταν δυνατή η σύνδεση με την υπηρεσία ανάλυσης."); } finally { clearTimeout(timeout); }
+  const timeout = setTimeout(() => controller.abort(), 90_000);
+  try { response = await fetch(`${apiBaseUrl}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: controller.signal }); } catch (error) { throw new Error(error instanceof DOMException && error.name === "AbortError" ? "Η ανάλυση καθυστέρησε υπερβολικά. Δοκιμάστε ξανά." : "Δεν ήταν δυνατή η σύνδεση με την υπηρεσία ανάλυσης."); } finally { clearTimeout(timeout); }
   const result: unknown = await response.json().catch(() => null);
   if (!response.ok) throw new Error(typeof result === "object" && result !== null && "error" in result && typeof result.error === "string" ? result.error : "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.");
   return result as T;

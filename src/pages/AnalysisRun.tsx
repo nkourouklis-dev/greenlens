@@ -111,8 +111,8 @@ export default function AnalysisRun() {
       return;
     }
 
-    setMessage(
-      "Αναλύω τα επιβεβαιωμένα συστατικά...",
+        setMessage(
+      "Αναλύω τα επιβεβαιωμένα συστατικά. Μπορεί να διαρκέσει έως 30 δευτερόλεπτα.",
     );
 
     runAnalysis({
