@@ -30,7 +30,10 @@ export default function ProductPhoto() {
       setIsSaving(true);
 
       const identity =
-        await identifyProduct(productPhoto);
+        await identifyProduct(
+        productPhoto,
+        barcode,
+      );
 
       const displayName = identity
         ? [identity.brand, identity.productName]

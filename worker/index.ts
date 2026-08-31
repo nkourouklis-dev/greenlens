@@ -1,8 +1,10 @@
 ﻿import {
-  parseOcrModelOutput,
   validateOcrRequest,
   type OcrResponse,
 } from "./ocr";
+import {
+  extractWithAzureOcr,
+} from "./azureOcr";
 import {
   parseAnalysis,
   type WorkerAnalysisResult,
@@ -17,45 +19,15 @@ import {
   parseProductIdentity,
   type ProductIdentity,
 } from "./identify";
-
+type AzureVisionEnvironment = Env & {
+  AZURE_VISION_ENDPOINT: string;
+  AZURE_VISION_KEY: string;
+};
 const visionModel =
   "@cf/moondream/moondream3.1-9B-A2B";
 
 const textModel =
   "@cf/meta/llama-4-scout-17b-16e-instruct";
-
-const ocrPrompt = [
-  "Read literal visible text on the product label.",
-  "",
-  "Rules:",
-  "- Prioritize headings: Συστατικά, Ingredients, INGREDIENTS, INCI.",
-  "- Read nutrition separately when visible.",
-  "- Never label nutrition fields as ingredients.",
-  "- Never invent missing words, ingredients, vitamins or quantities.",
-  "- Never complete partially visible text.",
-  "- Use [unreadable] when text is unclear.",
-  "- Do not describe packaging.",
-  "- Do not provide analysis.",
-  "- Do not provide medical advice.",
-  "- Do not provide safety conclusions.",
-  "- Do not calculate a score.",
-  "- Return ONLY a valid JSON object. Do not add any text before or after the JSON.",
-  "- Do not use Markdown code fences.",
-  '- If the label is completely unreadable, return EXACTLY this JSON: {"labelType": "unknown", "ingredients": [], "nutritionText": "", "unreadableSegments": ["UNREADABLE_INGREDIENTS_LABEL"]}',
-  "",
-  "Required JSON structure:",
-  "{",
-  '  "labelType": "ingredients",',
-  '  "ingredients": ["item1", "item2"],',
-  '  "nutritionText": "raw nutrition text here if any",',
-  '  "unreadableSegments": []',
-  "}",
-  "",
-  "The labelType value must be exactly one of: ingredients, nutrition, mixed, unknown.",
-  "Never repeat the same ingredient more than once.",
-  "Include at most 40 ingredients.",
-  "Stop immediately after closing the JSON object.",
-].join("\n");
 
 type JsonBody =
   | OcrResponse
@@ -178,7 +150,9 @@ async function runOcr(
     request.headers.get("content-type") ?? "";
 
   if (
-    !contentType.includes("multipart/form-data")
+    !contentType.includes(
+      "multipart/form-data",
+    )
   ) {
     return error(
       "Απαιτείται multipart/form-data.",
@@ -191,7 +165,8 @@ async function runOcr(
   let formData: FormData;
 
   try {
-    formData = await request.formData();
+    formData =
+      await request.formData();
   } catch {
     return error(
       "Το multipart payload δεν είναι έγκυρο.",
@@ -201,28 +176,32 @@ async function runOcr(
     );
   }
 
-  const imageValue = formData.get("image");
+  const imageValue =
+    formData.get("image");
 
   const image =
     imageValue instanceof File
       ? imageValue
       : null;
 
-  const barcode = readTextField(
-    formData,
-    "barcode",
-  );
+  const barcode =
+    readTextField(
+      formData,
+      "barcode",
+    );
 
-  const productId = readTextField(
-    formData,
-    "productId",
-  );
+  const productId =
+    readTextField(
+      formData,
+      "productId",
+    );
 
-  const validationError = validateOcrRequest(
-    image,
-    barcode,
-    productId,
-  );
+  const validationError =
+    validateOcrRequest(
+      image,
+      barcode,
+      productId,
+    );
 
   if (validationError) {
     return error(
@@ -234,101 +213,78 @@ async function runOcr(
   }
 
   if (!image) {
-  return error(
-    "Λείπει η εικόνα της ετικέτας.",
-    400,
-    origin,
+    return error(
+      "Λείπει η εικόνα της ετικέτας.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  console.log("ocr_image_received", {
     requestId,
-  );
-}
+    provider: "azure-ai-vision",
+    fileName: image.name,
+    fileType: image.type,
+    fileSizeBytes: image.size,
+  });
 
-console.log("ocr_image_received", {
-  requestId,
-  fileName: image.name,
-  fileType: image.type,
-  fileSizeBytes: image.size,
-});
+  const azureEnv =
+    env as AzureVisionEnvironment;
 
-
-  try {
-    const imageDataUri =
-      await fileToDataUri(image);
-
-    const startedAt = Date.now();
-
-    const modelOutput = await env.AI.run(
-      visionModel,
+  if (
+    !azureEnv.AZURE_VISION_ENDPOINT ||
+    !azureEnv.AZURE_VISION_KEY
+  ) {
+    console.error(
+      "azure_ocr_configuration_missing",
       {
-        task: "query",
-        image: imageDataUri,
-        question: ocrPrompt,
-        reasoning: false,
-        temperature: 0,
-        max_tokens: 1024,
-        stream: false,
+        requestId,
+        hasEndpoint: Boolean(
+          azureEnv.AZURE_VISION_ENDPOINT,
+        ),
+        hasKey: Boolean(
+          azureEnv.AZURE_VISION_KEY,
+        ),
       },
     );
 
-    const rawModelText =
-      extractModelText(modelOutput);
+    return error(
+      "Η υπηρεσία OCR δεν έχει ρυθμιστεί σωστά.",
+      503,
+      origin,
+      requestId,
+    );
+  }
 
-    if (
-      rawModelText &&
-      hasRepetitionLoop(rawModelText)
-    ) {
-      console.log("ocr_repetition_loop", {
-        requestId,
-        durationMs: Date.now() - startedAt,
-        rawLength: rawModelText.length,
-      });
-
-      return error(
-        "Η ανάγνωση της ετικέτας απέτυχε. Φωτογραφίστε ξανά πιο κοντά και με σταθερό χέρι.",
-        422,
-        origin,
-        requestId,
-      );
-    }
+  try {
+    const startedAt = Date.now();
 
     const result =
-      parseOcrModelOutput(modelOutput);
+      await extractWithAzureOcr(
+        image,
+        azureEnv.AZURE_VISION_ENDPOINT,
+        azureEnv.AZURE_VISION_KEY,
+      );
 
     console.log("ocr_model_completed", {
       requestId,
       endpoint: "/api/ocr/extract",
-      model: visionModel,
-      durationMs: Date.now() - startedAt,
-      outputType: typeof modelOutput,
-      outputKeys:
-        typeof modelOutput === "object" &&
-        modelOutput !== null
-          ? Object.keys(modelOutput)
-          : [],
-      parsedLabelType: result?.labelType ?? null,
+      provider: "azure-ai-vision",
+      durationMs:
+        Date.now() - startedAt,
+      parsedLabelType:
+        result.labelType,
       parsedTextLength:
-        result?.rawText?.length ?? 0,
+        result.rawText.length,
+      confidence:
+        result.confidence,
       status: "success",
     });
 
-    if (isUnreadableModelOutput(modelOutput)) {
-      return error(
-        "Δεν εντοπίστηκε καθαρή λίστα συστατικών. Φωτογραφίστε κοντά και κάθετα μόνο την περιοχή που γράφει «Συστατικά», «Ingredients» ή «INCI».",
-        422,
-        origin,
-        requestId,
-      );
-    }
-
-    if (!result) {
-      return error(
-        "Η ανάγνωση της ετικέτας δεν επέστρεψε έγκυρα δεδομένα.",
-        502,
-        origin,
-        requestId,
-      );
-    }
-
-    if (result.labelType === "nutrition") {
+    if (
+      result.labelType === "nutrition"
+    ) {
       return error(
         "Εντοπίστηκε διατροφικός πίνακας, όχι λίστα συστατικών. Φωτογραφίστε και τη λίστα συστατικών.",
         422,
@@ -337,7 +293,9 @@ console.log("ocr_image_received", {
       );
     }
 
-    if (isNutritionTable(result.rawText)) {
+    if (
+      isNutritionTable(result.rawText)
+    ) {
       return error(
         "Φωτογραφήσατε τον διατροφικό πίνακα. Η λίστα συστατικών βρίσκεται συνήθως δίπλα ή κάτω από αυτόν, μετά τη λέξη «Συστατικά».",
         422,
@@ -347,11 +305,15 @@ console.log("ocr_image_received", {
     }
 
     if (
-      isHeadingOnlyText(result.rawText) ||
-      !looksLikeIngredientList(result.rawText)
+      isHeadingOnlyText(
+        result.rawText,
+      ) ||
+      !looksLikeIngredientList(
+        result.rawText,
+      )
     ) {
       return error(
-        "Δεν εντοπίστηκε λίστα συστατικών. Φωτογραφίστε την περιοχή κάτω από τη λέξη «Συστατικά» ή «Ingredients».",
+        "Δεν εντοπίστηκε καθαρή λίστα συστατικών. Φωτογραφίστε κοντά και κάθετα την περιοχή κάτω από τη λέξη «Συστατικά», «Ingredients» ή «INCI».",
         422,
         origin,
         requestId,
@@ -371,22 +333,36 @@ console.log("ocr_image_received", {
       );
     }
 
-    return json(result, 200, origin, requestId);
-  } catch (caughtError) {
-    console.error("ocr_extract_failed", {
+    return json(
+      result,
+      200,
+      origin,
       requestId,
-      name:
-        caughtError instanceof Error
-          ? caughtError.name
-          : "unknown",
-      message:
-        caughtError instanceof Error
-          ? caughtError.message
-          : String(caughtError).slice(0, 300),
-    });
+    );
+  } catch (caughtError) {
+    console.error(
+      "ocr_extract_failed",
+      {
+        requestId,
+        provider:
+          "azure-ai-vision",
+        name:
+          caughtError instanceof Error
+            ? caughtError.name
+            : "unknown",
+        message:
+          caughtError instanceof Error
+            ? caughtError.message
+            : String(
+                caughtError,
+              ).slice(0, 300),
+      },
+    );
 
     return error(
-      "Δεν ήταν δυνατή η ανάγνωση της ετικέτας.",
+      caughtError instanceof Error
+        ? caughtError.message
+        : "Δεν ήταν δυνατή η ανάγνωση της ετικέτας.",
       502,
       origin,
       requestId,
@@ -901,7 +877,14 @@ async function runIdentify(
         stream: false,
       },
     );
-
+     console.log("identify_raw", {
+     requestId,
+     outputType: typeof modelOutput,
+     output:
+     typeof modelOutput === "object"
+      ? JSON.stringify(modelOutput).slice(0, 1000)
+      : String(modelOutput).slice(0, 1000),
+    });
     const identity =
       parseProductIdentity(modelOutput);
 
@@ -1093,26 +1076,6 @@ function extractModelText(
   }
 
   return null;
-}
-
-function isUnreadableModelOutput(
-  value: unknown,
-): boolean {
-  const text = extractModelText(value);
-
-  if (!text) {
-    return true;
-  }
-
-  const upper = text.toUpperCase();
-
-  return (
-    upper.includes(
-      "UNREADABLE_INGREDIENTS_LABEL",
-    ) ||
-    upper.split("CARBOHYDRATE").length > 10 ||
-    upper.split("ENERGY").length > 10
-  );
 }
 
 function looksLikeJsonWrapper(
@@ -1550,32 +1513,4 @@ function detectProductType(
   }
 
   return "unknown";
-}
-
-function hasRepetitionLoop(
-  value: string,
-): boolean {
-  const items = value
-    .split(/[",\n]/)
-    .map((item) => item.trim().toLowerCase())
-    .filter((item) => item.length >= 3);
-
-  if (items.length < 10) {
-    return false;
-  }
-
-  const counts = new Map<string, number>();
-
-  for (const item of items) {
-    counts.set(
-      item,
-      (counts.get(item) ?? 0) + 1,
-    );
-  }
-
-  const maxCount = Math.max(
-    ...Array.from(counts.values()),
-  );
-
-  return maxCount >= 8;
 }

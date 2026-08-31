@@ -12,6 +12,7 @@ export interface ProductIdentity {
 
 export async function identifyProduct(
   image: string,
+  barcode?: string,
 ): Promise<ProductIdentity | null> {
   if (apiConfigurationError) {
     return null;
@@ -30,7 +31,15 @@ export async function identifyProduct(
       "product.jpg",
     );
 
-    const controller = new AbortController();
+    if (barcode?.trim()) {
+      formData.append(
+        "barcode",
+        barcode.trim(),
+      );
+    }
+
+    const controller =
+      new AbortController();
 
     const timeout = setTimeout(
       () => controller.abort(),
@@ -56,9 +65,10 @@ export async function identifyProduct(
       return null;
     }
 
-    const result: unknown = await response
-      .json()
-      .catch(() => null);
+    const result: unknown =
+      await response
+        .json()
+        .catch(() => null);
 
     if (!isIdentity(result)) {
       return null;
@@ -80,18 +90,21 @@ function isIdentity(
     return false;
   }
 
-  const candidate = value as Record<
-    string,
-    unknown
-  >;
+  const candidate =
+    value as Record<
+      string,
+      unknown
+    >;
 
   const nameOk =
     candidate.productName === null ||
-    typeof candidate.productName === "string";
+    typeof candidate.productName ===
+      "string";
 
   const brandOk =
     candidate.brand === null ||
-    typeof candidate.brand === "string";
+    typeof candidate.brand ===
+      "string";
 
   return nameOk && brandOk;
 }
