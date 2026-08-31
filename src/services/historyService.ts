@@ -1,7 +1,14 @@
 import type { ScanHistoryItem } from "../types";
 
-const HISTORY_KEY = "greenlens.scan-history.v1";
-const MAX_IMAGE_SIZE = 800;
+const HISTORY_KEY =
+  "greenlens.scan-history.v1";
+
+const MAX_STORAGE_IMAGE_SIZE = 800;
+const STORAGE_IMAGE_QUALITY = 0.55;
+
+const MAX_OCR_IMAGE_SIZE = 2200;
+const OCR_IMAGE_QUALITY = 0.9;
+
 const MAX_HISTORY_ITEMS = 20;
 
 function readHistory(): ScanHistoryItem[] {
@@ -159,50 +166,80 @@ export function getStorageUsage(): {
 export async function compressImageForStorage(
   file: File,
 ): Promise<string> {
+  return resizeImage(
+    file,
+    MAX_STORAGE_IMAGE_SIZE,
+    STORAGE_IMAGE_QUALITY,
+  );
+}
+
+export async function prepareImageForOcr(
+  file: File,
+): Promise<string> {
+  return resizeImage(
+    file,
+    MAX_OCR_IMAGE_SIZE,
+    OCR_IMAGE_QUALITY,
+  );
+}
+
+async function resizeImage(
+  file: File,
+  maximumSize: number,
+  quality: number,
+): Promise<string> {
   const sourceUrl =
     URL.createObjectURL(file);
 
   try {
-    const image = await loadImage(sourceUrl);
+    const image =
+      await loadImage(sourceUrl);
 
     const scale = Math.min(
       1,
-      MAX_IMAGE_SIZE /
+      maximumSize /
         Math.max(image.width, image.height),
+    );
+
+    const targetWidth = Math.max(
+      1,
+      Math.round(image.width * scale),
+    );
+
+    const targetHeight = Math.max(
+      1,
+      Math.round(image.height * scale),
     );
 
     const canvas =
       document.createElement("canvas");
 
-    canvas.width = Math.max(
-      1,
-      Math.round(image.width * scale),
-    );
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
 
-    canvas.height = Math.max(
-      1,
-      Math.round(image.height * scale),
-    );
-
-    const context = canvas.getContext("2d");
+    const context =
+      canvas.getContext("2d");
 
     if (!context) {
       throw new Error(
-        "Image compression is unavailable.",
+        "Η επεξεργασία της εικόνας δεν είναι διαθέσιμη σε αυτή τη συσκευή.",
       );
     }
+
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
 
     context.drawImage(
       image,
       0,
       0,
-      canvas.width,
-      canvas.height,
+      targetWidth,
+      targetHeight,
     );
 
     return canvas.toDataURL(
       "image/jpeg",
-      0.55,
+      quality,
     );
   } finally {
     URL.revokeObjectURL(sourceUrl);
@@ -215,18 +252,20 @@ function loadImage(
   return new Promise((resolve, reject) => {
     const image = new Image();
 
-    image.onload = () => resolve(image);
+    image.onload = () =>
+      resolve(image);
 
     image.onerror = () =>
       reject(
         new Error(
-          "The selected image could not be read.",
+          "Η επιλεγμένη εικόνα δεν μπόρεσε να διαβαστεί.",
         ),
       );
 
     image.src = source;
   });
 }
+
 export function findByBarcode(
   barcode: string,
 ): ScanHistoryItem | undefined {
@@ -237,6 +276,7 @@ export function findByBarcode(
   }
 
   return getHistory().find(
-    (item) => item.barcode === normalized,
+    (item) =>
+      item.barcode === normalized,
   );
 }
