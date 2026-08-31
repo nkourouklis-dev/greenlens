@@ -234,13 +234,21 @@ async function runOcr(
   }
 
   if (!image) {
-    return error(
-      "Λείπει η εικόνα της ετικέτας.",
-      400,
-      origin,
-      requestId,
-    );
-  }
+  return error(
+    "Λείπει η εικόνα της ετικέτας.",
+    400,
+    origin,
+    requestId,
+  );
+}
+
+console.log("ocr_image_received", {
+  requestId,
+  fileName: image.name,
+  fileType: image.type,
+  fileSizeBytes: image.size,
+});
+
 
   try {
     const imageDataUri =
