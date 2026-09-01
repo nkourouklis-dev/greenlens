@@ -22,6 +22,9 @@ import {
 import {
   lookupProductByBarcode,
 } from "./productLookup";
+import {
+  extractIngredientText,
+} from "./ingredientText";
 type AzureVisionEnvironment = Env & {
   AZURE_VISION_ENDPOINT: string;
   AZURE_VISION_KEY: string;
@@ -523,7 +526,9 @@ function isChatRequest(
   );
 }
 
-function insufficientAnalysis(): WorkerAnalysisResult {
+function insufficientAnalysis(
+  reasons?: string[],
+): WorkerAnalysisResult {
   return {
     productType: "unknown",
     summary:
@@ -532,9 +537,12 @@ function insufficientAnalysis(): WorkerAnalysisResult {
     attentionItems: [],
     potentialAllergens: [],
     ingredientFindings: [],
-    insufficientDataReasons: [
-      "Λείπει επιβεβαιωμένη και επαρκής λίστα συστατικών.",
-    ],
+    insufficientDataReasons:
+      reasons && reasons.length > 0
+        ? reasons
+        : [
+            "Λείπει επιβεβαιωμένη και επαρκής λίστα συστατικών.",
+          ],
     confidence: 0,
   };
 }
@@ -588,17 +596,30 @@ async function runAnalysis(
     );
   }
 
-  if (
-    looksLikeJsonWrapper(confirmedText) ||
-    looksLikeMojibake(confirmedText) ||
-    looksLikeSyntheticNutritionText(
-      confirmedText,
-    ) ||
-    isHeadingOnlyText(confirmedText) ||
-    !looksLikeIngredientList(confirmedText)
-  ) {
+  // Deterministic extraction and validation of ingredient text
+  const extraction = extractIngredientText(
+    confirmedText,
+    0.9,
+  );
+
+  if (!extraction.isValid) {
+    console.log(
+      "ingredient_validation_rejected",
+      {
+        requestId,
+        reasons: extraction.reasons,
+        textLength: confirmedText.length,
+      },
+    );
+
     return json(
-      insufficientAnalysis(),
+      insufficientAnalysis(
+        extraction.reasons.length > 0
+          ? extraction.reasons
+          : [
+              "Δεν υπάρχουν επαρκή και επιβεβαιωμένη λίστα συστατικών.",
+            ],
+      ),
       200,
       origin,
       requestId,
@@ -1110,28 +1131,6 @@ function extractModelText(
   }
 
   return null;
-}
-
-function looksLikeJsonWrapper(
-  value: string,
-): boolean {
-  const trimmedValue = value.trim();
-
-  return (
-    trimmedValue.startsWith('{"rawText"') ||
-    trimmedValue.startsWith("{'rawText'") ||
-    trimmedValue.includes('"labelType"') ||
-    trimmedValue.includes('"unreadableSegments"')
-  );
-}
-
-function looksLikeMojibake(
-  value: string,
-): boolean {
-  const mojibakeRegex =
-    /\u00CE[\u0080-\u00BF]|\u00CF[\u0080-\u00BF]|\u00C2[\u0080-\u00BF]|\u00C3[\u0080-\u00BF]|\uFFFD|\u00E2\u20AC/;
-
-  return mojibakeRegex.test(value);
 }
 
 function looksLikeSyntheticNutritionText(
