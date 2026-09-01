@@ -216,3 +216,54 @@ test("accepts valid ingredients even if URL is present, if ingredients dominate"
     !result.ingredientText?.includes("example.com"),
   );
 });
+
+// Test 24: Greek label with nutrition table after ingredients
+test("keeps Greek ingredients block before nutrition facts", () => {
+  const text =
+    "Συστατικά: νερό, ζάχαρη, αλάτι, ελαιόλαδο, εκχύλισμα βανίλιας\n\nΠληροφορίες διατροφής\nΕνέργεια: 420 kcal\nΠρωτεΐνες: 4g";
+  const result = extractIngredientText(text, 0.95);
+  assert(result.isValid);
+  assert(result.ingredientText?.includes("νερό"));
+  assert(!result.ingredientText?.includes("Ενέργεια"));
+});
+
+// Test 25: English and German multilingual heading recognition
+test("recognizes multilingual ingredient headings", () => {
+  const text = "Zutaten: Wasser, Zucker, Salz, Aromen\n\nNutrition Facts\nEnergy 100 kcal";
+  const result = extractIngredientText(text, 0.95);
+  assert(result.isValid);
+  assert(result.ingredientText?.includes("Wasser"));
+  assert(!result.ingredientText?.includes("Energy"));
+});
+
+// Test 26: Bilingual ingredients label with nested parentheses
+test("handles bilingual labels and nested ingredients with parentheses", () => {
+  const text =
+    "Ingredients / Συστατικά: σοκολάτα (ζάχαρη, κακάο, βούτυρο κακάο), αρωματικές ύλες, γαλάκτωμα, συντηρητικό\n\nStorage: keep in cool place";
+  const result = extractIngredientText(text, 0.95);
+  assert(result.isValid);
+  assert(result.ingredientText?.includes("σοκολάτα"));
+  assert(result.ingredientText?.includes("βούτυρο κακάο"));
+  assert(!result.ingredientText?.includes("Storage"));
+});
+
+// Test 27: Multiline OCR without heading
+test("extracts multiline OCR ingredient list without explicit heading", () => {
+  const text =
+    "Water\nGlycerin\nCetearyl Alcohol\nParfum\nCitric Acid\nSodium Citrate\n\nManufacturer: Acme Ltd";
+  const result = extractIngredientText(text, 0.95);
+  assert(result.isValid);
+  assert(result.ingredientText?.includes("Water"));
+  assert(!result.ingredientText?.includes("Manufacturer"));
+});
+
+// Test 28: URL and storage instructions after ingredients should be removed
+test("strips URLs and storage instructions after the ingredient block", () => {
+  const text =
+    "Ingredients: Water, Glycerin, Sodium Hydroxide, Parfum\nWebsite: www.example.com\nStorage: Keep in a cool place";
+  const result = extractIngredientText(text, 0.95);
+  assert(result.isValid);
+  assert(result.ingredientText?.includes("Water"));
+  assert(!result.ingredientText?.includes("www.example.com"));
+  assert(!result.ingredientText?.includes("Storage"));
+});

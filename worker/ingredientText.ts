@@ -7,11 +7,18 @@ export interface IngredientTextResult {
   reasons: string[];
 }
 
-const INGREDIENT_HEADINGS = new Set([
+const INGREDIENT_HEADINGS = [
   "συστατικα",
   "συστατικά",
   "ingredients",
   "ingredient list",
+  "ingredienti",
+  "ingredients list",
+  "ingrédients",
+  "ingredientes",
+  "ingrediënten",
+  "zutaten",
+  "zutatenliste",
   "inci",
   "composition",
   "σύνθεση",
@@ -19,12 +26,13 @@ const INGREDIENT_HEADINGS = new Set([
   "περιέχει",
   "περιεχει",
   "contains",
-]);
+];
 
 const SECTION_BOUNDARIES = [
   "nutrition",
   "nutrition facts",
   "nutrition declaration",
+  "nutritional information",
   "διατροφική δήλωση",
   "διατροφικη δηλωση",
   "διατροφικά στοιχεία",
@@ -32,6 +40,7 @@ const SECTION_BOUNDARIES = [
   "οδηγίες χρήσης",
   "οδηγιες χρησης",
   "directions",
+  "preparation",
   "warnings",
   "προειδοποίηση",
   "προειδοποιηση",
@@ -45,13 +54,18 @@ const SECTION_BOUNDARIES = [
   "ανάλωση κατά προτίμηση",
   "αναλωση κατα προτιμηση",
   "manufacturer",
+  "distributor",
+  "distributed by",
   "παρασκευάζεται",
   "παρασκευαζεται",
-  "distributed by",
   "διανέμεται",
   "διανεμεται",
   "contact",
   "website",
+  "email",
+  "barcode",
+  "recycling",
+  "recycling information",
   "imported by",
   "εισάγεται",
   "εισαγεται",
@@ -207,6 +221,8 @@ const INGREDIENT_MARKERS = [
 function normalize(text: string): string {
   return text
     .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[́ΐΰ]/g, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -216,13 +232,32 @@ function findHeadingMatch(text: string): number {
   const normalized = normalize(text);
 
   for (const heading of INGREDIENT_HEADINGS) {
-    const idx = normalized.indexOf(heading);
+    const idx = normalized.indexOf(normalize(heading));
     if (idx >= 0) {
       return idx;
     }
   }
 
   return -1;
+}
+
+function isBoundaryLine(line: string): boolean {
+  const normalized = normalize(line);
+  return SECTION_BOUNDARIES.some((boundary) =>
+    normalized.includes(normalize(boundary)),
+  );
+}
+
+function stripNoiseSegments(text: string): string {
+  return text
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/www\.[^\s]+/gi, " ")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, " ")
+    .replace(/\b(?:tel|telephone|phone|fax)\s*[:\-]?[^\n]+/gi, " ")
+    .replace(/\b(?:website|manufacturer|distributor|imported by|distributed by|storage|directions|preparation|nutrition facts|recycling information)\b[^\n]*[:\-]?[^\n]*/gi, " ")
+    .replace(/\b(?:keep in|store in|best before|avoid|recycle)\b[^\n]*/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function countNoiseMarkers(text: string): number {
@@ -409,36 +444,70 @@ function extractIngredientTextWithoutHeading(
     return null;
   }
 
-  const noiseCount = countNoiseMarkers(rawText);
-  if (noiseCount >= 3) {
+  const lines = rawText
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const candidateLines: string[] = [];
+  let startIndex = -1;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const compact = normalize(line);
+    if (startIndex < 0) {
+      const looksIngredientLike =
+        countIngredientMarkers(compact) >= 1 ||
+        /[,;]|\(|\)|%|\d\s*%|\b(?:water|νερό|glycerin|ζάχαρη|sugar|salt|αλάτι|oil|extract|acid|parfum|flavour|aroma|αρωμα|βούτυρο|βουτυρο)\b/i.test(
+          line,
+        );
+      if (looksIngredientLike) {
+        startIndex = index;
+      }
+      continue;
+    }
+
+    if (isBoundaryLine(line)) {
+      break;
+    }
+
+    candidateLines.push(line);
+  }
+
+  if (startIndex < 0) {
     return null;
   }
 
-  const nutritionCount = countNutritionMarkers(rawText);
-  if (nutritionCount >= 4) {
+  const tail = lines.slice(startIndex).filter((line) => !isBoundaryLine(line));
+  const candidate = stripNoiseSegments(tail.join("\n").trim());
+
+  const noiseCount = countNoiseMarkers(candidate);
+  if (noiseCount >= 2) {
     return null;
   }
 
-  if (isLikelyMarketingClaim(rawText)) {
+  const nutritionCount = countNutritionMarkers(candidate);
+  if (nutritionCount >= 2) {
     return null;
   }
 
-  if (isLikelyStorageOrDirections(rawText)) {
+  if (isLikelyMarketingClaim(candidate)) {
     return null;
   }
 
-  const ingredientCount =
-    countIngredientMarkers(rawText);
-
-  if (ingredientCount < 2) {
+  if (isLikelyStorageOrDirections(candidate)) {
     return null;
   }
 
-  if (!hasStructuredFormat(rawText)) {
+  if (candidate.length < 12) {
     return null;
   }
 
-  return rawText;
+  if (countIngredientMarkers(candidate) < 2 && !/[,:;]|\(|\)|%/.test(candidate)) {
+    return null;
+  }
+
+  return candidate;
 }
 
 export function extractIngredientText(

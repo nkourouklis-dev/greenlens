@@ -5,6 +5,7 @@ import {
   getOcrDraft,
   updateOcrDraftText,
 } from "../services/captureDraftService";
+import { extractIngredientText } from "../../worker/ingredientText";
 
 function checkIngredientTextQuality(
   text: string,
@@ -16,20 +17,20 @@ function checkIngredientTextQuality(
 
   // Check for URLs
   if (
-    normalized.includes("http://") ||
-    normalized.includes("https://") ||
-    normalized.includes("www.") ||
-    normalized.includes(".com") ||
-    normalized.includes(".gr") ||
-    normalized.includes(".eu") ||
-    normalized.includes("@")
-  ) {
-    return {
-      isValid: false,
-      warning:
-        "Φαίνεται ότι υπάρχουν URLs ή διευθύνσεις αντί συστατικών.",
-    };
-  }
+  normalized.includes("http://") ||
+  normalized.includes("https://") ||
+  normalized.includes("www.") ||
+  normalized.includes(".com") ||
+  normalized.includes(".gr") ||
+  normalized.includes(".eu") ||
+  normalized.includes("@")
+) {
+  return {
+    isValid: true,
+    warning:
+      "Βρέθηκαν επίσης στοιχεία κατασκευαστή ή ιστοσελίδας. Θα αγνοηθούν κατά την ανάλυση.",
+  };
+}
 
   // Check for single word
   const words = text.trim().split(/\s+/);
@@ -106,7 +107,14 @@ export default function IngredientsReview() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const draft = getOcrDraft(id);
-  const [text, setText] = useState(draft?.result.rawText ?? "");
+  const [text, setText] = useState(() => {
+    if (!draft) return "";
+    const isolated = extractIngredientText(
+      draft.result.rawText,
+      draft.result.confidence,
+    );
+    return isolated.ingredientText ?? draft.result.rawText;
+  });
   const textQuality = checkIngredientTextQuality(text);
 
   if (!draft) {
@@ -250,11 +258,7 @@ export default function IngredientsReview() {
           <button
             type="button"
             onClick={confirm}
-            disabled={
-              !text.trim() ||
-              nutritionOnly ||
-              !textQuality.isValid
-            }
+            disabled={!text.trim() || nutritionOnly}
             className="h-11 rounded-lg bg-emerald-500 font-bold text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
             aria-live="polite"
           >

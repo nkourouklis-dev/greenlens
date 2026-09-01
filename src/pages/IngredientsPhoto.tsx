@@ -13,6 +13,7 @@ import {
   prepareImageForOcr,
 } from "../services/historyService";
 import { extractOcr } from "../services/ocrClient";
+import { extractIngredientText } from "../../worker/ingredientText";
 
 export default function IngredientsPhoto() {
   const [searchParams] =
@@ -58,10 +59,22 @@ export default function IngredientsPhoto() {
         productId,
       );
 
+      const extracted = extractIngredientText(
+        result.rawText,
+        result.confidence,
+      );
+
       saveOcrDraft(productId, {
         barcode,
         image: storageImage,
-        result,
+        result: {
+          ...result,
+          rawText:
+            extracted.ingredientText &&
+            extracted.isValid
+              ? extracted.ingredientText
+              : result.rawText,
+        },
       });
 
       navigate(
