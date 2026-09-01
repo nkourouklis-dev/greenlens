@@ -25,15 +25,34 @@ import {
 import {
   extractIngredientText,
 } from "./ingredientText";
+
 type AzureVisionEnvironment = Env & {
   AZURE_VISION_ENDPOINT: string;
   AZURE_VISION_KEY: string;
 };
+
 const visionModel =
   "@cf/moondream/moondream3.1-9B-A2B";
 
 const textModel =
   "@cf/meta/llama-4-scout-17b-16e-instruct";
+
+const trustedOcrConfidence = 0.9;
+
+type LabelType =
+  | "ingredients"
+  | "nutrition"
+  | "unknown";
+
+type LabelEvaluation = {
+  ingredientText: string;
+  nutritionMarkerCount: number;
+  numericUnitCount: number;
+  hasIngredientHeading: boolean;
+  looksLikeIngredients: boolean;
+  isNutritionTable: boolean;
+  sectionWasSliced: boolean;
+};
 
 type JsonBody =
   | OcrResponse
@@ -273,6 +292,9 @@ async function runOcr(
         azureEnv.AZURE_VISION_KEY,
       );
 
+    const evaluation =
+      evaluateLabelText(result.rawText);
+
     console.log("ocr_model_completed", {
       requestId,
       endpoint: "/api/ocr/extract",
@@ -283,13 +305,25 @@ async function runOcr(
         result.labelType,
       parsedTextLength:
         result.rawText.length,
+      ingredientSectionLength:
+        evaluation.ingredientText.length,
+      nutritionMarkerCount:
+        evaluation.nutritionMarkerCount,
+      numericUnitCount:
+        evaluation.numericUnitCount,
+      hasIngredientHeading:
+        evaluation.hasIngredientHeading,
       confidence:
         result.confidence,
       status: "success",
     });
 
     if (
-      result.labelType === "nutrition"
+      result.labelType === "nutrition" &&
+      !(
+        evaluation.hasIngredientHeading &&
+        evaluation.looksLikeIngredients
+      )
     ) {
       return error(
         "Εντοπίστηκε διατροφικός πίνακας, όχι λίστα συστατικών. Φωτογραφίστε και τη λίστα συστατικών.",
@@ -299,9 +333,7 @@ async function runOcr(
       );
     }
 
-    if (
-      isNutritionTable(result.rawText)
-    ) {
+    if (evaluation.isNutritionTable) {
       return error(
         "Φωτογραφήσατε τον διατροφικό πίνακα. Η λίστα συστατικών βρίσκεται συνήθως δίπλα ή κάτω από αυτόν, μετά τη λέξη «Συστατικά».",
         422,
@@ -310,14 +342,7 @@ async function runOcr(
       );
     }
 
-    if (
-      isHeadingOnlyText(
-        result.rawText,
-      ) ||
-      !looksLikeIngredientList(
-        result.rawText,
-      )
-    ) {
+    if (!evaluation.looksLikeIngredients) {
       return error(
         "Δεν εντοπίστηκε καθαρή λίστα συστατικών. Φωτογραφίστε κοντά και κάθετα την περιοχή κάτω από τη λέξη «Συστατικά», «Ingredients» ή «INCI».",
         422,
@@ -489,6 +514,8 @@ function isAnalysisRequest(
   confirmedIngredientText: string;
   normalizedIngredients: unknown[];
   ocrConfidence: number;
+  ocrLabelType?: LabelType;
+  ocrTextLength?: number;
 } {
   return (
     isRecord(value) &&
@@ -505,7 +532,13 @@ function isAnalysisRequest(
     value.normalizedIngredients.length <= 200 &&
     typeof value.ocrConfidence === "number" &&
     value.ocrConfidence >= 0 &&
-    value.ocrConfidence <= 1
+    value.ocrConfidence <= 1 &&
+    (value.ocrLabelType === undefined ||
+      value.ocrLabelType === "ingredients" ||
+      value.ocrLabelType === "nutrition" ||
+      value.ocrLabelType === "unknown") &&
+    (value.ocrTextLength === undefined ||
+      typeof value.ocrTextLength === "number")
   );
 }
 
@@ -596,26 +629,95 @@ async function runAnalysis(
     );
   }
 
+  const ocrLabelType: LabelType =
+    requestBody.ocrLabelType ?? "unknown";
+
+  const ocrConfidence = requestBody.ocrConfidence;
+
+  // Single shared evaluation of the label text, identical to the OCR gate.
+  const evaluation =
+    evaluateLabelText(confirmedText);
+
+  const analysisText =
+    evaluation.ingredientText.length >= 15
+      ? evaluation.ingredientText
+      : confirmedText;
+
   // Deterministic extraction and validation of ingredient text
   const extraction = extractIngredientText(
-    confirmedText,
-    0.9,
+    analysisText,
+    trustedOcrConfidence,
   );
 
-  if (!extraction.isValid) {
+  const reasons = Array.isArray(
+    extraction.reasons,
+  )
+    ? extraction.reasons
+    : [];
+
+  const nutritionOnlyRejection =
+    reasons.length > 0 &&
+    reasons.every(isNutritionRejectionReason);
+
+  const ocrConfirmedIngredients =
+    ocrLabelType === "ingredients" &&
+    ocrConfidence >= trustedOcrConfidence;
+
+  // The OCR review step already confirmed an ingredient list with high
+  // confidence, and the text itself is not a real nutrition table.
+  const overrideNutritionRejection =
+    !extraction.isValid &&
+    nutritionOnlyRejection &&
+    ocrConfirmedIngredients &&
+    evaluation.looksLikeIngredients &&
+    !evaluation.isNutritionTable;
+
+  console.log("ingredient_validation_diagnostics", {
+    requestId,
+    endpoint: "/api/analysis/run",
+    ocrLabelType,
+    ocrConfidence,
+    confirmedTextLength: confirmedText.length,
+    analysisTextLength: analysisText.length,
+    sectionWasSliced: evaluation.sectionWasSliced,
+    nutritionMarkerCount:
+      evaluation.nutritionMarkerCount,
+    numericUnitCount:
+      evaluation.numericUnitCount,
+    hasIngredientHeading:
+      evaluation.hasIngredientHeading,
+    looksLikeIngredients:
+      evaluation.looksLikeIngredients,
+    isNutritionTable:
+      evaluation.isNutritionTable,
+    validationValid: extraction.isValid === true,
+    validationReasons: reasons,
+    overrideApplied: overrideNutritionRejection,
+  });
+
+  if (
+    !extraction.isValid &&
+    !overrideNutritionRejection
+  ) {
     console.log(
       "ingredient_validation_rejected",
       {
         requestId,
-        reasons: extraction.reasons,
-        textLength: confirmedText.length,
+        reasons,
+        textLength: analysisText.length,
+        ocrLabelType,
+        ocrConfidence,
+        nutritionMarkerCount:
+          evaluation.nutritionMarkerCount,
+        numericUnitCount:
+          evaluation.numericUnitCount,
       },
     );
 
     return json(
       insufficientAnalysis(
-        extraction.reasons.length > 0
-          ? extraction.reasons
+        reasons.length > 0
+          ? reasons
           : [
               "Δεν υπάρχουν επαρκή και επιβεβαιωμένη λίστα συστατικών.",
             ],
@@ -623,6 +725,23 @@ async function runAnalysis(
       200,
       origin,
       requestId,
+    );
+  }
+
+  if (overrideNutritionRejection) {
+    console.log(
+      "ingredient_validation_overridden",
+      {
+        requestId,
+        reasons,
+        ocrLabelType,
+        ocrConfidence,
+        analysisTextLength: analysisText.length,
+        nutritionMarkerCount:
+          evaluation.nutritionMarkerCount,
+        numericUnitCount:
+          evaluation.numericUnitCount,
+      },
     );
   }
 
@@ -667,6 +786,7 @@ async function runAnalysis(
     "Content rules:",
     "- Only analyze ingredients that appear in the provided text.",
     "- Never add ingredients that are not in the provided list.",
+    "- Ignore any nutrition declaration values (energy, fat, carbohydrates, protein, vitamins with amounts).",
     "- If the provided text contains no actual ingredient names, return empty arrays and explain in insufficientDataReasons.",
     "- Do not calculate a score.",
     "- Do not claim unconditional product safety.",
@@ -685,7 +805,7 @@ async function runAnalysis(
     "- Return ONLY the JSON object. No commentary. No Markdown. No code fences.",
     "",
     "Confirmed ingredients:",
-    confirmedText,
+    analysisText,
   ].join("\n");
 
   try {
@@ -752,14 +872,14 @@ async function runAnalysis(
     }
 
     const detectedType =
-      detectProductType(confirmedText);
+      detectProductType(analysisText);
 
     if (detectedType !== "unknown") {
       result.productType = detectedType;
     }
 
     const score = scoreInterpretation(
-      confirmedText,
+      analysisText,
       requestBody.ocrConfidence,
       result,
     );
@@ -1162,8 +1282,8 @@ function looksLikeSyntheticNutritionText(
     "βιταμίνη κ",
     "βιταμινη κ",
     "vitamin d",
-    "βιταμίνη d",
     "βιταμινη d",
+    "βιταμίνη d",
   ];
 
   const matchedTerms = suspiciousTerms.filter(
@@ -1310,36 +1430,6 @@ function looksLikeIngredientList(
     return false;
   }
 
-  const nutritionMarkers = [
-    "ενέργεια",
-    "energy",
-    "kcal",
-    "kj",
-    "λιπαρά",
-    "λιπαρα",
-    "υδατάνθρακες",
-    "υδατανθρακες",
-    "πρωτεΐνες",
-    "πρωτεινες",
-    "ανά 100",
-    "per 100",
-    "βιταμίνη",
-    "βιταμινη",
-    "vitamin",
-    "%rda",
-    "θιαμίνη",
-    "ριβοφλαβίνη",
-  ];
-
-  const nutritionMatches =
-    nutritionMarkers.filter((marker) =>
-      normalized.includes(marker),
-    ).length;
-
-  if (nutritionMatches >= 3) {
-    return false;
-  }
-
   const parts = normalized
     .split(/[,;:]/)
     .map((part) => part.trim())
@@ -1403,47 +1493,178 @@ function looksLikeIngredientList(
   );
 }
 
-function isNutritionTable(
+const nutritionMarkers = [
+  "ενέργεια",
+  "ενεργεια",
+  "energy",
+  "kcal",
+  "kj",
+  "λιπαρά",
+  "λιπαρα",
+  "υδατάνθρακες",
+  "υδατανθρακες",
+  "carbohydrate",
+  "σάκχαρα",
+  "σακχαρα",
+  "sugars",
+  "πρωτεΐνες",
+  "πρωτεινες",
+  "protein",
+  "εδώδιμες ίνες",
+  "fibre",
+  "ανά 100",
+  "per 100",
+  "διατροφική δήλωση",
+  "nutrition declaration",
+  "βιταμίνη",
+  "βιταμινη",
+  "vitamin",
+  "θειαμίνη",
+  "ριβοφλαβίνη",
+  "νιασίνη",
+];
+
+function countNutritionMarkers(
   value: string,
-): boolean {
+): number {
   const normalized = value.toLowerCase();
 
-  const nutritionMarkers = [
-    "ενέργεια",
-    "ενεργεια",
-    "energy",
-    "kcal",
-    "kj",
-    "λιπαρά",
-    "λιπαρα",
-    "υδατάνθρακες",
-    "υδατανθρακες",
-    "carbohydrate",
-    "σάκχαρα",
-    "σακχαρα",
-    "sugars",
-    "πρωτεΐνες",
-    "πρωτεινες",
-    "protein",
-    "εδώδιμες ίνες",
-    "fibre",
-    "ανά 100",
-    "per 100",
-    "διατροφική δήλωση",
-    "nutrition declaration",
-    "βιταμίνη",
-    "βιταμινη",
-    "vitamin",
-    "θειαμίνη",
-    "ριβοφλαβίνη",
-    "νιασίνη",
-  ];
-
-  const matches = nutritionMarkers.filter(
-    (marker) => normalized.includes(marker),
+  return nutritionMarkers.filter((marker) =>
+    normalized.includes(marker),
   ).length;
+}
 
-  return matches >= 2;
+// Nutrition tables always carry numeric values with units next to the markers.
+// Ingredient lists mention the same words without measurement pairs.
+function countNumericUnits(
+  value: string,
+): number {
+  const normalized = value.toLowerCase();
+
+  const matches =
+    normalized.match(
+      /\d+(?:[.,]\d+)?\s*(kcal|kj|mg|µg|μg|g\b|γρ|ml|%)/g,
+    ) ?? [];
+
+  return matches.length;
+}
+
+function hasIngredientHeading(
+  value: string,
+): boolean {
+  return /(συστατικ[άα]|ingredients|ingr\.|inci)/i.test(
+    value,
+  );
+}
+
+// Isolates the ingredient part of a full label scan so that an adjacent
+// nutrition declaration cannot poison the validation.
+function extractIngredientSection(
+  value: string,
+): { text: string; sliced: boolean } {
+  const headingPattern =
+    /(συστατικ[άα]|ingredients|ingr\.|inci)\s*[:\-–]?/i;
+
+  const headingMatch =
+    headingPattern.exec(value);
+
+  let sliced = false;
+  let section = value;
+
+  if (headingMatch && headingMatch.index > 0) {
+    section = value.slice(headingMatch.index);
+    sliced = true;
+  }
+
+  const nutritionHeadingPattern =
+    /(διατροφικ[ήη]\s+(δήλωση|αξία|πληροφορ)|nutrition\s+(declaration|information|facts)|αν[άα]\s*100\s*(g|gr|γρ|ml)|per\s*100\s*(g|ml))/i;
+
+  const nutritionMatch =
+    nutritionHeadingPattern.exec(section);
+
+  // Cut the trailing nutrition block only when a meaningful ingredient
+  // part precedes it. If the nutrition block comes first, nothing is cut
+  // and the real nutrition-table protection stays active.
+  if (
+    nutritionMatch &&
+    nutritionMatch.index > 40
+  ) {
+    section = section.slice(
+      0,
+      nutritionMatch.index,
+    );
+
+    sliced = true;
+  }
+
+  return {
+    text: section.trim(),
+    sliced,
+  };
+}
+
+function evaluateLabelText(
+  value: string,
+): LabelEvaluation {
+  const section = extractIngredientSection(value);
+
+  const text =
+    section.text.length >= 15
+      ? section.text
+      : value.trim();
+
+  const markerCount =
+    countNutritionMarkers(text);
+
+  const numericUnitCount =
+    countNumericUnits(text);
+
+  const headingPresent =
+    hasIngredientHeading(text);
+
+  const looksLikeIngredients =
+    !isHeadingOnlyText(text) &&
+    looksLikeIngredientList(text);
+
+  // A real nutrition table needs both vocabulary and measured values.
+  // Ingredient lists that merely mention "βιταμίνη C" are no longer rejected.
+  const isNutrition =
+    markerCount >= 2 &&
+    numericUnitCount >= 3 &&
+    !(headingPresent && looksLikeIngredients);
+
+  return {
+    ingredientText: text,
+    nutritionMarkerCount: markerCount,
+    numericUnitCount,
+    hasIngredientHeading: headingPresent,
+    looksLikeIngredients,
+    isNutritionTable: isNutrition,
+    sectionWasSliced: section.sliced,
+  };
+}
+
+// Kept for backward compatibility with existing callers.
+export function isNutritionTable(
+  value: string,
+): boolean {
+  return evaluateLabelText(value)
+    .isNutritionTable;
+}
+
+function isNutritionRejectionReason(
+  reason: unknown,
+): boolean {
+  if (typeof reason !== "string") {
+    return false;
+  }
+
+  const normalized = reason.toLowerCase();
+
+  return (
+    normalized.includes("διατροφικ") ||
+    normalized.includes("nutrition")
+  );
 }
 
 function detectProductType(
