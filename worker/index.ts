@@ -19,6 +19,9 @@ import {
   parseProductIdentity,
   type ProductIdentity,
 } from "./identify";
+import {
+  lookupProductByBarcode,
+} from "./productLookup";
 type AzureVisionEnvironment = Env & {
   AZURE_VISION_ENDPOINT: string;
   AZURE_VISION_KEY: string;
@@ -838,6 +841,12 @@ async function runIdentify(
       ? imageValue
       : null;
 
+  const barcode =
+    readTextField(
+      formData,
+      "barcode",
+    );
+
   if (!image) {
     return error(
       "Λείπει η εικόνα του προϊόντος.",
@@ -860,44 +869,69 @@ async function runIdentify(
   }
 
   try {
-    const imageDataUri =
-      await fileToDataUri(image);
+    let identity: ProductIdentity | null = null;
 
-    const startedAt = Date.now();
+    // Try barcode lookup first if provided
+    if (barcode) {
+      const lookupStarted = Date.now();
+      const barcodeResult =
+        await lookupProductByBarcode(barcode);
 
-    const modelOutput = await env.AI.run(
-      visionModel,
-      {
-        task: "query",
-        image: imageDataUri,
-        question: identifyPrompt,
-        reasoning: false,
-        temperature: 0,
-        max_tokens: 512,
-        stream: false,
-      },
-    );
-     console.log("identify_raw", {
-     requestId,
-     outputType: typeof modelOutput,
-     output:
-     typeof modelOutput === "object"
-      ? JSON.stringify(modelOutput).slice(0, 1000)
-      : String(modelOutput).slice(0, 1000),
-    });
-    const identity =
-      parseProductIdentity(modelOutput);
+      console.log(
+        "product_lookup_completed",
+        {
+          requestId,
+          provider: barcodeResult.source,
+          durationMs: Date.now() - lookupStarted,
+          found: barcodeResult.source !== null,
+          hasName: Boolean(
+            barcodeResult.productName,
+          ),
+          hasBrand: Boolean(
+            barcodeResult.brand,
+          ),
+        },
+      );
 
-    console.log("identify_completed", {
-      requestId,
-      endpoint: "/api/product/identify",
-      model: visionModel,
-      durationMs: Date.now() - startedAt,
-      found: identity !== null,
-      hasName: Boolean(identity?.productName),
-      hasBrand: Boolean(identity?.brand),
-      status: "success",
-    });
+      if (barcodeResult.source) {
+        identity = barcodeResult;
+      }
+    }
+
+    // Fall back to AI if barcode lookup didn't find result
+    if (!identity) {
+      const imageDataUri =
+        await fileToDataUri(image);
+
+      const startedAt = Date.now();
+
+      const modelOutput = await env.AI.run(
+        visionModel,
+        {
+          task: "query",
+          image: imageDataUri,
+          question: identifyPrompt,
+          reasoning: false,
+          temperature: 0,
+          max_tokens: 256,
+          stream: false,
+        },
+      );
+
+      identity =
+        parseProductIdentity(modelOutput);
+
+      console.log("identify_completed", {
+        requestId,
+        endpoint: "/api/product/identify",
+        model: visionModel,
+        durationMs: Date.now() - startedAt,
+        found: identity !== null,
+        hasName: Boolean(identity?.productName),
+        hasBrand: Boolean(identity?.brand),
+        status: "success",
+      });
+    }
 
     if (!identity) {
       return error(

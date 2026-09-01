@@ -6,7 +6,7 @@ export interface ProductIdentity {
 }
 
 export const identifyPrompt = [
-  "Read the product name and brand from the front of this package.",
+  "Read only the product name and brand from the visible text on this package front.",
   "",
   "Return ONLY this JSON object:",
   "{",
@@ -16,13 +16,12 @@ export const identifyPrompt = [
   "}",
   "",
   "Rules:",
-  "- Read only text clearly printed on the package.",
-  "- Do not guess the brand from the logo design.",
-  "- Do not invent a product name.",
-  "- Use null when text is not clearly readable.",
-  "- Ignore ingredient lists and nutrition tables.",
-  "- Keep productName under 60 characters.",
-  "- Return ONLY the JSON object. No commentary. No Markdown.",
+  "- Read only clearly visible text.",
+  "- Do not guess from logo or design.",
+  "- Return null when unreadable.",
+  "- Ignore ingredients, nutrition labels, warnings.",
+  "- Keep productName ≤80 chars, brand ≤60 chars.",
+  "- Return ONLY JSON. No markdown. No commentary.",
 ].join("\n");
 
 export function parseProductIdentity(

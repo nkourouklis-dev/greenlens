@@ -79,44 +79,43 @@ export default function IngredientsPhoto() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 pb-24 pt-4 text-white">
-      <section className="mx-auto max-w-md">
+    <main className="bg-slate-950 px-4 py-4 pb-20 text-white">
+      <section className="mx-auto flex max-w-md flex-col gap-3">
         <button
           type="button"
           onClick={() => navigate(-1)}
           disabled={isSaving}
-          className="inline-flex min-h-10 items-center text-sm font-semibold text-emerald-400 disabled:opacity-50"
+          className="inline-flex h-9 items-center text-xs font-semibold text-emerald-400 disabled:opacity-50"
         >
           ← Πίσω
         </button>
 
-        <div className="mt-2 flex gap-2">
+        <div className="flex gap-1.5">
           <div className="h-1.5 flex-1 rounded-full bg-emerald-500" />
           <div className="h-1.5 flex-1 rounded-full bg-slate-700" />
         </div>
 
-        <div className="mt-4">
+        <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-400">
             Βήμα 1 από 2
           </p>
 
           <h1 className="mt-1 text-2xl font-bold">
-            Φωτογράφισε τα συστατικά
+            Συστατικά
           </h1>
 
-          <p className="mt-1 text-sm leading-5 text-slate-300">
-            Φέρε κοντά την ετικέτα και κράτησε
-            καθαρό ολόκληρο το κείμενο.
+          <p className="mt-1 text-xs leading-5 text-slate-300">
+            Φέρε κοντά την ετικέτα με καθαρό κείμενο.
           </p>
         </div>
 
         {barcode && (
-          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2.5">
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-2">
             <span className="text-xs text-slate-400">
               Barcode
             </span>
 
-            <span className="min-w-0 break-all font-mono text-sm font-semibold text-slate-200">
+            <span className="min-w-0 break-all font-mono text-xs font-semibold text-slate-200">
               {barcode}
             </span>
           </div>
@@ -125,7 +124,7 @@ export default function IngredientsPhoto() {
         <PhotoCapture
           inputId="ingredients-photo"
           title="Ετικέτα συστατικών"
-          description="Γέμισε το κάδρο με τα συστατικά. Απόφυγε αντανακλάσεις και θολά σημεία."
+          description="Γέμισε το κάδρο με τα συστατικά."
           actionLabel="Διάβασμα ετικέτας"
           onContinue={readIngredients}
           isSaving={isSaving}

@@ -40,20 +40,20 @@ export default function PhotoCapture({
   }
 
   return (
-    <div className="mt-7">
+    <div className="flex flex-col gap-3">
       {previewUrl ? (
-        <img src={previewUrl} alt={title} className="aspect-[3/4] w-full rounded-2xl border border-slate-700 object-cover" />
+        <img src={previewUrl} alt={title} className="max-h-[45vh] w-full rounded-2xl border border-slate-700 object-contain" />
       ) : (
-        <label htmlFor={inputId} className="flex aspect-[3/4] w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-emerald-500/70 bg-slate-900 px-8 text-center">
+        <label htmlFor={inputId} className="flex aspect-[3/4] w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-emerald-500/70 bg-slate-900 px-6 py-8 text-center">
           <span className="text-lg font-semibold text-white">{title}</span>
-          <span className="mt-2 text-sm leading-6 text-slate-400">{description}</span>
-          <span className="mt-6 rounded-xl bg-emerald-500 px-5 py-3 font-semibold text-slate-950">Άνοιγμα κάμερας</span>
+          <span className="mt-2 text-xs leading-5 text-slate-400">{description}</span>
+          <span className="mt-4 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950">Άνοιγμα κάμερας</span>
         </label>
       )}
       <input id={inputId} type="file" accept="image/*" capture="environment" className="sr-only" onChange={(event) => selectFile(event.target.files?.[0])} />
-      {error && <p className="mt-4 rounded-xl border border-red-400/40 bg-red-950/40 p-3 text-sm text-red-100">{error}</p>}
-      {previewUrl && <label htmlFor={inputId} className="mt-4 flex h-12 cursor-pointer items-center justify-center rounded-xl border border-slate-600 font-semibold text-slate-100">Λήψη ξανά</label>}
-      <button type="button" disabled={!file || isSaving} onClick={() => file && onContinue(file)} className="mt-4 h-14 w-full rounded-xl bg-emerald-500 px-5 text-base font-bold text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400">
+      {error && <p className="rounded-xl border border-red-400/40 bg-red-950/40 p-2.5 text-xs text-red-100">{error}</p>}
+      {previewUrl && <label htmlFor={inputId} className="flex h-10 cursor-pointer items-center justify-center rounded-xl border border-slate-600 text-sm font-semibold text-slate-100">Λήψη ξανά</label>}
+      <button type="button" disabled={!file || isSaving} onClick={() => file && onContinue(file)} className="h-12 w-full rounded-xl bg-emerald-500 px-5 text-sm font-bold text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400">
         {isSaving ? "Αποθήκευση..." : actionLabel}
       </button>
     </div>

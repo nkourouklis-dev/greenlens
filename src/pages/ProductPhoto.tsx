@@ -58,33 +58,55 @@ export default function ProductPhoto() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-white">
-      <section className="mx-auto flex min-h-screen max-w-md flex-col px-5 py-6">
-
-        <div className="mb-6 flex gap-2">
-          <div className="h-2 flex-1 rounded-full bg-green-500" />
-          <div className="h-2 flex-1 rounded-full bg-green-500" />
+    <main className="bg-slate-950 text-white">
+      <section className="mx-auto flex max-w-md flex-col gap-3 px-4 py-4 pb-20">
+        <div className="flex gap-1.5">
+          <div className="h-1.5 flex-1 rounded-full bg-green-500" />
+          <div className="h-1.5 flex-1 rounded-full bg-green-500" />
         </div>
 
-        <p className="text-sm font-semibold text-green-400">
-          Βήμα 2 από 2
-        </p>
+        <div>
+          <p className="text-xs font-semibold text-green-400">
+            Βήμα 2 από 2
+          </p>
 
-        <h1 className="mt-2 text-4xl font-bold">
-          Φωτογραφία προϊόντος
-        </h1>
+          <h1 className="mt-1 text-2xl font-bold">
+            Μπροστινή όψη
+          </h1>
 
-        <p className="mt-3 text-slate-400">
-          Φωτογράφισε την μπροστινή όψη του προϊόντος.
-        </p>
-
-        <div className="mt-4 rounded-2xl bg-slate-800 p-4 break-all">
-          {barcode}
+          <p className="mt-1 text-xs text-slate-400">
+            Φωτογράφισε τα ληπτικά στοιχεία του προϊόντος.
+          </p>
         </div>
 
-        <PhotoCapture inputId="product-photo" title="Μπροστινή όψη" description="Βεβαιώσου ότι φαίνεται καθαρά η συσκευασία." actionLabel="Αποθήκευση" onContinue={saveProduct} isSaving={isSaving} error={error} />
+        <div className="rounded-lg border border-slate-700 bg-slate-900 p-2 break-all">
+          <p className="text-xs text-slate-400">Barcode</p>
+          <p className="mt-0.5 font-mono text-sm font-semibold text-slate-200">
+            {barcode}
+          </p>
+        </div>
 
+        <PhotoCapture 
+          inputId="product-photo" 
+          title="Φωτογραφία" 
+          description="Γέμισε το κάδρο με την μπροστινή όψη της συσκευασίας." 
+          actionLabel="Αποθήκευση" 
+          onContinue={saveProduct} 
+          isSaving={isSaving} 
+          error={error} 
+        />
       </section>
+
+      {/* Sticky footer action bar */}
+      <div className="fixed bottom-16 left-0 right-0 border-t border-slate-800 bg-slate-950/95 backdrop-blur px-4 py-3">
+        <div className="mx-auto max-w-md">
+          {error && (
+            <p className="mb-2 rounded-lg border border-red-400/40 bg-red-950/40 p-2 text-xs text-red-100">
+              {error}
+            </p>
+          )}
+        </div>
+      </div>
     </main>
   );
 }
