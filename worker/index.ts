@@ -39,9 +39,13 @@ const textModel =
 
 const trustedOcrConfidence = 0.9;
 
+// A real nutrition table needs this many numeric values with a unit.
+const nutritionNumericUnitThreshold = 3;
+
 type LabelType =
   | "ingredients"
   | "nutrition"
+  | "mixed"
   | "unknown";
 
 type LabelEvaluation = {
@@ -274,8 +278,10 @@ async function runOcr(
       },
     );
 
+    // Distinct wording from the frontend configuration message, so the two
+    // can never be confused again while debugging.
     return error(
-      "Η υπηρεσία OCR δεν έχει ρυθμιστεί σωστά.",
+      "Η υπηρεσία OCR δεν έχει ρυθμιστεί σωστά στον διακομιστή (AZURE_VISION).",
       503,
       origin,
       requestId,
@@ -536,6 +542,7 @@ function isAnalysisRequest(
     (value.ocrLabelType === undefined ||
       value.ocrLabelType === "ingredients" ||
       value.ocrLabelType === "nutrition" ||
+      value.ocrLabelType === "mixed" ||
       value.ocrLabelType === "unknown") &&
     (value.ocrTextLength === undefined ||
       typeof value.ocrTextLength === "number")
@@ -659,18 +666,38 @@ async function runAnalysis(
     reasons.length > 0 &&
     reasons.every(isNutritionRejectionReason);
 
+  // The OCR step may or may not forward its verdict. "mixed" means a label
+  // that carries both an ingredient list and a nutrition table, which is
+  // exactly the case that must be allowed through.
+  const ocrSaysIngredients =
+    ocrLabelType === "ingredients" ||
+    ocrLabelType === "mixed";
+
   const ocrConfirmedIngredients =
-    ocrLabelType === "ingredients" &&
+    ocrSaysIngredients &&
     ocrConfidence >= trustedOcrConfidence;
 
-  // The OCR review step already confirmed an ingredient list with high
-  // confidence, and the text itself is not a real nutrition table.
+  // Independent, deterministic evidence computed here on the server.
+  // This does not depend on what the client chose to send.
+  const textLooksLikeIngredients =
+    evaluation.looksLikeIngredients &&
+    !evaluation.isNutritionTable &&
+    evaluation.numericUnitCount <
+      nutritionNumericUnitThreshold;
+
+  // Override a nutrition-only rejection when our own analysis of the text
+  // disagrees with it, unless OCR explicitly said this is a nutrition table.
   const overrideNutritionRejection =
     !extraction.isValid &&
     nutritionOnlyRejection &&
-    ocrConfirmedIngredients &&
-    evaluation.looksLikeIngredients &&
-    !evaluation.isNutritionTable;
+    textLooksLikeIngredients &&
+    ocrLabelType !== "nutrition";
+
+  const overrideReason = !overrideNutritionRejection
+    ? null
+    : ocrConfirmedIngredients
+      ? "ocr_confirmed_ingredients"
+      : "server_text_evidence";
 
   console.log("ingredient_validation_diagnostics", {
     requestId,
@@ -693,6 +720,7 @@ async function runAnalysis(
     validationValid: extraction.isValid === true,
     validationReasons: reasons,
     overrideApplied: overrideNutritionRejection,
+    overrideReason,
   });
 
   if (
@@ -734,6 +762,7 @@ async function runAnalysis(
       {
         requestId,
         reasons,
+        overrideReason,
         ocrLabelType,
         ocrConfidence,
         analysisTextLength: analysisText.length,
@@ -1630,7 +1659,8 @@ function evaluateLabelText(
   // Ingredient lists that merely mention "βιταμίνη C" are no longer rejected.
   const isNutrition =
     markerCount >= 2 &&
-    numericUnitCount >= 3 &&
+    numericUnitCount >=
+      nutritionNumericUnitThreshold &&
     !(headingPresent && looksLikeIngredients);
 
   return {
