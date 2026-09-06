@@ -122,18 +122,18 @@ export default function IngredientsReview() {
 
   if (!draft) {
     return (
-      <main className="bg-slate-950 px-4 py-6 text-white">
+      <main className="bg-canvas px-4 py-6 text-ink">
         <section className="mx-auto max-w-md flex flex-col gap-3">
           <h1 className="text-2xl font-bold">
             Έλεγχος ετικέτας
           </h1>
-          <p className="text-sm text-slate-300">
+          <p className="text-sm text-ink-muted">
             Δεν βρέθηκε ανάγνωση ετικέτας.
           </p>
           <button
             type="button"
             onClick={() => navigate("/scan")}
-            className="mt-2 h-11 rounded-lg bg-emerald-500 font-bold text-slate-950"
+            className="mt-2 h-11 rounded-lg bg-accent font-bold text-on-accent"
           >
             Νέα σάρωση
           </button>
@@ -162,6 +162,15 @@ export default function IngredientsReview() {
     !textQuality.canContinue &&
     (ocrDraft.result.labelType === "ingredients" ||
       ocrDraft.result.labelType === "mixed");
+
+  // The OCR confidence score only measures how well the model read the
+  // pixels, not whether it read an actual ingredient list. Only pair it
+  // with a "Λίστα συστατικών" label once the deterministic validator has
+  // confirmed the text really is one — otherwise a high OCR confidence on,
+  // say, a front-of-pack photo would read as "we found the ingredients"
+  // when nothing of the sort happened.
+  const confirmedIngredientList =
+    textQuality.canContinue && !nutritionOnly;
 
   function retake() {
     clearOcrDraft(id);
@@ -194,10 +203,10 @@ export default function IngredientsReview() {
           : "Άγνωστος τύπος";
 
   return (
-    <main className="bg-slate-950 px-4 py-4 pb-20 text-white">
+    <main className="bg-canvas px-4 py-4 pb-20 text-ink">
       <section className="mx-auto flex max-w-md flex-col gap-3">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.14em] text-emerald-400">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-accent-strong">
             Ανάγνωση ετικέτας
           </p>
           <h1 className="mt-1 text-2xl font-bold">
@@ -208,18 +217,27 @@ export default function IngredientsReview() {
         <img
           src={ocrDraft.image}
           alt="Φωτογραφία ετικέτας συστατικών"
-          className="max-h-[40vh] w-full rounded-2xl border border-slate-700 object-contain"
+          className="max-h-[40vh] w-full rounded-2xl border border-line object-contain"
         />
 
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-700 bg-slate-900 p-3">
-          <span className="text-sm font-semibold">
-            {label}
-          </span>
-          <span className="text-sm font-bold text-emerald-300">
-            {Math.round(ocrDraft.result.confidence * 100)}
-            %
-          </span>
-        </div>
+        {confirmedIngredientList ? (
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface p-3">
+            <span className="text-sm font-semibold text-ink">
+              {label}
+            </span>
+            <span className="text-sm font-bold text-accent-soft">
+              {Math.round(ocrDraft.result.confidence * 100)}
+              %
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface p-3">
+            <span className="text-sm font-semibold text-ink-muted">
+              Κείμενο εντοπίστηκε, αλλά δεν μοιάζει
+              με λίστα συστατικών
+            </span>
+          </div>
+        )}
 
         {nutritionOnly && (
           <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-2.5 text-xs text-amber-50">
@@ -238,7 +256,7 @@ export default function IngredientsReview() {
 
         {textQuality.notice && (
           <p
-            className="rounded-lg border border-slate-700 bg-slate-900 p-2.5 text-xs text-slate-200"
+            className="rounded-lg border border-line bg-surface p-2.5 text-xs text-ink-muted"
             aria-live="polite"
           >
             {textQuality.notice}
@@ -275,7 +293,7 @@ export default function IngredientsReview() {
         <div>
           <label
             htmlFor="ocr-text"
-            className="block text-xs font-semibold uppercase tracking-wide text-slate-400"
+            className="block text-xs font-semibold uppercase tracking-wide text-ink-faint"
           >
             Κείμενο ετικέτας
           </label>
@@ -283,10 +301,10 @@ export default function IngredientsReview() {
             id="ocr-text"
             value={text}
             onChange={(event) => setText(event.target.value)}
-            className="mt-2 min-h-32 w-full rounded-lg border border-slate-700 bg-slate-900 p-3 text-sm leading-5"
+            className="mt-2 min-h-32 w-full rounded-lg border border-line bg-surface p-3 text-sm leading-5 text-ink"
             placeholder="Κείμενο από ετικέτα..."
           />
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-ink-faintest">
             Μπορείτε να διορθώσετε το κείμενο πριν
             συνεχίσετε. Αυτό ακριβώς το κείμενο θα
             αναλυθεί.
@@ -294,7 +312,7 @@ export default function IngredientsReview() {
         </div>
 
         {ocrDraft.result.unreadableSegments.length > 0 && (
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-ink-faint">
             Μη αναγνώσιμα: {ocrDraft.result.unreadableSegments.join(", ")}
           </p>
         )}
@@ -304,7 +322,7 @@ export default function IngredientsReview() {
             type="button"
             onClick={confirm}
             disabled={!canContinue}
-            className="h-11 rounded-lg bg-emerald-500 font-bold text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+            className="h-11 rounded-lg bg-accent font-bold text-on-accent disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
             aria-live="polite"
           >
             Συνέχεια
@@ -312,7 +330,7 @@ export default function IngredientsReview() {
           <button
             type="button"
             onClick={retake}
-            className="h-11 rounded-lg border border-slate-600 font-semibold text-slate-100"
+            className="h-11 rounded-lg border border-line font-semibold text-ink-muted"
           >
             Λήψη ξανά
           </button>

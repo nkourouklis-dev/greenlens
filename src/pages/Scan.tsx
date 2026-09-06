@@ -213,7 +213,7 @@ export default function Scan() {
       existingItem.analysis?.score.score ?? null;
 
     return (
-      <main className="min-h-screen bg-slate-950 px-4 pb-28 pt-5 text-white">
+      <main className="min-h-screen bg-canvas px-4 pb-28 pt-5 text-ink">
         <section className="mx-auto max-w-md">
           <button
             type="button"
@@ -222,12 +222,12 @@ export default function Scan() {
               setBarcode("");
               startScanner();
             }}
-            className="mb-4 inline-flex min-h-10 items-center text-sm font-semibold text-emerald-400"
+            className="mb-4 inline-flex min-h-10 items-center text-sm font-semibold text-accent-strong"
           >
             ← Πίσω στη σάρωση
           </button>
 
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-400">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-accent-strong">
             Υπάρχουσα καταχώρηση
           </p>
 
@@ -261,26 +261,26 @@ export default function Scan() {
               )}
             </div>
 
-            <div className="mt-3 border-t border-slate-700/70 pt-3">
-              <p className="break-all font-mono text-sm text-slate-300">
+            <div className="mt-3 border-t border-line/70 pt-3">
+              <p className="break-all font-mono text-sm text-ink-muted">
                 {existingItem.barcode}
               </p>
 
-              <p className="mt-1 text-xs text-slate-500">
+              <p className="mt-1 text-xs text-ink-faintest">
                 {scanDate}
               </p>
             </div>
 
             {existingItem.analysis &&
               scoreValue === null && (
-                <p className="mt-3 rounded-xl bg-slate-900/60 p-3 text-sm leading-5 text-slate-300">
+                <p className="mt-3 rounded-xl bg-surface/60 p-3 text-sm leading-5 text-ink-muted">
                   Η προηγούμενη ανάλυση δεν είχε
                   επαρκή στοιχεία.
                 </p>
               )}
 
             {!existingItem.analysis && (
-              <p className="mt-3 rounded-xl bg-slate-900/60 p-3 text-sm leading-5 text-slate-300">
+              <p className="mt-3 rounded-xl bg-surface/60 p-3 text-sm leading-5 text-ink-muted">
                 Δεν έχει γίνει ακόμη ανάλυση.
               </p>
             )}
@@ -294,7 +294,7 @@ export default function Scan() {
                   `/product/${existingItem.id}`,
                 )
               }
-              className="h-14 w-full rounded-2xl bg-emerald-500 px-5 text-base font-bold text-slate-950 transition active:scale-[0.98]"
+              className="h-14 w-full rounded-2xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98]"
             >
               Προβολή καταχώρησης
             </button>
@@ -308,7 +308,7 @@ export default function Scan() {
                 setExistingItem(null);
                 continueWithBarcode(value);
               }}
-              className="h-12 w-full rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 transition active:scale-[0.98]"
+              className="h-12 w-full rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink-muted transition active:scale-[0.98]"
             >
               Νέα καταχώρηση ίδιου προϊόντος
             </button>
@@ -320,7 +320,7 @@ export default function Scan() {
                 setBarcode("");
                 startScanner();
               }}
-              className="h-12 w-full rounded-xl px-4 text-sm font-semibold text-slate-300 transition active:bg-slate-900"
+              className="h-12 w-full rounded-xl px-4 text-sm font-semibold text-ink-muted transition active:bg-surface"
             >
               Σάρωση άλλου προϊόντος
             </button>
@@ -331,13 +331,13 @@ export default function Scan() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 pb-28 pt-4 text-white">
+    <main className="min-h-screen bg-canvas px-4 pb-28 pt-4 text-ink">
       <section className="mx-auto max-w-md">
         <header className="mb-4">
           <button
             type="button"
             onClick={() => navigate("/")}
-            className="inline-flex min-h-10 items-center text-sm font-semibold text-emerald-400"
+            className="inline-flex min-h-10 items-center text-sm font-semibold text-accent-strong"
           >
             ← Επιστροφή
           </button>
@@ -347,14 +347,14 @@ export default function Scan() {
               Σάρωση προϊόντος
             </h1>
 
-            <p className="mt-1 text-sm leading-5 text-slate-300">
+            <p className="mt-1 text-sm leading-5 text-ink-muted">
               Βάλε το barcode μέσα στο πλαίσιο και
               κράτησε την κάμερα σταθερή.
             </p>
           </div>
         </header>
 
-        <div className="relative overflow-hidden rounded-2xl border border-slate-700 bg-black shadow-lg shadow-black/20">
+        <div className="relative overflow-hidden rounded-2xl border border-line bg-black shadow-lg shadow-black/20">
           <video
             ref={videoRef}
             autoPlay
@@ -401,7 +401,7 @@ export default function Scan() {
                 onClick={() =>
                   handleBarcode(barcode)
                 }
-                className="h-12 w-full rounded-xl bg-emerald-500 px-4 font-bold text-slate-950 transition active:scale-[0.98]"
+                className="h-12 w-full rounded-xl bg-accent px-4 font-bold text-on-accent transition active:scale-[0.98]"
               >
                 Συνέχεια
               </button>
@@ -409,7 +409,7 @@ export default function Scan() {
               <button
                 type="button"
                 onClick={startScanner}
-                className="h-11 w-full rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100"
+                className="h-11 w-full rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink-muted"
               >
                 Νέα σάρωση
               </button>
@@ -418,15 +418,15 @@ export default function Scan() {
         )}
 
         {!isScanning && !barcode && (
-          <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+          <div className="mt-4 rounded-2xl border border-line-subtle bg-surface/70 p-4">
             <label
               htmlFor="manual-barcode"
-              className="text-sm font-semibold text-slate-200"
+              className="text-sm font-semibold text-ink-muted"
             >
               Χειροκίνητη εισαγωγή
             </label>
 
-            <p className="mt-1 text-xs leading-5 text-slate-400">
+            <p className="mt-1 text-xs leading-5 text-ink-faint">
               Χρησιμοποίησέ την αν η κάμερα δεν
               αναγνωρίζει το barcode.
             </p>
@@ -450,7 +450,7 @@ export default function Scan() {
                   }
                 }}
                 placeholder="π.χ. 0000000000000"
-                className="h-12 min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                className="h-12 min-w-0 flex-1 rounded-xl border border-line bg-canvas px-3 text-base text-ink outline-none transition placeholder:text-ink-faintest focus:border-accent focus:ring-2 focus:ring-accent/20"
               />
 
               <button
@@ -460,7 +460,7 @@ export default function Scan() {
                 }
                 disabled={!barcode.trim()}
                 aria-label="Συνέχεια με barcode"
-                className="h-12 shrink-0 rounded-xl bg-emerald-500 px-4 font-bold text-slate-950 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+                className="h-12 shrink-0 rounded-xl bg-accent px-4 font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
               >
                 Συνέχεια
               </button>
@@ -470,13 +470,13 @@ export default function Scan() {
       </section>
 
       {!barcode && (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-800 bg-slate-950/95 px-4 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-3 backdrop-blur">
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line-subtle bg-canvas/95 px-4 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-3 backdrop-blur">
           <div className="mx-auto max-w-md">
             {isScanning ? (
               <button
                 type="button"
                 onClick={stopScanner}
-                className="h-12 w-full rounded-xl border border-slate-600 bg-slate-800 px-5 font-semibold text-white transition active:scale-[0.98]"
+                className="h-12 w-full rounded-xl border border-line bg-surface-muted px-5 font-semibold text-ink transition active:scale-[0.98]"
               >
                 Διακοπή σάρωσης
               </button>
@@ -484,7 +484,7 @@ export default function Scan() {
               <button
                 type="button"
                 onClick={startScanner}
-                className="h-14 w-full rounded-xl bg-emerald-500 px-5 text-base font-bold text-slate-950 transition active:scale-[0.98]"
+                className="h-14 w-full rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98]"
               >
                 {error
                   ? "Δοκιμή ξανά"

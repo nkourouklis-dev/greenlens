@@ -92,24 +92,24 @@ export default function IngredientsPhoto() {
   }
 
   return (
-    <main className="bg-slate-950 px-4 py-4 pb-20 text-white">
+    <main className="bg-canvas px-4 py-4 pb-20 text-ink">
       <section className="mx-auto flex max-w-md flex-col gap-3">
         <button
           type="button"
           onClick={() => navigate(-1)}
           disabled={isSaving}
-          className="inline-flex h-9 items-center text-xs font-semibold text-emerald-400 disabled:opacity-50"
+          className="inline-flex h-9 items-center text-xs font-semibold text-accent-strong disabled:opacity-50"
         >
           ← Πίσω
         </button>
 
         <div className="flex gap-1.5">
-          <div className="h-1.5 flex-1 rounded-full bg-emerald-500" />
-          <div className="h-1.5 flex-1 rounded-full bg-slate-700" />
+          <div className="h-1.5 flex-1 rounded-full bg-accent" />
+          <div className="h-1.5 flex-1 rounded-full bg-surface-muted" />
         </div>
 
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-400">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-accent-strong">
             Βήμα 1 από 2
           </p>
 
@@ -117,18 +117,18 @@ export default function IngredientsPhoto() {
             Συστατικά
           </h1>
 
-          <p className="mt-1 text-xs leading-5 text-slate-300">
+          <p className="mt-1 text-xs leading-5 text-ink-muted">
             Φέρε κοντά την ετικέτα με καθαρό κείμενο.
           </p>
         </div>
 
         {barcode && (
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-2">
-            <span className="text-xs text-slate-400">
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-line-subtle bg-surface px-2.5 py-2">
+            <span className="text-xs text-ink-faint">
               Barcode
             </span>
 
-            <span className="min-w-0 break-all font-mono text-xs font-semibold text-slate-200">
+            <span className="min-w-0 break-all font-mono text-xs font-semibold text-ink-muted">
               {barcode}
             </span>
           </div>
@@ -147,4 +147,3 @@ export default function IngredientsPhoto() {
     </main>
   );
 }
-``

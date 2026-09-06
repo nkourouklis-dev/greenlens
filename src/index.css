@@ -1,15 +1,36 @@
 @import "tailwindcss";
 
+/*
+ * Shared dark-theme design tokens for the scanning flow. Every screen from
+ * Scan through Product should read colors from here instead of hardcoding
+ * Tailwind palette classes, so the whole flow stays visually consistent.
+ */
+@theme {
+	--color-canvas: var(--color-slate-950);
+	--color-surface: var(--color-slate-900);
+	--color-surface-muted: var(--color-slate-800);
+	--color-line: var(--color-slate-700);
+	--color-line-subtle: var(--color-slate-800);
+	--color-ink: var(--color-white);
+	--color-ink-muted: var(--color-slate-300);
+	--color-ink-faint: var(--color-slate-400);
+	--color-ink-faintest: var(--color-slate-500);
+	--color-accent: var(--color-emerald-500);
+	--color-accent-strong: var(--color-emerald-400);
+	--color-accent-soft: var(--color-emerald-300);
+	--color-on-accent: var(--color-slate-950);
+}
+
 :root {
-	color: #f8fafc;
-	background: #0f172a;
+	color: var(--color-ink);
+	background: var(--color-canvas);
 	font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
 body {
 	min-width: 320px;
 	margin: 0;
-	background: #0f172a;
+	background: var(--color-canvas);
 }
 
 button,
@@ -19,5 +40,5 @@ label {
 }
 
 main { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
-button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid #34d399; outline-offset: 2px; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--color-accent-strong); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }

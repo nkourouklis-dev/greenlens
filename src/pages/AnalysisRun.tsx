@@ -197,9 +197,9 @@ export default function AnalysisRun() {
   }, [id, navigate]);
 
   return (
-    <main className="min-h-screen bg-slate-950 px-5 py-12 text-white">
+    <main className="min-h-screen bg-canvas px-5 py-12 text-ink">
       <section className="mx-auto max-w-md">
-        <p className="text-sm font-bold uppercase tracking-[0.14em] text-emerald-400">
+        <p className="text-sm font-bold uppercase tracking-[0.14em] text-accent-strong">
           GreenLens
         </p>
 
@@ -221,7 +221,7 @@ export default function AnalysisRun() {
               onClick={() =>
                 navigate(`/product/${id}`)
               }
-              className="mt-5 h-14 w-full rounded-xl bg-emerald-500 font-bold text-slate-950"
+              className="mt-5 h-14 w-full rounded-xl bg-accent font-bold text-on-accent"
             >
               Πίσω στο προϊόν
             </button>
@@ -229,15 +229,15 @@ export default function AnalysisRun() {
         ) : (
           <div
             role="status"
-            className="mt-8 rounded-2xl border border-slate-800 bg-slate-900 p-6"
+            className="mt-8 rounded-2xl border border-line-subtle bg-surface p-6"
           >
-            <span className="block h-3 w-3 animate-pulse rounded-full bg-emerald-400" />
+            <span className="block h-3 w-3 animate-pulse rounded-full bg-accent-strong" />
 
-            <p className="mt-4 font-semibold">
+            <p className="mt-4 font-semibold text-ink">
               {message}
             </p>
 
-            <p className="mt-2 text-sm leading-6 text-slate-400">
+            <p className="mt-2 text-sm leading-6 text-ink-faint">
               Η βαθμολογία υπολογίζεται από
               σταθερούς κανόνες αφού ολοκληρωθεί η
               ερμηνεία.
