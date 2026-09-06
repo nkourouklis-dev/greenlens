@@ -126,14 +126,48 @@ export function CameraProvider({ children }: { children: ReactNode }) {
       return null;
     }
 
+    // The preview crops the raw camera feed to fit its box (CSS
+    // object-cover). Capturing the full, uncropped frame here produced a
+    // photo that didn't match what the user framed on screen. Mirror the
+    // same "cover" crop — centered, filling the displayed box — so the
+    // captured photo is exactly what was visible in the preview.
+    const displayWidth = video.clientWidth || video.videoWidth;
+    const displayHeight = video.clientHeight || video.videoHeight;
+
+    const videoAspect = video.videoWidth / video.videoHeight;
+    const displayAspect = displayWidth / displayHeight;
+
+    let sourceX = 0;
+    let sourceY = 0;
+    let sourceWidth = video.videoWidth;
+    let sourceHeight = video.videoHeight;
+
+    if (videoAspect > displayAspect) {
+      sourceWidth = video.videoHeight * displayAspect;
+      sourceX = (video.videoWidth - sourceWidth) / 2;
+    } else if (videoAspect < displayAspect) {
+      sourceHeight = video.videoWidth / displayAspect;
+      sourceY = (video.videoHeight - sourceHeight) / 2;
+    }
+
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = sourceWidth;
+    canvas.height = sourceHeight;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
 
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(
+      video,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
 
     return new Promise((resolve) => {
       canvas.toBlob(
