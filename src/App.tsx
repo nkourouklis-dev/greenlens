@@ -1,16 +1,26 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import Home from "./pages/Home";
-import Scan from "./pages/Scan";
-import AddProduct from "./pages/AddProduct";
-import ProductPhoto from "./pages/ProductPhoto";
-import IngredientsPhoto from "./pages/IngredientsPhoto";
-import Product from "./pages/Product";
-import History from "./pages/History";
-import IngredientsReview from "./pages/IngredientsReview";
 import MobileNav from "./components/MobileNav";
-import AnalysisRun from "./pages/AnalysisRun";
 import { CameraProvider } from "./contexts/CameraContext";
 import ErrorBoundary from "./components/ErrorBoundary";
+
+const Home = lazy(() => import("./pages/Home"));
+const Scan = lazy(() => import("./pages/Scan"));
+const AddProduct = lazy(() => import("./pages/AddProduct"));
+const ProductPhoto = lazy(() => import("./pages/ProductPhoto"));
+const IngredientsPhoto = lazy(() => import("./pages/IngredientsPhoto"));
+const Product = lazy(() => import("./pages/Product"));
+const History = lazy(() => import("./pages/History"));
+const IngredientsReview = lazy(() => import("./pages/IngredientsReview"));
+const AnalysisRun = lazy(() => import("./pages/AnalysisRun"));
+
+function PageFallback() {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-canvas text-ink-muted">
+      <p className="text-sm font-semibold">Φόρτωση...</p>
+    </main>
+  );
+}
 
 export default function App() {
   return (
@@ -21,18 +31,20 @@ export default function App() {
       <CameraProvider>
         <MobileNav />
         <ErrorBoundary>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/scan" element={<Scan />} />
-            <Route path="/add-product" element={<AddProduct />} />
-            <Route path="/ingredients-photo" element={<IngredientsPhoto />} />
-            <Route path="/ingredients-review/:id" element={<IngredientsReview />} />
-            <Route path="/product-photo" element={<ProductPhoto />} />
-            <Route path="/product/:id" element={<Product />} />
-            <Route path="/product/:id/analysis" element={<AnalysisRun />} />
-            <Route path="/history" element={<History />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <Suspense fallback={<PageFallback />}>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/scan" element={<Scan />} />
+              <Route path="/add-product" element={<AddProduct />} />
+              <Route path="/ingredients-photo" element={<IngredientsPhoto />} />
+              <Route path="/ingredients-review/:id" element={<IngredientsReview />} />
+              <Route path="/product-photo" element={<ProductPhoto />} />
+              <Route path="/product/:id" element={<Product />} />
+              <Route path="/product/:id/analysis" element={<AnalysisRun />} />
+              <Route path="/history" element={<History />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
         </ErrorBoundary>
       </CameraProvider>
     </BrowserRouter>

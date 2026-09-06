@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import {
+import type {
   BrowserMultiFormatReader,
-  type IScannerControls,
+  IScannerControls,
 } from "@zxing/browser";
 import { useNavigate } from "react-router-dom";
 import { findProductByBarcode } from "../data/productRepository";
@@ -70,6 +70,10 @@ export default function Scan() {
 
     try {
       if (!codeReaderRef.current) {
+        const { BrowserMultiFormatReader } = await import(
+          "@zxing/browser"
+        );
+
         codeReaderRef.current =
           new BrowserMultiFormatReader();
       }
