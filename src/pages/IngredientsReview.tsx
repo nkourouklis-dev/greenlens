@@ -8,8 +8,9 @@ import {
 import { extractIngredientText } from "../../worker/ingredientText";
 
 // Reasons that describe extra noise on the label (manufacturer, website,
-// storage advice) are informational: the analysis strips them anyway.
-// Everything else blocks the flow.
+// storage advice) are shown as a quiet notice: the analysis strips them
+// anyway. Everything else is surfaced as a warning (blockingReason below),
+// but never disables the Continue button — see canContinue.
 const informationalPatterns = [
   "κατασκευαστ",
   "ιστοσελίδ",
@@ -144,20 +145,20 @@ export default function IngredientsReview() {
 
   const ocrDraft = draft;
 
-  // Only a pure nutrition reading blocks the flow. A mixed label still
-  // contains the ingredient list, so the user can correct and continue.
+  // A pure nutrition reading only triggers an informational notice below —
+  // it never blocks the flow (see canContinue).
   const nutritionOnly =
     ocrDraft.result.labelType === "nutrition";
 
-  const canContinue =
-    !nutritionOnly &&
-    textQuality.canContinue &&
-    text.trim().length > 0;
+  // Quality checks are informational only — they never block the flow.
+  // The user can always continue with whatever text is present (raw OCR
+  // fallback included) and correct it manually if needed.
+  const canContinue = text.trim().length > 0;
 
   // The model's own labelType disagrees with the deterministic check: it
   // thought this was an ingredient label, but extractIngredientText rejected
-  // the text. Surface that mismatch so the user understands why a label
-  // that "looks right" still got blocked.
+  // the text. Surface that mismatch as a notice so the user understands why
+  // the reading looks uncertain, even though they can still continue.
   const modelBelievedIngredients =
     !textQuality.canContinue &&
     (ocrDraft.result.labelType === "ingredients" ||

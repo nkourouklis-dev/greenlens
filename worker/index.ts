@@ -311,6 +311,27 @@ async function runOcr(
     const evaluation =
       evaluateLabelText(result.rawText);
 
+    // Quality signals only — never used to block the flow. A low-confidence
+    // read still returns 200 with the raw OCR text so the user can always
+    // continue; retaking the photo stays available but optional.
+    const ambiguousNutritionLabel =
+      result.labelType === "nutrition" &&
+      !(
+        evaluation.hasIngredientHeading &&
+        evaluation.looksLikeIngredients
+      );
+
+    const failedQualityChecks =
+      ambiguousNutritionLabel ||
+      evaluation.isNutritionTable ||
+      !evaluation.looksLikeIngredients ||
+      looksLikeSyntheticNutritionText(
+        result.rawText,
+      );
+
+    const extractionQuality: "high" | "low" =
+      failedQualityChecks ? "low" : "high";
+
     console.log("ocr_model_completed", {
       requestId,
       endpoint: "/api/ocr/extract",
@@ -331,54 +352,9 @@ async function runOcr(
         evaluation.hasIngredientHeading,
       confidence:
         result.confidence,
+      extractionQuality,
       status: "success",
     });
-
-    if (
-      result.labelType === "nutrition" &&
-      !(
-        evaluation.hasIngredientHeading &&
-        evaluation.looksLikeIngredients
-      )
-    ) {
-      return error(
-        "Εντοπίστηκε διατροφικός πίνακας, όχι λίστα συστατικών. Φωτογραφίστε και τη λίστα συστατικών.",
-        422,
-        origin,
-        requestId,
-      );
-    }
-
-    if (evaluation.isNutritionTable) {
-      return error(
-        "Φωτογραφήσατε τον διατροφικό πίνακα. Η λίστα συστατικών βρίσκεται συνήθως δίπλα ή κάτω από αυτόν, μετά τη λέξη «Συστατικά».",
-        422,
-        origin,
-        requestId,
-      );
-    }
-
-    if (!evaluation.looksLikeIngredients) {
-      return error(
-        "Δεν εντοπίστηκε καθαρή λίστα συστατικών. Φωτογραφίστε κοντά και κάθετα την περιοχή κάτω από τη λέξη «Συστατικά», «Ingredients» ή «INCI».",
-        422,
-        origin,
-        requestId,
-      );
-    }
-
-    if (
-      looksLikeSyntheticNutritionText(
-        result.rawText,
-      )
-    ) {
-      return error(
-        "Η ανάγνωση δεν ήταν αρκετά αξιόπιστη. Φωτογραφίστε ξανά τη λίστα συστατικών με καλύτερο φωτισμό.",
-        422,
-        origin,
-        requestId,
-      );
-    }
 
     return json(
       result,
@@ -731,6 +707,10 @@ async function runAnalysis(
     validationReasons: reasons,
     overrideApplied: overrideNutritionRejection,
     overrideReason,
+    extractionQuality:
+      extraction.isValid || overrideNutritionRejection
+        ? "high"
+        : "fallback",
   });
 
   if (
