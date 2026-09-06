@@ -98,6 +98,12 @@ export interface ScoreBreakdown {
   deductions: ScoreDeduction[];
   bonuses: string[];
   confidence: number;
+  /**
+   * Set when the ingredient text was accepted on shaky evidence (no
+   * heading found, or only via the nutrition-table override) even though a
+   * full score is still shown. Null when the reading was solid.
+   */
+  lowConfidenceReason: string | null;
   insufficientDataReasons: string[];
   scoringVersion: string;
 }

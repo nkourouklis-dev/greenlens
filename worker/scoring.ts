@@ -22,6 +22,13 @@ export interface WorkerScore {
   }>;
   bonuses: string[];
   confidence: number;
+  /**
+   * Set when the ingredient text was accepted on shaky evidence (no
+   * heading, or only via the nutrition-table override) even though a full
+   * score was still computed. Never blocks the flow — it's shown next to
+   * the result as a caveat, not a rejection.
+   */
+  lowConfidenceReason: string | null;
   insufficientDataReasons: string[];
   scoringVersion: string;
 }
@@ -34,9 +41,25 @@ export function scoreInterpretation(
   text: string,
   ocrConfidence: number,
   analysis: WorkerAnalysisResult,
+  options?: {
+    /**
+     * Confidence from the deterministic ingredient-text validator (lower
+     * when the text was accepted without a heading). Defaults to 1 (no
+     * effect) so existing callers that omit it keep today's behaviour.
+     */
+    extractionConfidence?: number;
+    lowConfidenceReason?: string | null;
+  },
 ): WorkerScore {
+  const extractionConfidence =
+    options?.extractionConfidence ?? 1;
+
+  const lowConfidenceReason =
+    options?.lowConfidenceReason ?? null;
+
   const confidence = Math.min(
     ocrConfidence,
+    extractionConfidence,
     analysis.confidence,
   );
 
@@ -72,6 +95,7 @@ export function scoreInterpretation(
       deductions: [],
       bonuses: [],
       confidence,
+      lowConfidenceReason,
       insufficientDataReasons: Array.from(
         new Set([
           ...blockingReasons,
@@ -183,6 +207,7 @@ export function scoreInterpretation(
     deductions,
     bonuses,
     confidence,
+    lowConfidenceReason,
     insufficientDataReasons: [],
     scoringVersion,
   };

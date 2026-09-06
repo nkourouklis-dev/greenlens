@@ -114,6 +114,7 @@ export default function Product() {
     deductions: [],
     bonuses: [],
     confidence: 0,
+    lowConfidenceReason: null,
     insufficientDataReasons: [
       "Δεν υπάρχουν επαρκή δεδομένα για βαθμολογία.",
     ],
@@ -388,6 +389,12 @@ function Result(props: {
               )}
               %
             </p>
+
+            {props.score.lowConfidenceReason && (
+              <p className="mt-1 text-xs text-amber-400">
+                {props.score.lowConfidenceReason}
+              </p>
+            )}
 
             <button
               type="button"

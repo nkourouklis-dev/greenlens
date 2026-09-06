@@ -311,6 +311,14 @@ async function runOcr(
     const evaluation =
       evaluateLabelText(result.rawText);
 
+    // Same authoritative validator used by /api/analysis/run and the
+    // ingredients review screen — one source of truth for "is this really
+    // an ingredient list", instead of a second, ad hoc rule set here.
+    const extraction = extractIngredientText(
+      result.rawText,
+      result.confidence,
+    );
+
     // Quality signals only — never used to block the flow. A low-confidence
     // read still returns 200 with the raw OCR text so the user can always
     // continue; retaking the photo stays available but optional.
@@ -321,16 +329,15 @@ async function runOcr(
         evaluation.looksLikeIngredients
       );
 
-    const failedQualityChecks =
-      ambiguousNutritionLabel ||
-      evaluation.isNutritionTable ||
-      !evaluation.looksLikeIngredients ||
-      looksLikeSyntheticNutritionText(
-        result.rawText,
-      );
-
     const extractionQuality: "high" | "low" =
-      failedQualityChecks ? "low" : "high";
+      extraction.isValid &&
+      extraction.confidence >= 0.6 &&
+      !ambiguousNutritionLabel &&
+      !looksLikeSyntheticNutritionText(
+        result.rawText,
+      )
+        ? "high"
+        : "low";
 
     console.log("ocr_model_completed", {
       requestId,
@@ -352,6 +359,10 @@ async function runOcr(
         evaluation.hasIngredientHeading,
       confidence:
         result.confidence,
+      extractionConfidence:
+        extraction.confidence,
+      extractionValid:
+        extraction.isValid,
       extractionQuality,
       status: "success",
     });
@@ -636,10 +647,14 @@ async function runAnalysis(
       ? evaluation.ingredientText
       : confirmedText;
 
-  // Deterministic extraction and validation of ingredient text
+  // Deterministic extraction and validation of ingredient text. Uses the
+  // real OCR confidence (not the trusted-threshold constant used below for
+  // the ocrConfirmedIngredients gate) so extraction.confidence reflects how
+  // reliable this specific read actually was, instead of always assuming
+  // the best case.
   const extraction = extractIngredientText(
     analysisText,
-    trustedOcrConfidence,
+    ocrConfidence,
   );
 
   const reasons = Array.isArray(
@@ -897,10 +912,28 @@ async function runAnalysis(
       result.productType = detectedType;
     }
 
+    // Surface *why* a full score is being shown despite shaky evidence,
+    // without blocking anything — the user sees this as a caveat next to
+    // the result, not a rejection.
+    const acceptedWithoutHeading =
+      extraction.isValid &&
+      !evaluation.hasIngredientHeading;
+
+    const lowConfidenceReason: string | null =
+      overrideNutritionRejection
+        ? "Το κείμενο μοιάζει και με διατροφικό πίνακα — ελέγξτε ότι είναι όντως η λίστα συστατικών."
+        : acceptedWithoutHeading
+          ? "Δεν εντοπίστηκε ένδειξη «Συστατικά» στο κείμενο — η ανάγνωση μπορεί να είναι αβέβαιη."
+          : null;
+
     const score = scoreInterpretation(
       analysisText,
       requestBody.ocrConfidence,
       result,
+      {
+        extractionConfidence: extraction.confidence,
+        lowConfidenceReason,
+      },
     );
 
     // Explanation-only enrichment layer. It reads `result` (the AI's

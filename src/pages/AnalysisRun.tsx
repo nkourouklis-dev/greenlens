@@ -52,6 +52,7 @@ const insufficientScore = (
   deductions: [],
   bonuses: [],
   confidence,
+  lowConfidenceReason: null,
   insufficientDataReasons: [reason],
   scoringVersion: analysisVersion,
 });
