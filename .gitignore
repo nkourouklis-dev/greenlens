@@ -24,3 +24,8 @@ worker/worker-configuration.d.ts
 *.njsproj
 *.sln
 *.sw?
+
+# env
+.env
+.env.*
+!.env.example
