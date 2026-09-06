@@ -35,13 +35,15 @@ export default function AddProduct() {
         </div>
 
         <p className="mt-6 text-slate-600">
-          Επόμενο βήμα: φωτογραφία μπροστινής όψης προϊόντος.
+          Επόμενο βήμα: φωτογραφία της λίστας συστατικών.
         </p>
 
         <button
           type="button"
           onClick={() =>
-            navigate(`/product-photo?barcode=${barcode}`)
+            navigate(
+              `/ingredients-photo?barcode=${encodeURIComponent(barcode)}`,
+            )
           }
           className="mt-6 w-full rounded-2xl bg-green-600 py-4 text-white font-semibold"
         >

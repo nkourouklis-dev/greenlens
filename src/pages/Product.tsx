@@ -10,12 +10,18 @@ import {
 } from "react-router-dom";
 import { askProductQuestion } from "../services/analysisClient";
 import { getHistoryItem } from "../services/historyService";
+import {
+  deriveExecutiveSummary,
+  deriveIngredientInsights,
+} from "../utils/ingredientInsights";
 import type {
-  FindingSeverity,
-  IngredientFinding,
   ProductAnalysisRecord,
   ScoreBreakdown,
 } from "../types";
+import ShareScanButton from "../components/ShareScanButton";
+import ExecutiveSummaryCard from "../components/ExecutiveSummaryCard";
+import IngredientCard from "../components/IngredientCard";
+import ScoreBreakdownPanel from "../components/ScoreBreakdownPanel";
 
 const bands: Record<
   ScoreBreakdown["band"],
@@ -53,32 +59,6 @@ const bands: Record<
   ],
 };
 
-const severityLabels: Record<
-  FindingSeverity,
-  [string, string]
-> = {
-  positive: [
-    "Θετικό",
-    "bg-emerald-500/15 text-emerald-200",
-  ],
-  info: [
-    "Ουδέτερο",
-    "bg-slate-700/50 text-slate-300",
-  ],
-  attention: [
-    "Προσοχή",
-    "bg-amber-500/15 text-amber-200",
-  ],
-  high_attention: [
-    "Υψηλή προσοχή",
-    "bg-red-500/15 text-red-200",
-  ],
-  unknown: [
-    "Άγνωστο",
-    "bg-slate-700/50 text-slate-400",
-  ],
-};
-
 function ProductImage(props: {
   source: string;
 }) {
@@ -105,9 +85,6 @@ export default function Product() {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState("");
-  const [open, setOpen] = useState<
-    string | null
-  >(null);
 
   if (!item) {
     return (
@@ -229,8 +206,6 @@ export default function Product() {
           <Result
             record={record}
             score={score}
-            open={open}
-            setOpen={setOpen}
             onReanalyze={() =>
               navigate(
                 `/product/${id}/analysis`,
@@ -316,6 +291,16 @@ export default function Product() {
           </section>
         )}
 
+        <ShareScanButton
+          productName={item.productName}
+          barcode={item.barcode}
+          score={item.analysis?.score.score}
+          summary={item.analysis?.structured.summary}
+          positives={item.analysis?.structured.positives}
+          attentionItems={item.analysis?.structured.attentionItems}
+          allergens={item.analysis?.structured.potentialAllergens}
+        />
+
         <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
@@ -346,48 +331,28 @@ export default function Product() {
   );
 }
 
-function countSeverities(
-  findings: IngredientFinding[],
-) {
-  let safe = 0;
-  let attention = 0;
-  let high = 0;
-
-  for (const finding of findings) {
-    if (
-      finding.severity === "positive" ||
-      finding.severity === "info"
-    ) {
-      safe += 1;
-      continue;
-    }
-
-    if (finding.severity === "attention") {
-      attention += 1;
-      continue;
-    }
-
-    if (finding.severity === "high_attention") {
-      high += 1;
-    }
-  }
-
-  return { safe, attention, high };
-}
-
 function Result(props: {
   record: ProductAnalysisRecord;
   score: ScoreBreakdown;
-  open: string | null;
-  setOpen: (value: string | null) => void;
   onReanalyze: () => void;
 }) {
   const [label, color, borderColor] =
     bands[props.score.band];
 
-  const counts = countSeverities(
-    props.record.structured.ingredientFindings,
-  );
+  const insights =
+    props.record.ingredientInsights ??
+    deriveIngredientInsights(
+      props.record.structured,
+      props.score,
+    );
+
+  const executiveSummary =
+    props.record.executiveSummary ??
+    deriveExecutiveSummary(
+      props.record.structured,
+      props.score,
+      insights,
+    );
 
   return (
     <>
@@ -434,200 +399,44 @@ function Result(props: {
             </button>
           </div>
         </div>
-
-        <div className="mt-5 grid grid-cols-3 gap-2">
-          <div className="rounded-xl bg-emerald-500/10 p-3 text-center">
-            <strong className="block text-xl text-emerald-300">
-              {counts.safe}
-            </strong>
-
-            <span className="text-xs text-emerald-200">
-              Ασφαλή
-            </span>
-          </div>
-
-          <div className="rounded-xl bg-amber-500/10 p-3 text-center">
-            <strong className="block text-xl text-amber-300">
-              {counts.attention}
-            </strong>
-
-            <span className="text-xs text-amber-200">
-              Προσοχή
-            </span>
-          </div>
-
-          <div className="rounded-xl bg-red-500/10 p-3 text-center">
-            <strong className="block text-xl text-red-300">
-              {counts.high}
-            </strong>
-
-            <span className="text-xs text-red-200">
-              Υψηλή προσοχή
-            </span>
-          </div>
-        </div>
       </section>
 
+      <ExecutiveSummaryCard
+        summary={executiveSummary}
+        finalScore={props.score.score}
+      />
+
       <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-        <h2 className="font-bold">Με μια ματιά</h2>
+        <h2 className="font-bold">Περίληψη</h2>
 
         <p className="mt-2 text-sm leading-6 text-slate-300">
           {props.record.structured.summary}
         </p>
       </section>
 
-      <Cards
-        title="Θετικά"
-        items={
-          props.record.structured.positives
-        }
-      />
-
-      <Cards
-        title="Σημεία προσοχής"
-        items={
-          props.record.structured.attentionItems
-        }
-      />
-
-      <Cards
-        title="Πιθανά αλλεργιογόνα"
-        items={
-          props.record.structured
-            .potentialAllergens
-        }
-      />
-
       <section>
         <div className="flex items-baseline justify-between px-1">
-          <h2 className="font-bold">
-            Συστατικά
-          </h2>
+          <h2 className="font-bold">Συστατικά</h2>
 
           <span className="text-xs text-slate-400">
-            {
-              props.record.structured
-                .ingredientFindings.length
-            }{" "}
-            αναλύθηκαν
+            {insights.length} αναλύθηκαν
           </span>
         </div>
 
         <div className="mt-3 space-y-2">
-          {props.record.structured.ingredientFindings.map(
-            (finding) => {
-              const [
-                severityLabel,
-                severityClass,
-              ] =
-                severityLabels[
-                  finding.severity
-                ] ??
-                severityLabels.unknown;
-
-              const key =
-                finding.normalizedName +
-                "-" +
-                finding.title;
-
-              return (
-                <article
-                  key={key}
-                  className="rounded-xl border border-slate-800 bg-slate-900"
-                >
-                  <button
-                    type="button"
-                    onClick={() =>
-                      props.setOpen(
-                        props.open === key
-                          ? null
-                          : key,
-                      )
-                    }
-                  className="flex min-h-12 w-full items-start justify-between gap-2 px-4 py-3 text-left"
-                  >
-                    <span className="min-w-0 flex-1 break-words pr-2 text-sm font-semibold leading-tight">
-                      {finding.ingredientName}
-                    </span>
-
-                    <span
-                      className={`mt-0.5 shrink-0 rounded-full px-2 py-1 text-[11px] ${severityClass}`}
-                    >
-                      {severityLabel}
-                    </span>
-                  </button>
-
-                  {props.open === key && (
-                    <div className="border-t border-slate-800 px-4 py-3 text-sm leading-6 text-slate-300">
-                      <p className="font-semibold text-slate-200">
-                        {finding.title}
-                      </p>
-
-                      <p className="mt-1">
-                        {finding.explanation}
-                      </p>
-
-                                            {finding.sourceUrl &&
-                        React.createElement(
-                          "a",
-                          {
-                            href: finding.sourceUrl,
-                            target: "_blank",
-                            rel: "noreferrer",
-                            className:
-                              "mt-2 inline-block text-emerald-300 underline",
-                          },
-                          finding.sourceName ||
-                            "Πηγή",
-                        )}
-                    </div>
-                  )}
-                </article>
-              );
-            },
-          )}
+          {insights.map((insight) => (
+            <IngredientCard
+              key={insight.normalizedName}
+              insight={insight}
+            />
+          ))}
         </div>
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-        <h2 className="font-bold">
-          Ανάλυση βαθμολογίας
-        </h2>
-
-        {props.score.score === null ? (
-          <p className="mt-2 text-sm text-slate-400">
-            {props.score.insufficientDataReasons.join(
-              " ",
-            )}
-          </p>
-        ) : props.score.deductions.length ===
-          0 ? (
-          <p className="mt-2 text-sm text-slate-400">
-            Δεν εντοπίστηκαν αφαιρέσεις βαθμών.
-          </p>
-        ) : (
-          props.score.deductions.map(
-            (deduction) => (
-              <div
-                key={deduction.code}
-                className="mt-3"
-              >
-                <div className="flex justify-between text-sm font-semibold">
-                  <span>{deduction.title}</span>
-
-                  <span className="text-orange-300">
-                    -{deduction.points}
-                  </span>
-                </div>
-
-                <p className="mt-1 text-sm text-slate-400">
-                  {deduction.explanation}
-                </p>
-              </div>
-            ),
-          )
-        )}
-      </section>
+      <ScoreBreakdownPanel
+        score={props.score}
+        insights={insights}
+      />
 
       <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
         <h2 className="font-bold">Σύγκριση</h2>
@@ -641,25 +450,3 @@ function Result(props: {
   );
 }
 
-function Cards(props: {
-  title: string;
-  items: string[];
-}) {
-  if (props.items.length === 0) {
-    return null;
-  }
-
-  return (
-    <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <h2 className="font-bold">
-        {props.title}
-      </h2>
-
-      <ul className="mt-2 space-y-1 text-sm text-slate-300">
-        {props.items.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
-    </section>
-  );
-}

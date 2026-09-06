@@ -12,6 +12,37 @@ import {
 } from "../services/historyService";
 import type { ScoreBreakdown } from "../types";
 
+type OcrLabelType =
+  | "ingredients"
+  | "nutrition"
+  | "mixed"
+  | "unknown";
+
+// The stored history item may predate the label type field, so it is read
+// defensively. Older entries simply fall back to "unknown" and the Worker
+// keeps its previous behaviour.
+function readLabelType(
+  item: unknown,
+): OcrLabelType {
+  if (typeof item !== "object" || item === null) {
+    return "unknown";
+  }
+
+  const value = (item as Record<string, unknown>)
+    .ocrLabelType;
+
+  if (
+    value === "ingredients" ||
+    value === "nutrition" ||
+    value === "mixed" ||
+    value === "unknown"
+  ) {
+    return value;
+  }
+
+  return "unknown";
+}
+
 const insufficientScore = (
   reason: string,
   confidence: number,
@@ -52,6 +83,8 @@ export default function AnalysisRun() {
 
     const confidence = item.ocrConfidence ?? 0;
 
+    const labelType = readLabelType(item);
+
     const ingredients = normalizeIngredients(
       text,
       confidence,
@@ -86,6 +119,15 @@ export default function AnalysisRun() {
             "Δεν υπάρχει επιβεβαιωμένο κείμενο συστατικών.",
             confidence,
           ),
+          ingredientInsights: [],
+          executiveSummary: {
+            overallVerdict: "Ανεπαρκή στοιχεία",
+            safeIngredients: 0,
+            cautionIngredients: 0,
+            highImpactIngredients: 0,
+            highlights: [],
+            watchOutFor: [],
+          },
           analyzedAt: new Date().toISOString(),
           analysisVersion,
         },
@@ -109,8 +151,13 @@ export default function AnalysisRun() {
       confirmedIngredientText: text,
       normalizedIngredients: ingredients,
       ocrConfidence: confidence,
+      // Carries the OCR verdict to the Worker so the analysis step can
+      // trust a high confidence ingredient reading instead of re-judging
+      // the label from scratch.
+      ocrLabelType: labelType,
+      ocrTextLength: text.trim().length,
     })
-      .then(({ structured, score }) => {
+      .then(({ structured, score, ingredientInsights, executiveSummary }) => {
         const wasSaved = updateHistoryItem(id, {
           normalizedIngredients: ingredients,
           analysis: {
@@ -122,6 +169,8 @@ export default function AnalysisRun() {
             ocrConfidence: confidence,
             structured,
             score,
+            ingredientInsights,
+            executiveSummary,
             analyzedAt: new Date().toISOString(),
             analysisVersion: score.scoringVersion,
           },

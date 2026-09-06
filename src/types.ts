@@ -1,13 +1,19 @@
 export type ScanStatus = "known" | "unknown";
 
+/**
+ * Label verdict produced by the OCR step. Shared by the OCR result, the
+ * scan history record and the analysis request payload.
+ */
+export type OcrLabelType =
+  | "ingredients"
+  | "nutrition"
+  | "mixed"
+  | "unknown";
+
 export interface OcrResult {
   rawText: string;
   confidence: number;
-  labelType:
-    | "ingredients"
-    | "nutrition"
-    | "mixed"
-    | "unknown";
+  labelType: OcrLabelType;
   unreadableSegments: string[];
 }
 
@@ -96,6 +102,45 @@ export interface ScoreBreakdown {
   scoringVersion: string;
 }
 
+export type IngredientCategory =
+  | "preservative"
+  | "fragrance"
+  | "colorant"
+  | "humectant"
+  | "surfactant"
+  | "emollient"
+  | "antioxidant"
+  | "active"
+  | "other";
+
+export type IngredientRating = "good" | "caution" | "neutral";
+
+export type EvidenceLevel = "high" | "medium" | "low";
+
+export interface IngredientInsight {
+  name: string;
+  normalizedName: string;
+  category: IngredientCategory;
+  rating: IngredientRating;
+  scoreImpact: number;
+  shortDescription: string;
+  whyRated: string;
+  benefits: string[];
+  concerns: string[];
+  aliases: string[];
+  evidenceLevel: EvidenceLevel;
+  evidenceAvailable: boolean;
+}
+
+export interface ExecutiveSummary {
+  overallVerdict: string;
+  safeIngredients: number;
+  cautionIngredients: number;
+  highImpactIngredients: number;
+  highlights: string[];
+  watchOutFor: string[];
+}
+
 export interface ProductAnalysisRecord {
   productId: string;
   barcode: string;
@@ -105,6 +150,13 @@ export interface ProductAnalysisRecord {
   ocrConfidence: number;
   structured: StructuredAnalysis;
   score: ScoreBreakdown;
+  /**
+   * Optional because history items analyzed before this field existed
+   * don't have it. Product.tsx falls back to deriving these on the client
+   * (src/utils/ingredientInsights.ts) when they are missing.
+   */
+  ingredientInsights?: IngredientInsight[];
+  executiveSummary?: ExecutiveSummary;
   analyzedAt: string;
   analysisVersion: string;
 }
@@ -130,6 +182,7 @@ export interface ScanHistoryItem {
   productPhoto?: string;
   ocrRawText?: string;
   ocrConfidence?: number;
+  ocrLabelType?: OcrLabelType;
   userCorrectedText?: string;
   normalizedIngredients?: NormalizedIngredient[];
   analysis?: ProductAnalysisRecord;

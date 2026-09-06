@@ -15,6 +15,12 @@ import {
   type WorkerScore,
 } from "./scoring";
 import {
+  buildExecutiveSummary,
+  buildIngredientInsights,
+  type ExecutiveSummary,
+  type IngredientInsight,
+} from "./ingredientInsights";
+import {
   identifyPrompt,
   parseProductIdentity,
   type ProductIdentity,
@@ -61,7 +67,11 @@ type LabelEvaluation = {
 type JsonBody =
   | OcrResponse
   | WorkerAnalysisResult
-  | (WorkerAnalysisResult & { score: WorkerScore })
+  | (WorkerAnalysisResult & {
+      score: WorkerScore;
+      ingredientInsights: IngredientInsight[];
+      executiveSummary: ExecutiveSummary;
+    })
   | {
       status: "ok";
       service: "greenlens-ocr";
@@ -913,10 +923,26 @@ async function runAnalysis(
       result,
     );
 
+    // Explanation-only enrichment layer. It reads `result` (the AI's
+    // findings) and `score` (the Worker's own deductions) but never
+    // computes or overrides a score itself — see ingredientInsights.ts.
+    const ingredientInsights = buildIngredientInsights(
+      result,
+      score,
+    );
+
+    const executiveSummary = buildExecutiveSummary(
+      result,
+      score,
+      ingredientInsights,
+    );
+
     return json(
       {
         ...result,
         score,
+        ingredientInsights,
+        executiveSummary,
       },
       200,
       origin,
@@ -1672,14 +1698,6 @@ function evaluateLabelText(
     isNutritionTable: isNutrition,
     sectionWasSliced: section.sliced,
   };
-}
-
-// Kept for backward compatibility with existing callers.
-export function isNutritionTable(
-  value: string,
-): boolean {
-  return evaluateLabelText(value)
-    .isNutritionTable;
 }
 
 function isNutritionRejectionReason(

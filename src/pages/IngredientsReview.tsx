@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   clearOcrDraft,
@@ -7,115 +7,118 @@ import {
 } from "../services/captureDraftService";
 import { extractIngredientText } from "../../worker/ingredientText";
 
-function checkIngredientTextQuality(
-  text: string,
-): {
-  isValid: boolean;
-  warning: string | null;
-} {
-  const normalized = text.toLowerCase();
+// Reasons that describe extra noise on the label (manufacturer, website,
+// storage advice) are informational: the analysis strips them anyway.
+// Everything else blocks the flow.
+const informationalPatterns = [
+  "κατασκευαστ",
+  "ιστοσελίδ",
+  "ιστοσελιδ",
+  "website",
+  "manufacturer",
+  "distributor",
+  "αποθήκευσ",
+  "αποθηκευσ",
+  "storage",
+  "heading",
+];
 
-  // Check for URLs
-  if (
-  normalized.includes("http://") ||
-  normalized.includes("https://") ||
-  normalized.includes("www.") ||
-  normalized.includes(".com") ||
-  normalized.includes(".gr") ||
-  normalized.includes(".eu") ||
-  normalized.includes("@")
-) {
-  return {
-    isValid: true,
-    warning:
-      "Βρέθηκαν επίσης στοιχεία κατασκευαστή ή ιστοσελίδας. Θα αγνοηθούν κατά την ανάλυση.",
-  };
+function isInformationalReason(
+  reason: string,
+): boolean {
+  const normalized = reason.toLowerCase();
+
+  return informationalPatterns.some((pattern) =>
+    normalized.includes(pattern),
+  );
 }
 
-  // Check for single word
-  const words = text.trim().split(/\s+/);
-  if (words.length < 3) {
+type TextQuality = {
+  canContinue: boolean;
+  blockingReason: string | null;
+  notice: string | null;
+};
+
+// Single source of truth: the same deterministic validator the Worker uses.
+// No parallel heuristics, so the review step can never disagree with the
+// analysis step.
+function reviewTextQuality(
+  text: string,
+  confidence: number,
+): TextQuality {
+  const trimmed = text.trim();
+
+  if (trimmed.length < 12) {
     return {
-      isValid: false,
-      warning:
-        "Πάρα πολύ σύντομο κείμενο. Πρέπει να περιέχει τουλάχιστον μια λίστα συστατικών.",
+      canContinue: false,
+      blockingReason:
+        "Πάρα πολύ σύντομο κείμενο. Χρειάζεται ολόκληρη η λίστα συστατικών.",
+      notice: null,
     };
   }
 
-  // Check for marketing claims
-  if (
-    (normalized.includes("suitable for") ||
-      normalized.includes("low sodium")) &&
-    !normalized.includes("water") &&
-    !normalized.includes("νερό") &&
-    !normalized.includes("glycerin") &&
-    !normalized.includes("γλυκερίνη")
-  ) {
+  const extraction = extractIngredientText(
+    trimmed,
+    confidence,
+  );
+
+  const reasons = Array.isArray(extraction.reasons)
+    ? extraction.reasons
+    : [];
+
+  const blocking = reasons.filter(
+    (reason) => !isInformationalReason(reason),
+  );
+
+  const informational = reasons.filter(
+    isInformationalReason,
+  );
+
+  if (!extraction.isValid && blocking.length > 0) {
     return {
-      isValid: false,
-      warning:
-        "Φαίνεται ότι πρόκειται για διατροφικές ισχυρισμούς, όχι συστατικά.",
+      canContinue: false,
+      blockingReason: blocking[0],
+      notice: null,
     };
   }
 
-  // Check for storage/directions dominance
-  if (
-    (normalized.includes("cool place") ||
-      normalized.includes("store in") ||
-      normalized.includes("keep in") ||
-      normalized.includes("δροσερό") ||
-      normalized.includes("αποθηκεύστε")) &&
-    !normalized.includes(",") &&
-    !normalized.includes(";")
-  ) {
-    return {
-      isValid: false,
-      warning:
-        "Φαίνεται ότι πρόκειται για οδηγίες αποθήκευσης, όχι λίστα συστατικών.",
-    };
-  }
-
-  // Check for minimum ingredient-like content
-  const hasIngredientsMarkers =
-    normalized.includes("water") ||
-    normalized.includes("νερό") ||
-    normalized.includes("glycerin") ||
-    normalized.includes("γλυκερίνη") ||
-    normalized.includes("alcohol") ||
-    normalized.includes("αλκοόλ") ||
-    normalized.includes("oil") ||
-    normalized.includes("έλαιο") ||
-    normalized.includes("sugar") ||
-    normalized.includes("ζάχαρη") ||
-    normalized.includes("salt") ||
-    normalized.includes("αλάτι") ||
-    normalized.includes("acid") ||
-    normalized.includes("οξύ");
-
-  if (!hasIngredientsMarkers && words.length < 8) {
-    return {
-      isValid: false,
-      warning:
-        "Δεν υπάρχουν σαφή σημάδια συστατικών. Ελέγξτε ότι είναι ορατή η λίστα συστατικών.",
-    };
-  }
-
-  return { isValid: true, warning: null };
+  return {
+    canContinue: true,
+    blockingReason: null,
+    notice:
+      informational.length > 0
+        ? "Βρέθηκαν και στοιχεία εκτός λίστας συστατικών (π.χ. κατασκευαστής ή οδηγίες). Θα αγνοηθούν κατά την ανάλυση."
+        : null,
+  };
 }
 
 export default function IngredientsReview() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const draft = getOcrDraft(id);
+
   const [text, setText] = useState(() => {
     if (!draft) return "";
+
     const isolated = extractIngredientText(
       draft.result.rawText,
       draft.result.confidence,
     );
-    return isolated.ingredientText ?? draft.result.rawText;
+
+    return (
+      isolated.ingredientText?.trim() ||
+      draft.result.rawText
+    );
   });
-  const textQuality = checkIngredientTextQuality(text);
+
+  const textQuality = useMemo(
+    () =>
+      reviewTextQuality(
+        text,
+        draft?.result.confidence ?? 0,
+      ),
+    [text, draft?.result.confidence],
+  );
 
   if (!draft) {
     return (
@@ -140,11 +143,25 @@ export default function IngredientsReview() {
   }
 
   const ocrDraft = draft;
+
+  // Only a pure nutrition reading blocks the flow. A mixed label still
+  // contains the ingredient list, so the user can correct and continue.
   const nutritionOnly =
     ocrDraft.result.labelType === "nutrition";
-  const insufficient =
-    ocrDraft.result.labelType === "unknown" ||
-    text.trim().length < 12;
+
+  const canContinue =
+    !nutritionOnly &&
+    textQuality.canContinue &&
+    text.trim().length > 0;
+
+  // The model's own labelType disagrees with the deterministic check: it
+  // thought this was an ingredient label, but extractIngredientText rejected
+  // the text. Surface that mismatch so the user understands why a label
+  // that "looks right" still got blocked.
+  const modelBelievedIngredients =
+    !textQuality.canContinue &&
+    (ocrDraft.result.labelType === "ingredients" ||
+      ocrDraft.result.labelType === "mixed");
 
   function retake() {
     clearOcrDraft(id);
@@ -156,8 +173,10 @@ export default function IngredientsReview() {
   }
 
   function confirm() {
-    if (!text.trim() || nutritionOnly) return;
+    if (!canContinue) return;
+
     updateOcrDraftText(id, text.trim());
+
     navigate(
       `/product-photo?barcode=${encodeURIComponent(
         ocrDraft.barcode,
@@ -205,7 +224,8 @@ export default function IngredientsReview() {
         {nutritionOnly && (
           <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-2.5 text-xs text-amber-50">
             Εντοπίστηκε διατροφικός πίνακας, όχι
-            λίστα συστατικών.
+            λίστα συστατικών. Φωτογραφίστε την
+            περιοχή μετά τη λέξη «Συστατικά».
           </p>
         )}
 
@@ -216,19 +236,39 @@ export default function IngredientsReview() {
           </p>
         )}
 
-        {insufficient && (
-          <p className="rounded-lg border border-slate-700 bg-slate-900 p-2.5 text-xs text-slate-200">
-            Δεν υπάρχουν αρκετά στοιχεία για
-            αξιόπιστη ανάλυση.
+        {textQuality.notice && (
+          <p
+            className="rounded-lg border border-slate-700 bg-slate-900 p-2.5 text-xs text-slate-200"
+            aria-live="polite"
+          >
+            {textQuality.notice}
           </p>
         )}
 
-        {textQuality.warning && (
+        {modelBelievedIngredients && (
           <p
-            className="rounded-lg border border-red-400/40 bg-red-400/10 p-2.5 text-xs text-red-50"
+            className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-2.5 text-xs text-amber-50"
+            role="alert"
             aria-live="polite"
           >
-            {textQuality.warning}
+            Το αρχικό μοντέλο ανάγνωσης πίστεψε ότι
+            βρήκε λίστα συστατικών, αλλά ο
+            λεπτομερής έλεγχος δεν εντόπισε
+            πραγματικά συστατικά σε αυτό το κείμενο.
+            Πιθανόν φωτογραφίσατε λάθος πλευρά της
+            συσκευασίας. Φωτογραφίστε την περιοχή με
+            την ένδειξη «Συστατικά», «Ingredients» ή
+            «INCI».
+          </p>
+        )}
+
+        {textQuality.blockingReason && (
+          <p
+            className="rounded-lg border border-red-400/40 bg-red-400/10 p-2.5 text-xs text-red-50"
+            role="alert"
+            aria-live="polite"
+          >
+            {textQuality.blockingReason}
           </p>
         )}
 
@@ -246,6 +286,11 @@ export default function IngredientsReview() {
             className="mt-2 min-h-32 w-full rounded-lg border border-slate-700 bg-slate-900 p-3 text-sm leading-5"
             placeholder="Κείμενο από ετικέτα..."
           />
+          <p className="mt-1 text-xs text-slate-500">
+            Μπορείτε να διορθώσετε το κείμενο πριν
+            συνεχίσετε. Αυτό ακριβώς το κείμενο θα
+            αναλυθεί.
+          </p>
         </div>
 
         {ocrDraft.result.unreadableSegments.length > 0 && (
@@ -258,7 +303,7 @@ export default function IngredientsReview() {
           <button
             type="button"
             onClick={confirm}
-            disabled={!text.trim() || nutritionOnly}
+            disabled={!canContinue}
             className="h-11 rounded-lg bg-emerald-500 font-bold text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
             aria-live="polite"
           >

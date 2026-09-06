@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Home from "./pages/Home";
 import Scan from "./pages/Scan";
+import AddProduct from "./pages/AddProduct";
 import ProductPhoto from "./pages/ProductPhoto";
 import IngredientsPhoto from "./pages/IngredientsPhoto";
 import Product from "./pages/Product";
@@ -16,6 +17,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/scan" element={<Scan />} />
+        <Route path="/add-product" element={<AddProduct />} />
         <Route path="/ingredients-photo" element={<IngredientsPhoto />} />
         <Route path="/ingredients-review/:id" element={<IngredientsReview />} />
         <Route path="/product-photo" element={<ProductPhoto />} />

@@ -192,7 +192,7 @@ export default function Scan() {
     }
 
     navigate(
-      `/ingredients-photo?barcode=${encodeURIComponent(
+      `/add-product?barcode=${encodeURIComponent(
         cleanBarcode,
       )}`,
     );
