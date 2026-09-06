@@ -1,4 +1,5 @@
-import { apiBaseUrl, apiConfigurationError } from "../config";
+import { analysisVersion, apiBaseUrl, apiConfigurationError } from "../config";
+import { UserFacingError } from "./errors";
 import type {
   ExecutiveSummary,
   IngredientInsight,
@@ -32,7 +33,7 @@ export async function runAnalysis(request: AnalysisRequest): Promise<{
   executiveSummary: ExecutiveSummary;
 }> {
   if (apiConfigurationError) {
-    throw new Error(apiConfigurationError);
+    throw new UserFacingError(apiConfigurationError);
   }
 
   // "mixed" means a label that carries both an ingredient list and a
@@ -67,7 +68,21 @@ export async function runAnalysis(request: AnalysisRequest): Promise<{
       insufficientDataReasons: response.insufficientDataReasons,
       confidence: response.confidence,
     },
-    score: response.score,
+    // Older/mismatched Worker deployments during a rolling release, or a
+    // malformed response, might not carry a score at all — default rather
+    // than letting the UI crash trying to read fields off undefined.
+    score: response.score ?? {
+      score: null,
+      band: "insufficient_data",
+      deductions: [],
+      bonuses: [],
+      confidence: 0,
+      lowConfidenceReason: null,
+      insufficientDataReasons: [
+        "Η απάντηση του διακομιστή δεν περιείχε βαθμολογία.",
+      ],
+      scoringVersion: analysisVersion,
+    },
     // Older Worker deployments won't send these yet during a rolling
     // release, so default to empty rather than letting the UI crash.
     ingredientInsights: response.ingredientInsights ?? [],
@@ -109,7 +124,7 @@ async function requestJson<T>(
       signal: controller.signal,
     });
   } catch (error) {
-    throw new Error(
+    throw new UserFacingError(
       error instanceof DOMException && error.name === "AbortError"
         ? "Η ανάλυση καθυστέρησε υπερβολικά. Δοκιμάστε ξανά."
         : "Δεν ήταν δυνατή η σύνδεση με την υπηρεσία ανάλυσης.",
@@ -121,7 +136,7 @@ async function requestJson<T>(
   const result: unknown = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(
+    throw new UserFacingError(
       typeof result === "object" &&
         result !== null &&
         "error" in result &&

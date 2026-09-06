@@ -1,16 +1,20 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   useNavigate,
   useParams,
 } from "react-router-dom";
 import { analysisVersion } from "../config";
 import { runAnalysis } from "../services/analysisClient";
+import { UserFacingError } from "../services/errors";
 import { normalizeIngredients } from "../services/ingredientNormalizer";
 import {
   getHistoryItem,
   updateHistoryItem,
 } from "../services/historyService";
 import type { ScoreBreakdown } from "../types";
+
+const GENERIC_ANALYSIS_ERROR =
+  "Κάτι πήγε στραβά κατά την ανάλυση. Δοκιμάστε ξανά.";
 
 type OcrLabelType =
   | "ingredients"
@@ -67,7 +71,9 @@ export default function AnalysisRun() {
 
   const [error, setError] = useState("");
 
-  useEffect(() => {
+  const performAnalysis = useCallback(() => {
+    setError("");
+
     const item = getHistoryItem(id);
 
     if (!item) {
@@ -158,44 +164,68 @@ export default function AnalysisRun() {
       ocrLabelType: labelType,
       ocrTextLength: text.trim().length,
     })
-      .then(({ structured, score, ingredientInsights, executiveSummary }) => {
-        const wasSaved = updateHistoryItem(id, {
-          normalizedIngredients: ingredients,
-          analysis: {
-            productId: id,
-            barcode: item.barcode,
-            productType: structured.productType,
-            confirmedIngredientText: text,
+      .then((result) => {
+        // Guards against any unexpected shape in `result` (a malformed or
+        // partial response that slipped past analysisClient's own
+        // defaults) turning into a raw JS error shown to the user instead
+        // of the friendly message below.
+        try {
+          const { structured, score, ingredientInsights, executiveSummary } =
+            result;
+
+          const wasSaved = updateHistoryItem(id, {
             normalizedIngredients: ingredients,
-            ocrConfidence: confidence,
-            structured,
-            score,
-            ingredientInsights,
-            executiveSummary,
-            analyzedAt: new Date().toISOString(),
-            analysisVersion: score.scoringVersion,
-          },
-        });
+            analysis: {
+              productId: id,
+              barcode: item.barcode,
+              productType: structured.productType,
+              confirmedIngredientText: text,
+              normalizedIngredients: ingredients,
+              ocrConfidence: confidence,
+              structured,
+              score,
+              ingredientInsights,
+              executiveSummary,
+              analyzedAt: new Date().toISOString(),
+              analysisVersion:
+                score?.scoringVersion ?? analysisVersion,
+            },
+          });
 
-        if (!wasSaved) {
-          setError(
-            "Δεν ήταν δυνατή η αποθήκευση της ανάλυσης στη συσκευή.",
+          if (!wasSaved) {
+            setError(
+              "Δεν ήταν δυνατή η αποθήκευση της ανάλυσης στη συσκευή.",
+            );
+            return;
+          }
+
+          navigate(`/product/${id}`, {
+            replace: true,
+          });
+        } catch (processingError) {
+          console.error(
+            "analysis_run_processing_failed",
+            processingError,
           );
-          return;
+          setError(GENERIC_ANALYSIS_ERROR);
         }
-
-        navigate(`/product/${id}`, {
-          replace: true,
-        });
       })
       .catch((caughtError) => {
+        console.error(
+          "analysis_run_request_failed",
+          caughtError,
+        );
         setError(
-          caughtError instanceof Error
+          caughtError instanceof UserFacingError
             ? caughtError.message
-            : "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.",
+            : GENERIC_ANALYSIS_ERROR,
         );
       });
   }, [id, navigate]);
+
+  useEffect(() => {
+    performAnalysis();
+  }, [performAnalysis]);
 
   return (
     <main className="min-h-screen bg-canvas px-5 py-12 text-ink">
@@ -217,15 +247,30 @@ export default function AnalysisRun() {
               {error}
             </p>
 
-            <button
-              type="button"
-              onClick={() =>
-                navigate(`/product/${id}`)
-              }
-              className="mt-5 h-14 w-full rounded-xl bg-accent font-bold text-on-accent"
-            >
-              Πίσω στο προϊόν
-            </button>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/product/${id}`)
+                }
+                className="h-14 rounded-xl border border-line font-semibold text-ink-muted"
+              >
+                Πίσω στο προϊόν
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setMessage(
+                    "Προετοιμασία ανάλυσης...",
+                  );
+                  performAnalysis();
+                }}
+                className="h-14 rounded-xl bg-accent font-bold text-on-accent"
+              >
+                Δοκιμή ξανά
+              </button>
+            </div>
           </>
         ) : (
           <div

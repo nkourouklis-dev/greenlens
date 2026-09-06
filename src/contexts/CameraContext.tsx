@@ -29,14 +29,80 @@ function isScanFlowPath(pathname: string): boolean {
   );
 }
 
+export interface CapturedPhoto {
+  file: File;
+  /**
+   * Cheap, approximate sharpness signal — never a hard gate. A photo
+   * flagged blurry is still usable; the caller just gets to nudge the user
+   * toward retaking it before spending an OCR/API call on it.
+   */
+  isBlurry: boolean;
+}
+
 interface CameraContextValue {
   isActive: boolean;
   error: string;
   start: () => Promise<void>;
   stop: () => void;
   attachViewport: (node: HTMLDivElement | null) => void;
-  captureFrame: () => Promise<File | null>;
+  captureFrame: () => Promise<CapturedPhoto | null>;
   videoRef: RefObject<HTMLVideoElement | null>;
+}
+
+// Below this, a frame is flagged as likely blurry. Measures variance of the
+// gradient magnitude on a coarse grid — a sharp, in-focus label has strong
+// edges (high variance); an out-of-focus or motion-blurred shot is closer
+// to a flat gradient (low variance). Threshold picked conservatively (only
+// flags clearly soft frames) since it isn't calibrated against real device
+// cameras — tune if it proves noisy in practice.
+const BLUR_VARIANCE_THRESHOLD = 15;
+
+function estimateSharpness(
+  imageData: ImageData,
+): number {
+  const { data, width, height } = imageData;
+  const stride = Math.max(
+    1,
+    Math.floor(Math.min(width, height) / 200),
+  );
+
+  const gray = (x: number, y: number) => {
+    const i = (y * width + x) * 4;
+    return (
+      0.299 * data[i] +
+      0.587 * data[i + 1] +
+      0.114 * data[i + 2]
+    );
+  };
+
+  let sum = 0;
+  let sumSquares = 0;
+  let count = 0;
+
+  for (
+    let y = stride;
+    y < height - stride;
+    y += stride
+  ) {
+    for (
+      let x = stride;
+      x < width - stride;
+      x += stride
+    ) {
+      const gx = gray(x + 1, y) - gray(x - 1, y);
+      const gy = gray(x, y + 1) - gray(x, y - 1);
+      const magnitude = Math.sqrt(gx * gx + gy * gy);
+
+      sum += magnitude;
+      sumSquares += magnitude * magnitude;
+      count += 1;
+    }
+  }
+
+  if (count === 0) return 0;
+
+  const mean = sum / count;
+  return sumSquares / count - mean * mean;
 }
 
 const CameraContext = createContext<CameraContextValue | null>(null);
@@ -119,7 +185,7 @@ export function CameraProvider({ children }: { children: ReactNode }) {
     setIsActive(false);
   }, []);
 
-  const captureFrame = useCallback(async (): Promise<File | null> => {
+  const captureFrame = useCallback(async (): Promise<CapturedPhoto | null> => {
     const video = videoRef.current;
 
     if (!video || video.videoWidth === 0) {
@@ -169,12 +235,31 @@ export function CameraProvider({ children }: { children: ReactNode }) {
       canvas.height,
     );
 
+    // Cheap enough to run synchronously on the already-drawn frame — no
+    // extra capture or network round trip needed just to flag blur.
+    const isBlurry =
+      estimateSharpness(
+        ctx.getImageData(
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        ),
+      ) < BLUR_VARIANCE_THRESHOLD;
+
     return new Promise((resolve) => {
       canvas.toBlob(
         (blob) =>
           resolve(
             blob
-              ? new File([blob], "capture.jpg", { type: "image/jpeg" })
+              ? {
+                  file: new File(
+                    [blob],
+                    "capture.jpg",
+                    { type: "image/jpeg" },
+                  ),
+                  isBlurry,
+                }
               : null,
           ),
         "image/jpeg",

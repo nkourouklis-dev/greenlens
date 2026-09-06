@@ -264,31 +264,36 @@ export default function IngredientsReview() {
           </p>
         )}
 
-        {modelBelievedIngredients && (
-          <p
-            className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-2.5 text-xs text-amber-50"
-            role="alert"
-            aria-live="polite"
-          >
-            Το αρχικό μοντέλο ανάγνωσης πίστεψε ότι
-            βρήκε λίστα συστατικών, αλλά ο
-            λεπτομερής έλεγχος δεν εντόπισε
-            πραγματικά συστατικά σε αυτό το κείμενο.
-            Πιθανόν φωτογραφίσατε λάθος πλευρά της
-            συσκευασίας. Φωτογραφίστε την περιοχή με
-            την ένδειξη «Συστατικά», «Ingredients» ή
-            «INCI».
-          </p>
-        )}
-
         {textQuality.blockingReason && (
-          <p
+          <div
             className="rounded-lg border border-red-400/40 bg-red-400/10 p-2.5 text-xs text-red-50"
             role="alert"
             aria-live="polite"
           >
-            {textQuality.blockingReason}
-          </p>
+            <p>
+              Δεν εντοπίστηκε λίστα συστατικών.
+              Φωτογραφίστε την περιοχή με την ένδειξη
+              «Συστατικά» / «Ingredients» / «INCI».
+            </p>
+
+            <details className="mt-1.5">
+              <summary className="cursor-pointer text-[11px] text-red-100/70">
+                Λεπτομέρειες
+              </summary>
+              <div className="mt-1 space-y-1 text-[11px] leading-4 text-red-100/70">
+                {modelBelievedIngredients && (
+                  <p>
+                    Το αρχικό μοντέλο ανάγνωσης
+                    πίστεψε ότι βρήκε λίστα
+                    συστατικών, αλλά ο λεπτομερής
+                    έλεγχος δεν εντόπισε πραγματικά
+                    συστατικά σε αυτό το κείμενο.
+                  </p>
+                )}
+                <p>Λόγος: {textQuality.blockingReason}</p>
+              </div>
+            </details>
+          </div>
         )}
 
         <div>

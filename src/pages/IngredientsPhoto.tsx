@@ -136,7 +136,7 @@ export default function IngredientsPhoto() {
 
         <PhotoCapture
           title="Ετικέτα συστατικών"
-          description="Γέμισε το κάδρο με τα συστατικά."
+          description='Βεβαιωθείτε ότι φαίνεται η λίστα συστατικών (μετά τη λέξη «Συστατικά» / «Ingredients» / «INCI»), όχι οδηγίες χρήσης.'
           actionLabel="Διάβασμα ετικέτας"
           onContinue={readIngredients}
           isSaving={isSaving}

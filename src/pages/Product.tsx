@@ -295,11 +295,11 @@ export default function Product() {
         <ShareScanButton
           productName={item.productName}
           barcode={item.barcode}
-          score={item.analysis?.score.score}
-          summary={item.analysis?.structured.summary}
-          positives={item.analysis?.structured.positives}
-          attentionItems={item.analysis?.structured.attentionItems}
-          allergens={item.analysis?.structured.potentialAllergens}
+          score={item.analysis?.score?.score}
+          summary={item.analysis?.structured?.summary}
+          positives={item.analysis?.structured?.positives}
+          attentionItems={item.analysis?.structured?.attentionItems}
+          allergens={item.analysis?.structured?.potentialAllergens}
         />
 
         <div className="grid grid-cols-2 gap-3">

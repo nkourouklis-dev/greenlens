@@ -10,6 +10,7 @@ import IngredientsReview from "./pages/IngredientsReview";
 import MobileNav from "./components/MobileNav";
 import AnalysisRun from "./pages/AnalysisRun";
 import { CameraProvider } from "./contexts/CameraContext";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 export default function App() {
   return (
@@ -19,18 +20,20 @@ export default function App() {
           (and re-prompted for permission) on every step. */}
       <CameraProvider>
         <MobileNav />
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/scan" element={<Scan />} />
-          <Route path="/add-product" element={<AddProduct />} />
-          <Route path="/ingredients-photo" element={<IngredientsPhoto />} />
-          <Route path="/ingredients-review/:id" element={<IngredientsReview />} />
-          <Route path="/product-photo" element={<ProductPhoto />} />
-          <Route path="/product/:id" element={<Product />} />
-          <Route path="/product/:id/analysis" element={<AnalysisRun />} />
-          <Route path="/history" element={<History />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/scan" element={<Scan />} />
+            <Route path="/add-product" element={<AddProduct />} />
+            <Route path="/ingredients-photo" element={<IngredientsPhoto />} />
+            <Route path="/ingredients-review/:id" element={<IngredientsReview />} />
+            <Route path="/product-photo" element={<ProductPhoto />} />
+            <Route path="/product/:id" element={<Product />} />
+            <Route path="/product/:id/analysis" element={<AnalysisRun />} />
+            <Route path="/history" element={<History />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </ErrorBoundary>
       </CameraProvider>
     </BrowserRouter>
   );

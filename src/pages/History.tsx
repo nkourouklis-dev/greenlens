@@ -172,13 +172,12 @@ export default function History() {
 
                   <div className="flex flex-col items-end justify-between">
                     <span className="text-xs">
-                      {item.analysis &&
-                      item.analysis.score.score !==
-                        null ? (
+                      {item.analysis?.score?.score !=
+                      null ? (
                         <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-emerald-200">
                           {
-                            item.analysis.score
-                              .score
+                            item.analysis?.score
+                              ?.score
                           }
                         </span>
                       ) : (

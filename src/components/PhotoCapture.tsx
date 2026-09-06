@@ -28,6 +28,7 @@ export default function PhotoCapture({
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isBlurry, setIsBlurry] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -39,11 +40,12 @@ export default function PhotoCapture({
     setIsCapturing(true);
 
     try {
-      const capturedFile = await captureFrame();
-      if (!capturedFile) return;
+      const captured = await captureFrame();
+      if (!captured) return;
 
-      const nextPreviewUrl = URL.createObjectURL(capturedFile);
-      setFile(capturedFile);
+      const nextPreviewUrl = URL.createObjectURL(captured.file);
+      setFile(captured.file);
+      setIsBlurry(captured.isBlurry);
       setPreviewUrl((currentPreviewUrl) => {
         if (currentPreviewUrl) URL.revokeObjectURL(currentPreviewUrl);
         return nextPreviewUrl;
@@ -55,6 +57,7 @@ export default function PhotoCapture({
 
   function retake() {
     setFile(null);
+    setIsBlurry(false);
     setPreviewUrl((currentPreviewUrl) => {
       if (currentPreviewUrl) URL.revokeObjectURL(currentPreviewUrl);
       return null;
@@ -87,11 +90,29 @@ export default function PhotoCapture({
             <span className="mt-2 text-xs leading-5 text-ink-faint">{description}</span>
           </div>
         )}
+
+        {/* Shown while framing, before the shot is taken — the whole point
+            is to guide what gets photographed, not to explain it after the
+            fact once it's too late to reframe. */}
+        {!previewUrl && isCameraActive && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-4 pb-3 pt-8">
+            <p className="text-center text-xs font-semibold leading-5 text-white drop-shadow">
+              {description}
+            </p>
+          </div>
+        )}
       </div>
 
       {cameraError && (
         <p className="rounded-xl border border-red-400/40 bg-red-950/40 p-2.5 text-xs text-red-100">
           {cameraError}
+        </p>
+      )}
+
+      {previewUrl && isBlurry && (
+        <p className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-2.5 text-xs text-amber-50">
+          Η φωτογραφία μοιάζει θολή. Δοκιμάστε "Λήψη ξανά" κρατώντας το
+          κινητό σταθερό, ή συνεχίστε αν το κείμενο διαβάζεται καθαρά.
         </p>
       )}
 
