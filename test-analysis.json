@@ -1,0 +1,10 @@
+{
+  "productId": "test-1",
+  "barcode": "5201234567890",
+  "productType": "food",
+  "confirmedIngredientText": "Συστατικά: νερό, ζάχαρη, αλεύρι σίτου, ελαιόλαδο, αλάτι, άρωμα, γάλα σε σκόνη, βιταμίνη C. Διατροφική δήλωση ανά 100 g: Ενέργεια 2100 kJ / 500 kcal, Λιπαρά 25 g, Υδατάνθρακες 60 g, Πρωτεΐνες 6 g.",
+  "normalizedIngredients": ["νερό", "ζάχαρη", "αλεύρι σίτου", "ελαιόλαδο", "αλάτι"],
+  "ocrConfidence": 0.95,
+  "ocrLabelType": "ingredients",
+  "ocrTextLength": 240
+}

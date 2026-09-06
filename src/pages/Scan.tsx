@@ -10,22 +10,34 @@ import {
   saveHistoryItem,
 } from "../services/historyService";
 import type { ScanHistoryItem } from "../types";
+import { useCameraViewport } from "../contexts/CameraContext";
 
 export default function Scan() {
-  const videoRef = useRef<HTMLVideoElement | null>(
-    null,
-  );
+  const {
+    containerRef,
+    isActive: isCameraActive,
+    error: cameraError,
+    start: startCamera,
+    stop: stopCamera,
+    videoRef,
+  } = useCameraViewport();
+
+  const codeReaderRef =
+    useRef<BrowserMultiFormatReader | null>(null);
 
   const controlsRef =
     useRef<IScannerControls | null>(null);
 
-  const scannerStartingRef = useRef(false);
+  const decodeStartingRef = useRef(false);
   const detectedRef = useRef(false);
-  const scannerRunRef = useRef(0);
+  const scanRunRef = useRef(0);
 
   const [barcode, setBarcode] = useState("");
-  const [error, setError] = useState("");
+  const [decodeError, setDecodeError] = useState("");
 
+  // Whether the decode loop (not the camera hardware) is actively looking
+  // for a barcode. The stream itself is owned by CameraContext and keeps
+  // running across the whole flow; this only tracks the scanning loop.
   const [isScanning, setIsScanning] =
     useState(false);
 
@@ -34,46 +46,44 @@ export default function Scan() {
 
   const navigate = useNavigate();
 
-  async function startScanner() {
+  const error = cameraError || decodeError;
+
+  async function startDecoding() {
     if (
       !videoRef.current ||
-      scannerStartingRef.current ||
+      decodeStartingRef.current ||
       controlsRef.current
     ) {
       return;
     }
 
-    const scannerRun =
-      scannerRunRef.current + 1;
+    const scanRun = scanRunRef.current + 1;
 
-    scannerRunRef.current = scannerRun;
-    scannerStartingRef.current = true;
+    scanRunRef.current = scanRun;
+    decodeStartingRef.current = true;
     detectedRef.current = false;
 
-    setError("");
+    setDecodeError("");
     setBarcode("");
     setExistingItem(null);
     setIsScanning(true);
 
     try {
-      const codeReader =
-        new BrowserMultiFormatReader();
+      if (!codeReaderRef.current) {
+        codeReaderRef.current =
+          new BrowserMultiFormatReader();
+      }
 
+      // decodeFromVideoElement scans an existing, already-playing video
+      // element and never touches its MediaStream — unlike
+      // decodeFromConstraints/decodeFromStream, controls.stop() here only
+      // stops the scan loop, so the shared camera stream survives.
       const controls =
-        await codeReader.decodeFromConstraints(
-          {
-            audio: false,
-            video: {
-              facingMode: {
-                ideal: "environment",
-              },
-            },
-          },
+        await codeReaderRef.current.decodeFromVideoElement(
           videoRef.current,
           (result) => {
             if (
-              scannerRun !==
-                scannerRunRef.current ||
+              scanRun !== scanRunRef.current ||
               !result ||
               detectedRef.current
             ) {
@@ -90,58 +100,57 @@ export default function Scan() {
             setBarcode(scannedBarcode);
             detectedRef.current = true;
 
-            stopScanner();
+            stopDecoding();
             handleBarcode(scannedBarcode);
           },
         );
 
-      if (
-        scannerRun !== scannerRunRef.current
-      ) {
+      if (scanRun !== scanRunRef.current) {
         controls.stop();
         return;
       }
 
       controlsRef.current = controls;
-    } catch (scannerError) {
-      if (
-        scannerRun !== scannerRunRef.current
-      ) {
+    } catch (decodeErr) {
+      if (scanRun !== scanRunRef.current) {
         return;
       }
 
-      console.error(scannerError);
+      console.error(decodeErr);
 
-      setError(
-        "Δεν ήταν δυνατή η πρόσβαση στην κάμερα. Έλεγξε ότι έχεις δώσει άδεια στον browser.",
+      setDecodeError(
+        "Δεν ήταν δυνατή η ανάγνωση από την κάμερα.",
       );
 
       setIsScanning(false);
     } finally {
-      if (
-        scannerRun === scannerRunRef.current
-      ) {
-        scannerStartingRef.current = false;
+      if (scanRun === scanRunRef.current) {
+        decodeStartingRef.current = false;
       }
     }
   }
 
-  function stopScanner() {
-    scannerRunRef.current += 1;
-    scannerStartingRef.current = false;
+  function stopDecoding() {
+    scanRunRef.current += 1;
+    decodeStartingRef.current = false;
 
     controlsRef.current?.stop();
     controlsRef.current = null;
 
-    const stream = videoRef.current?.srcObject;
-
-    if (stream instanceof MediaStream) {
-      stream
-        .getTracks()
-        .forEach((track) => track.stop());
-    }
-
     setIsScanning(false);
+  }
+
+  // Explicit in-page toggle ("Διακοπή σάρωσης"): unlike navigating between
+  // flow steps, this is a deliberate request to turn the camera off, so it
+  // stops the actual hardware, not just the decode loop.
+  function pauseScanning() {
+    stopDecoding();
+    stopCamera();
+  }
+
+  async function resumeScanning() {
+    setDecodeError("");
+    await startCamera();
   }
 
   function handleBarcode(value: string) {
@@ -198,10 +207,20 @@ export default function Scan() {
     );
   }
 
+  // The shared camera stream is started by useCameraViewport(). Once it is
+  // ready (or if it was already running from a previous step), (re)start
+  // the decode loop. On unmount, only the decode loop is torn down — the
+  // stream itself keeps running for the next step in the flow.
   useEffect(() => {
-    startScanner();
+    if (isCameraActive) {
+      startDecoding();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCameraActive]);
 
-    return stopScanner;
+  useEffect(() => {
+    return stopDecoding;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (existingItem) {
@@ -220,7 +239,7 @@ export default function Scan() {
             onClick={() => {
               setExistingItem(null);
               setBarcode("");
-              startScanner();
+              startDecoding();
             }}
             className="mb-4 inline-flex min-h-10 items-center text-sm font-semibold text-accent-strong"
           >
@@ -318,7 +337,7 @@ export default function Scan() {
               onClick={() => {
                 setExistingItem(null);
                 setBarcode("");
-                startScanner();
+                startDecoding();
               }}
               className="h-12 w-full rounded-xl px-4 text-sm font-semibold text-ink-muted transition active:bg-surface"
             >
@@ -355,12 +374,9 @@ export default function Scan() {
         </header>
 
         <div className="relative overflow-hidden rounded-2xl border border-line bg-black shadow-lg shadow-black/20">
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            playsInline
-            className="aspect-[4/5] max-h-[50vh] w-full object-cover"
+          <div
+            ref={containerRef}
+            className="aspect-[4/5] max-h-[50vh] w-full [&>video]:h-full [&>video]:w-full [&>video]:object-cover"
           />
 
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -408,7 +424,7 @@ export default function Scan() {
 
               <button
                 type="button"
-                onClick={startScanner}
+                onClick={startDecoding}
                 className="h-11 w-full rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink-muted"
               >
                 Νέα σάρωση
@@ -475,7 +491,7 @@ export default function Scan() {
             {isScanning ? (
               <button
                 type="button"
-                onClick={stopScanner}
+                onClick={pauseScanning}
                 className="h-12 w-full rounded-xl border border-line bg-surface-muted px-5 font-semibold text-ink transition active:scale-[0.98]"
               >
                 Διακοπή σάρωσης
@@ -483,7 +499,7 @@ export default function Scan() {
             ) : (
               <button
                 type="button"
-                onClick={startScanner}
+                onClick={resumeScanning}
                 className="h-14 w-full rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98]"
               >
                 {error

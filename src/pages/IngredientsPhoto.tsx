@@ -135,7 +135,6 @@ export default function IngredientsPhoto() {
         )}
 
         <PhotoCapture
-          inputId="ingredients-photo"
           title="Ετικέτα συστατικών"
           description="Γέμισε το κάδρο με τα συστατικά."
           actionLabel="Διάβασμα ετικέτας"

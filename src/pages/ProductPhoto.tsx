@@ -87,7 +87,6 @@ export default function ProductPhoto() {
         </div>
 
         <PhotoCapture
-          inputId="product-photo"
           title="Φωτογραφία"
           description="Γέμισε το κάδρο με την μπροστινή όψη της συσκευασίας."
           actionLabel="Αποθήκευση"

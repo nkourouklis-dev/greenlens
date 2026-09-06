@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
+import { useCameraViewport } from "../contexts/CameraContext";
 
 interface PhotoCaptureProps {
-  inputId: string;
   title: string;
   description: string;
   actionLabel: string;
@@ -11,7 +11,6 @@ interface PhotoCaptureProps {
 }
 
 export default function PhotoCapture({
-  inputId,
   title,
   description,
   actionLabel,
@@ -19,8 +18,16 @@ export default function PhotoCapture({
   isSaving = false,
   error,
 }: PhotoCaptureProps) {
+  const {
+    containerRef,
+    isActive: isCameraActive,
+    error: cameraError,
+    captureFrame,
+  } = useCameraViewport();
+
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isCapturing, setIsCapturing] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -28,30 +35,84 @@ export default function PhotoCapture({
     };
   }, [previewUrl]);
 
-  function selectFile(selectedFile: File | undefined) {
-    if (!selectedFile) return;
+  async function takePhoto() {
+    setIsCapturing(true);
 
-    const nextPreviewUrl = URL.createObjectURL(selectedFile);
-    setFile(selectedFile);
+    try {
+      const capturedFile = await captureFrame();
+      if (!capturedFile) return;
+
+      const nextPreviewUrl = URL.createObjectURL(capturedFile);
+      setFile(capturedFile);
+      setPreviewUrl((currentPreviewUrl) => {
+        if (currentPreviewUrl) URL.revokeObjectURL(currentPreviewUrl);
+        return nextPreviewUrl;
+      });
+    } finally {
+      setIsCapturing(false);
+    }
+  }
+
+  function retake() {
+    setFile(null);
     setPreviewUrl((currentPreviewUrl) => {
       if (currentPreviewUrl) URL.revokeObjectURL(currentPreviewUrl);
-      return nextPreviewUrl;
+      return null;
     });
   }
 
   return (
     <div className="flex flex-col gap-3">
-      {previewUrl ? (
-        <img src={previewUrl} alt={title} className="max-h-[38vh] w-full rounded-2xl border border-line object-contain" />
-      ) : (
-        <label htmlFor={inputId} className="flex aspect-[3/4] max-h-[38vh] w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-accent/70 bg-surface px-6 py-8 text-center">
-          <span className="text-lg font-semibold text-ink">{title}</span>
-          <span className="mt-2 text-xs leading-5 text-ink-faint">{description}</span>
-          <span className="mt-4 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-on-accent">Άνοιγμα κάμερας</span>
-        </label>
+      <div className="relative aspect-[3/4] max-h-[38vh] w-full overflow-hidden rounded-2xl border-2 border-dashed border-accent/70 bg-surface">
+        {/* The shared live camera is portaled into this container. It stays
+            mounted (and the stream keeps running) even while a captured
+            frame is shown on top of it — no stream stop/restart needed to
+            "freeze" the picture between steps. */}
+        <div
+          ref={containerRef}
+          className={`h-full w-full [&>video]:h-full [&>video]:w-full [&>video]:object-cover ${previewUrl ? "invisible" : ""}`}
+        />
+
+        {previewUrl && (
+          <img
+            src={previewUrl}
+            alt={title}
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        )}
+
+        {!previewUrl && !isCameraActive && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
+            <span className="text-lg font-semibold text-ink">{title}</span>
+            <span className="mt-2 text-xs leading-5 text-ink-faint">{description}</span>
+          </div>
+        )}
+      </div>
+
+      {cameraError && (
+        <p className="rounded-xl border border-red-400/40 bg-red-950/40 p-2.5 text-xs text-red-100">
+          {cameraError}
+        </p>
       )}
-      <input id={inputId} type="file" accept="image/*" capture="environment" className="sr-only" onChange={(event) => selectFile(event.target.files?.[0])} />
-      {previewUrl && <label htmlFor={inputId} className="flex h-10 cursor-pointer items-center justify-center rounded-xl border border-line text-sm font-semibold text-ink-muted">Λήψη ξανά</label>}
+
+      {previewUrl ? (
+        <button
+          type="button"
+          onClick={retake}
+          className="flex h-10 items-center justify-center rounded-xl border border-line text-sm font-semibold text-ink-muted"
+        >
+          Λήψη ξανά
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={takePhoto}
+          disabled={!isCameraActive || isCapturing}
+          className="h-12 w-full rounded-xl bg-accent px-5 text-sm font-bold text-on-accent disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+        >
+          {isCapturing ? "Λήψη..." : "Λήψη φωτογραφίας"}
+        </button>
+      )}
 
       {/* Spacer reserving room for the fixed CTA bar below, so normal-flow
           content never ends up hidden underneath it. */}
