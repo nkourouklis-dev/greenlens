@@ -1,15 +1,12 @@
 import React from "react";
 import {
   Camera,
-  MessageCircle,
   RefreshCw,
 } from "lucide-react";
-import { useState } from "react";
 import {
   useNavigate,
   useParams,
 } from "react-router-dom";
-import { askProductQuestion } from "../services/analysisClient";
 import { getHistoryItem } from "../services/historyService";
 import {
   deriveAllergenNotice,
@@ -103,10 +100,6 @@ export default function Product() {
 
   const item = getHistoryItem(id);
 
-  const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [error, setError] = useState("");
-
   if (!item) {
     return (
       <main className="min-h-screen bg-slate-950 px-4 py-6 text-white">
@@ -141,25 +134,6 @@ export default function Product() {
     ],
     scoringVersion: "unknown",
   };
-
-  async function ask() {
-    if (!record || !question.trim()) {
-      return;
-    }
-
-    try {
-      setError("");
-      setAnswer(
-        await askProductQuestion(id, question),
-      );
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Η υπηρεσία ερωτήσεων δεν είναι διαθέσιμη.",
-      );
-    }
-  }
 
   return (
     <main className="min-h-screen bg-slate-950 px-4 py-5 text-white">
@@ -245,83 +219,6 @@ export default function Product() {
               )
             }
           />
-        )}
-
-        {record && (
-          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-            <div className="flex items-center gap-2">
-              <MessageCircle
-                size={18}
-                className="text-emerald-300"
-              />
-
-              <h2 className="font-bold">
-                Ρώτησε το GreenLens
-              </h2>
-            </div>
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              {[
-                "Γιατί πήρε αυτό το score;",
-                "Ποια συστατικά χρειάζονται προσοχή;",
-                "Υπάρχουν πιθανά αλλεργιογόνα;",
-                "Τι πληροφορίες λείπουν;",
-              ].map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() =>
-                    setQuestion(value)
-                  }
-                  className="rounded-lg border border-slate-700 px-3 py-2 text-xs"
-                >
-                  {value}
-                </button>
-              ))}
-            </div>
-
-            <label
-              htmlFor="question"
-              className="sr-only"
-            >
-              Ερώτηση για το προϊόν
-            </label>
-
-            <div className="mt-4 flex gap-2">
-              <input
-                id="question"
-                value={question}
-                onChange={(event) =>
-                  setQuestion(event.target.value)
-                }
-                placeholder="Γράψε μια ερώτηση"
-                className="min-w-0 flex-1 rounded-xl bg-slate-800 px-3 py-3 text-sm"
-              />
-
-              <button
-                type="button"
-                onClick={ask}
-                className="rounded-xl bg-emerald-500 px-3 font-bold text-slate-950"
-              >
-                Αποστολή
-              </button>
-            </div>
-
-            {error && (
-              <p
-                role="alert"
-                className="mt-3 text-sm text-red-200"
-              >
-                {error}
-              </p>
-            )}
-
-            {answer && (
-              <p className="mt-3 rounded-xl bg-emerald-400/10 p-3 text-sm leading-6 text-emerald-50">
-                {answer}
-              </p>
-            )}
-          </section>
         )}
 
         <ShareScanButton

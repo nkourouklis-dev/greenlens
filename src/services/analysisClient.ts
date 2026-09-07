@@ -224,13 +224,6 @@ export async function runAnalysis(
   };
 }
 
-export async function askProductQuestion(
-  _productId: string,
-  _question: string,
-): Promise<string> {
-  return "Η συνομιλία θα είναι διαθέσιμη όταν αποθηκευτεί με ασφάλεια η ανάλυση του προϊόντος.";
-}
-
 async function requestJson<T>(
   path: string,
   body: unknown,
