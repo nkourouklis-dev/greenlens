@@ -93,8 +93,12 @@ export function deriveIngredientInsights(
       scoreImpact: deduction ? -deduction.points : 0,
       shortDescription: finding.title,
       whyRated: finding.explanation,
-      benefits: rating === "good" ? [finding.explanation] : [],
-      concerns: rating === "caution" ? [finding.explanation] : [],
+      // Empty, not [finding.explanation]: whyRated above is already that
+      // same sentence, so repeating it here just shows it twice on the
+      // card — see worker/ingredientInsights.ts for the server-side twin
+      // of this fix.
+      benefits: [],
+      concerns: [],
       aliases: [],
       evidenceLevel: finding.evidenceType === "none" ? "low" : finding.confidence >= 0.7 ? "high" : "medium",
       evidenceAvailable: finding.evidenceType !== "none",

@@ -163,6 +163,37 @@ test("cosmetic fragrance allergens outside the EU food-14 still surface in the n
   assert.ok(notice?.labels.includes("Linalool"));
 });
 
+test("does not repeat the explanation as a concern for an unregistered ingredient", () => {
+  // Benzalkonium Chloride has no entry in worker/ingredientKnowledge.ts.
+  // Before this fix, the fallback set concerns to [finding.explanation] —
+  // the exact same sentence whyRated already shows — so the card rendered
+  // it a second time under "ΣΗΜΕΙΑ ΠΡΟΣΟΧΗΣ" for no added information.
+  const unregistered: WorkerAnalysisResult = {
+    ...base,
+    ingredientFindings: [
+      {
+        ingredientName: "Benzalkonium Chloride",
+        normalizedName: "benzalkonium chloride",
+        severity: "attention",
+        title: "Προσοχή σε αλλεργίες",
+        explanation: "Μπορεί να προκαλέσει αλλεργικές αντιδράσεις.",
+        evidenceType: "label",
+        sourceName: null,
+        sourceUrl: null,
+        confidence: 0.8,
+      },
+    ],
+  };
+
+  const score = scoreInterpretation(validText, 0.9, unregistered);
+  const insights = buildIngredientInsights(unregistered, score);
+  const insight = insights[0];
+
+  assert.equal(insight.whyRated, "Μπορεί να προκαλέσει αλλεργικές αντιδράσεις.");
+  assert.deepEqual(insight.concerns, []);
+  assert.deepEqual(insight.benefits, []);
+});
+
 test("executive summary verdict matches the score band", () => {
   const score = scoreInterpretation(validText, 0.9, base);
   const insights = buildIngredientInsights(base, score);

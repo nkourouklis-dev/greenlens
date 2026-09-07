@@ -377,10 +377,15 @@ export default function Scan() {
           </div>
         </header>
 
-        <div className="relative overflow-hidden rounded-2xl border border-line bg-black shadow-lg shadow-black/20">
+        {/* Same aspect-ratio/max-height fix as PhotoCapture.tsx: capping
+            height directly leaves width at w-full, so the box silently
+            renders wider/shorter than 4/5 on short viewports. Capping
+            width instead (50vh * 4/5) keeps it genuinely 4/5 at any
+            height, matching the border frame the barcode is aimed at. */}
+        <div className="relative mx-auto aspect-[4/5] w-full max-w-[40vh] overflow-hidden rounded-2xl border border-line bg-black shadow-lg shadow-black/20">
           <div
             ref={containerRef}
-            className="aspect-[4/5] max-h-[50vh] w-full [&>video]:h-full [&>video]:w-full [&>video]:object-cover"
+            className="h-full w-full [&>video]:h-full [&>video]:w-full [&>video]:object-cover"
           />
 
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">

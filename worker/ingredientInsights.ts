@@ -135,12 +135,15 @@ export function buildIngredientInsights(
       scoreImpact: deduction ? -deduction.points : 0,
       shortDescription: knowledge?.shortDescription ?? finding.title,
       whyRated: finding.explanation,
-      benefits:
-        knowledge?.benefits ??
-        (rating === "good" ? [finding.explanation] : []),
-      concerns:
-        knowledge?.concerns ??
-        (rating === "caution" ? [finding.explanation] : []),
+      // No fallback to [finding.explanation] here: whyRated above already
+      // *is* finding.explanation, so that fallback used to render the
+      // model's one sentence twice — once as the card body, once again
+      // under "Οφέλη"/"ΣΗΜΕΙΑ ΠΡΟΣΟΧΗΣ" — for every ingredient the static
+      // registry doesn't cover. An empty list here just means the card
+      // shows no bullets beyond whyRated, which is the correct amount of
+      // information when there's nothing extra to add.
+      benefits: knowledge?.benefits ?? [],
+      concerns: knowledge?.concerns ?? [],
       aliases: knowledge?.aliases ?? [],
       evidenceLevel: knowledge?.evidenceLevel ?? inferEvidenceLevel(finding),
       evidenceAvailable: finding.evidenceType !== "none",

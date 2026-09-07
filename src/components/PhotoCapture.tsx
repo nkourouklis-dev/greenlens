@@ -186,7 +186,17 @@ export default function PhotoCapture({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="relative aspect-[3/4] max-h-[38vh] w-full overflow-hidden rounded-2xl border-2 border-dashed border-accent/70 bg-surface">
+      {/* aspect-[3/4] only fills in the axis CSS leaves "auto" — with a
+          definite w-full and a max-height, the browser clamps height but
+          never shrinks width back down to match, so on short viewports the
+          box silently renders wider/shorter than the 3:4 it claims. That
+          matters here because captureFrame() (CameraContext.tsx) crops the
+          photo to mirror this exact box: a wrong-shaped box means the
+          photo is cropped from a different, shorter vertical slice than
+          what the dashed outline promised the user they were framing.
+          Driving the cap through max-width instead (38vh * 3/4) keeps the
+          rendered box — and so the capture — genuinely 3:4 at any height. */}
+      <div className="relative mx-auto aspect-[3/4] w-full max-w-[28.5vh] overflow-hidden rounded-2xl border-2 border-dashed border-accent/70 bg-surface">
         {/* The shared live camera is portaled into this container. It stays
             mounted (and the stream keeps running) even while a captured
             frame is shown on top of it — no stream stop/restart needed to
