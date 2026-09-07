@@ -7,6 +7,7 @@ import { analysisVersion } from "../config";
 import { runAnalysis } from "../services/analysisClient";
 import { UserFacingError } from "../services/errors";
 import { normalizeIngredients } from "../services/ingredientNormalizer";
+import { extractIngredientText } from "../../worker/ingredientText";
 import {
   getHistoryItem,
   updateHistoryItem,
@@ -97,10 +98,17 @@ export default function AnalysisRun() {
       confidence,
     );
 
-    if (
-      !text.trim() ||
-      ingredients.length === 0
-    ) {
+    // The naive comma-splitting normalizer above can come back empty even
+    // when the text itself is a valid ingredient list (e.g. OCR text
+    // missing commas between entries). extractIngredientText is the same
+    // robust, tested validator the review screen and the Worker use — it
+    // is the actual authority on whether the text is analyzable, not the
+    // size of the normalized array.
+    const isAnalyzable =
+      text.trim().length > 0 &&
+      extractIngredientText(text, confidence).isValid;
+
+    if (!isAnalyzable) {
       updateHistoryItem(id, {
         analysis: {
           productId: id,

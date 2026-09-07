@@ -8,6 +8,62 @@ interface PhotoCaptureProps {
   onContinue: (file: File) => void;
   isSaving?: boolean;
   error?: string;
+  /**
+   * Which frame overlay to show: "list" hints at lines of text (the
+   * ingredients list — usually on the back of the pack), "pack" hints at a
+   * whole product silhouette (the front-of-pack identification photo).
+   * Omitted when a step has no specific visual to show.
+   */
+  icon?: "list" | "pack";
+}
+
+// Lines-of-text glyph shown inside the frame for the ingredients step, so
+// the shape being asked for reads at a glance instead of only through text.
+function ListFrameIcon() {
+  return (
+    <svg
+      viewBox="0 0 64 64"
+      className="h-14 w-14 text-ink-faint"
+      fill="none"
+      aria-hidden
+    >
+      <rect
+        x="8"
+        y="10"
+        width="48"
+        height="44"
+        rx="4"
+        stroke="currentColor"
+        strokeWidth="2.5"
+      />
+      <line x1="16" y1="22" x2="48" y2="22" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+      <line x1="16" y1="30" x2="48" y2="30" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+      <line x1="16" y1="38" x2="40" y2="38" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+      <line x1="16" y1="46" x2="44" y2="46" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// Product-pack silhouette shown for the front-of-pack identification step.
+function PackFrameIcon() {
+  return (
+    <svg
+      viewBox="0 0 64 64"
+      className="h-14 w-14 text-ink-faint"
+      fill="none"
+      aria-hidden
+    >
+      <path
+        d="M20 12 L44 12 L48 22 L48 52 L16 52 L16 22 Z"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinejoin="round"
+      />
+      <line x1="16" y1="22" x2="48" y2="22" stroke="currentColor" strokeWidth="2.5" />
+      <line x1="24" y1="30" x2="40" y2="30" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+      <line x1="24" y1="37" x2="40" y2="37" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 export default function PhotoCapture({
@@ -17,6 +73,7 @@ export default function PhotoCapture({
   onContinue,
   isSaving = false,
   error,
+  icon,
 }: PhotoCaptureProps) {
   const {
     containerRef,
@@ -29,6 +86,7 @@ export default function PhotoCapture({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isBlurry, setIsBlurry] = useState(false);
+  const [captureError, setCaptureError] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -38,10 +96,14 @@ export default function PhotoCapture({
 
   async function takePhoto() {
     setIsCapturing(true);
+    setCaptureError(false);
 
     try {
       const captured = await captureFrame();
-      if (!captured) return;
+      if (!captured) {
+        setCaptureError(true);
+        return;
+      }
 
       const nextPreviewUrl = URL.createObjectURL(captured.file);
       setFile(captured.file);
@@ -86,8 +148,20 @@ export default function PhotoCapture({
 
         {!previewUrl && !isCameraActive && (
           <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
-            <span className="text-lg font-semibold text-ink">{title}</span>
+            {icon === "list" && <ListFrameIcon />}
+            {icon === "pack" && <PackFrameIcon />}
+            <span className="mt-2 text-lg font-semibold text-ink">{title}</span>
             <span className="mt-2 text-xs leading-5 text-ink-faint">{description}</span>
+          </div>
+        )}
+
+        {/* Faint framing guide overlaid on the live feed, showing what
+            shape the shot should be (a text list vs. a whole pack) — a
+            picture the user can match, not just a caption to read. */}
+        {!previewUrl && isCameraActive && icon && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-25">
+            {icon === "list" && <ListFrameIcon />}
+            {icon === "pack" && <PackFrameIcon />}
           </div>
         )}
 
@@ -106,6 +180,12 @@ export default function PhotoCapture({
       {cameraError && (
         <p className="rounded-xl border border-red-400/40 bg-red-950/40 p-2.5 text-xs text-red-100">
           {cameraError}
+        </p>
+      )}
+
+      {captureError && (
+        <p className="rounded-xl border border-red-400/40 bg-red-950/40 p-2.5 text-xs text-red-100">
+          Η λήψη απέτυχε. Δοκιμάστε ξανά.
         </p>
       )}
 

@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Camera,
   MessageCircle,
   RefreshCw,
 } from "lucide-react";
@@ -212,6 +213,11 @@ export default function Product() {
                 `/product/${id}/analysis`,
               )
             }
+            onRetakePhoto={() =>
+              navigate(
+                `/ingredients-photo?barcode=${encodeURIComponent(item.barcode)}`,
+              )
+            }
           />
         )}
 
@@ -336,9 +342,13 @@ function Result(props: {
   record: ProductAnalysisRecord;
   score: ScoreBreakdown;
   onReanalyze: () => void;
+  onRetakePhoto: () => void;
 }) {
   const [label, color, borderColor] =
     bands[props.score.band];
+
+  const isInsufficientData =
+    props.score.band === "insufficient_data";
 
   const insights =
     props.record.ingredientInsights ??
@@ -396,17 +406,36 @@ function Result(props: {
               </p>
             )}
 
-            <button
-              type="button"
-              onClick={props.onReanalyze}
-              className="mt-2 flex items-center gap-1 text-xs text-emerald-300"
-            >
-              <RefreshCw size={14} />
-              Νέα ανάλυση
-            </button>
+            {!isInsufficientData && (
+              <button
+                type="button"
+                onClick={props.onReanalyze}
+                className="mt-2 flex items-center gap-1 text-xs text-emerald-300"
+              >
+                <RefreshCw size={14} />
+                Νέα ανάλυση
+              </button>
+            )}
           </div>
         </div>
       </section>
+
+      {isInsufficientData && (
+        <section className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-4">
+          <p className="text-sm leading-6 text-amber-50">
+            {props.score.insufficientDataReasons.join(" ")}
+          </p>
+
+          <button
+            type="button"
+            onClick={props.onRetakePhoto}
+            className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 font-bold text-slate-950"
+          >
+            <Camera size={18} />
+            Ξαναπροσπάθησε
+          </button>
+        </section>
+      )}
 
       <ExecutiveSummaryCard
         summary={executiveSummary}

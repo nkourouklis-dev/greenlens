@@ -75,7 +75,8 @@ export default function ProductPhoto() {
           </h1>
 
           <p className="mt-1 text-xs text-ink-faint">
-            Φωτογράφισε τα ληπτικά στοιχεία του προϊόντος.
+            Φωτογράφισε τη μάρκα και το όνομα του
+            προϊόντος, για την αναγνώρισή του.
           </p>
         </div>
 
@@ -87,9 +88,10 @@ export default function ProductPhoto() {
         </div>
 
         <PhotoCapture
-          title="Φωτογραφία"
-          description="Γέμισε το κάδρο με την μπροστινή όψη της συσκευασίας."
+          title="Μπροστινή όψη"
+          description="Γέμισε το κάδρο με την μπροστινή όψη της συσκευασίας (μάρκα, όνομα προϊόντος)."
           actionLabel="Αποθήκευση"
+          icon="pack"
           onContinue={saveProduct}
           isSaving={isSaving}
           error={error}

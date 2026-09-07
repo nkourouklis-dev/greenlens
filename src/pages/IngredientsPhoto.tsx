@@ -114,11 +114,12 @@ export default function IngredientsPhoto() {
           </p>
 
           <h1 className="mt-1 text-2xl font-bold">
-            Συστατικά
+            Λίστα συστατικών
           </h1>
 
           <p className="mt-1 text-xs leading-5 text-ink-muted">
-            Φέρε κοντά την ετικέτα με καθαρό κείμενο.
+            Συνήθως στο πίσω μέρος της συσκευασίας. Φέρε
+            κοντά την ετικέτα με καθαρό κείμενο.
           </p>
         </div>
 
@@ -135,9 +136,10 @@ export default function IngredientsPhoto() {
         )}
 
         <PhotoCapture
-          title="Ετικέτα συστατικών"
-          description='Βεβαιωθείτε ότι φαίνεται η λίστα συστατικών (μετά τη λέξη «Συστατικά» / «Ingredients» / «INCI»), όχι οδηγίες χρήσης.'
+          title="Λίστα συστατικών"
+          description='Δείξε τη ΛΙΣΤΑ ΣΥΣΤΑΤΙΚΩΝ (Ingredients / INCI) — συνήθως στο πίσω μέρος της συσκευασίας.'
           actionLabel="Διάβασμα ετικέτας"
+          icon="list"
           onContinue={readIngredients}
           isSaving={isSaving}
           error={error}

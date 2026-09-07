@@ -12,6 +12,7 @@ import {
 import { isAllowedOrigin } from "./cors";
 import {
   scoreInterpretation,
+  scoringVersion,
   type WorkerScore,
 } from "./scoring";
 import {
@@ -584,6 +585,63 @@ function insufficientAnalysis(
   };
 }
 
+function insufficientScore(
+  reasons: string[],
+  ocrConfidence: number,
+): WorkerScore {
+  return {
+    score: null,
+    band: "insufficient_data",
+    deductions: [],
+    bonuses: [],
+    confidence: ocrConfidence,
+    lowConfidenceReason: null,
+    insufficientDataReasons: reasons,
+    scoringVersion,
+  };
+}
+
+// Builds the same response envelope as a successful analysis (result +
+// score + ingredientInsights + executiveSummary), just filled with
+// "insufficient data" values. Every early-return in runAnalysis must go
+// through this instead of returning insufficientAnalysis() bare — a
+// response missing `score` reads to the client as a malformed/unknown
+// response and gets replaced with a generic, unhelpful placeholder instead
+// of the specific reason computed here.
+function insufficientResponse(
+  reasons: string[] | undefined,
+  ocrConfidence: number,
+  origin: string | null,
+  requestId: string,
+): Response {
+  const result = insufficientAnalysis(reasons);
+  const score = insufficientScore(
+    result.insufficientDataReasons,
+    ocrConfidence,
+  );
+  const ingredientInsights = buildIngredientInsights(
+    result,
+    score,
+  );
+  const executiveSummary = buildExecutiveSummary(
+    result,
+    score,
+    ingredientInsights,
+  );
+
+  return json(
+    {
+      ...result,
+      score,
+      ingredientInsights,
+      executiveSummary,
+    },
+    200,
+    origin,
+    requestId,
+  );
+}
+
 function isRecord(
   value: unknown,
 ): value is Record<string, unknown> {
@@ -621,13 +679,15 @@ async function runAnalysis(
   const confirmedText =
     requestBody.confirmedIngredientText.trim();
 
-  if (
-    !confirmedText ||
-    requestBody.normalizedIngredients.length === 0
-  ) {
-    return json(
-      insufficientAnalysis(),
-      200,
+  // Only gate on the raw confirmed text here. normalizedIngredients is a
+  // client-computed convenience array (naive comma-splitting) that can be
+  // empty even when the text itself is a perfectly valid ingredient list
+  // (e.g. OCR text missing commas) — extractIngredientText below is the
+  // real, authoritative validator for that.
+  if (!confirmedText) {
+    return insufficientResponse(
+      undefined,
+      requestBody.ocrConfidence,
       origin,
       requestId,
     );
@@ -662,6 +722,14 @@ async function runAnalysis(
   )
     ? extraction.reasons
     : [];
+
+  // Send the model only the isolated ingredient block when the validator
+  // managed to isolate one (it strips marketing claims, storage/usage
+  // instructions and manufacturer noise). Falls back to the broader
+  // section text for the override path, where extraction.ingredientText is
+  // null but the text is still allowed through on other evidence.
+  const modelInputText =
+    extraction.ingredientText ?? analysisText;
 
   const nutritionOnlyRejection =
     reasons.length > 0 &&
@@ -747,15 +815,11 @@ async function runAnalysis(
       },
     );
 
-    return json(
-      insufficientAnalysis(
-        reasons.length > 0
-          ? reasons
-          : [
-              "Δεν υπάρχουν επαρκή και επιβεβαιωμένη λίστα συστατικών.",
-            ],
-      ),
-      200,
+    return insufficientResponse(
+      [
+        "Δεν εντοπίστηκε λίστα συστατικών σε αυτή τη φωτογραφία. Ξαναφωτογράφισε την πίσω πλευρά της συσκευασίας.",
+      ],
+      ocrConfidence,
       origin,
       requestId,
     );
@@ -839,7 +903,7 @@ async function runAnalysis(
     "- Return ONLY the JSON object. No commentary. No Markdown. No code fences.",
     "",
     "Confirmed ingredients:",
-    analysisText,
+    modelInputText,
   ].join("\n");
 
   try {

@@ -197,8 +197,22 @@ export function CameraProvider({ children }: { children: ReactNode }) {
     // photo that didn't match what the user framed on screen. Mirror the
     // same "cover" crop — centered, filling the displayed box — so the
     // captured photo is exactly what was visible in the preview.
-    const displayWidth = video.clientWidth || video.videoWidth;
-    const displayHeight = video.clientHeight || video.videoHeight;
+    const displayWidth = video.clientWidth;
+    const displayHeight = video.clientHeight;
+
+    // clientWidth/clientHeight read 0 when the video isn't laid out in the
+    // visible viewport yet (e.g. still attached to the off-screen fallback
+    // container). Falling back to the raw sensor size here used to
+    // silently disable the crop, so the capture no longer matched the
+    // on-screen preview at all — better to fail the capture than to
+    // produce a mismatched one.
+    if (displayWidth === 0 || displayHeight === 0) {
+      console.error("camera_capture_no_layout", {
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+      });
+      return null;
+    }
 
     const videoAspect = video.videoWidth / video.videoHeight;
     const displayAspect = displayWidth / displayHeight;
