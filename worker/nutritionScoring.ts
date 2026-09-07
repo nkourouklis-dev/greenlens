@@ -114,11 +114,14 @@ export function scoreNutrition(
     0,
   );
 
-  const bonuses: string[] = [];
+  const bonuses: WorkerScore["bonuses"] = [];
   let bonusPoints = 0;
 
   if (analysis.positives.length >= 2) {
-    bonuses.push("Πολλαπλά θετικά διατροφικά χαρακτηριστικά");
+    bonuses.push({
+      label: "Πολλαπλά θετικά διατροφικά χαρακτηριστικά",
+      points: 3,
+    });
     bonusPoints += 3;
   }
 
@@ -130,7 +133,10 @@ export function scoreNutrition(
   );
 
   if (!hasFlaggedAdditive) {
-    bonuses.push("Δεν εντοπίστηκαν προβληματικά πρόσθετα (E-numbers)");
+    bonuses.push({
+      label: "Δεν εντοπίστηκαν προβληματικά πρόσθετα (E-numbers)",
+      points: 5,
+    });
     bonusPoints += 5;
   }
 

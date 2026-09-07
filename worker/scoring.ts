@@ -27,7 +27,15 @@ export interface WorkerScore {
     evidenceRequired: boolean;
     evidenceAvailable: boolean;
   }>;
-  bonuses: string[];
+  /**
+   * Each bonus carries its own points (unlike the old string[] shape) so
+   * the UI can show the same "starting - deductions + bonuses = final"
+   * arithmetic it already shows for deductions — before this, the score
+   * breakdown panel could show e.g. "-4" total deductions next to a final
+   * score unchanged from 100, with no visible reason, whenever a bonus
+   * more than offset the deduction.
+   */
+  bonuses: Array<{ label: string; points: number }>;
   confidence: number;
   /**
    * Set when the ingredient text was accepted on shaky evidence (no
@@ -182,14 +190,15 @@ export function scoreInterpretation(
     0,
   );
 
-  const bonuses: string[] = [];
+  const bonuses: WorkerScore["bonuses"] = [];
 
   let bonusPoints = 0;
 
   if (analysis.positives.length >= 2) {
-    bonuses.push(
-      "Πολλαπλά θετικά χαρακτηριστικά",
-    );
+    bonuses.push({
+      label: "Πολλαπλά θετικά χαρακτηριστικά",
+      points: 3,
+    });
     bonusPoints += 3;
   }
 
@@ -211,9 +220,10 @@ export function scoreInterpretation(
     );
 
   if (!hasFlaggedAdditive) {
-    bonuses.push(
-      "Δεν εντοπίστηκαν προβληματικά πρόσθετα (E-numbers)",
-    );
+    bonuses.push({
+      label: "Δεν εντοπίστηκαν προβληματικά πρόσθετα (E-numbers)",
+      points: 5,
+    });
     bonusPoints += 5;
   }
 

@@ -46,6 +46,20 @@ export default function ScoreBreakdownPanel(props: {
     0,
   );
 
+  const totalBonusPoints = score.bonuses.reduce(
+    (total, bonus) => total + bonus.points,
+    0,
+  );
+
+  // score.score is always the authoritative value (clamped to 0-100
+  // server-side); this is only to decide whether to show the capped-score
+  // note below, by checking whether the clamp actually did anything.
+  const rawComputedScore =
+    STARTING_SCORE - totalPenalty + totalBonusPoints;
+
+  const wasClamped =
+    score.score !== null && rawComputedScore !== score.score;
+
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
       <h2 className="font-bold">Ανάλυση βαθμολογίας</h2>
@@ -92,12 +106,46 @@ export default function ScoreBreakdownPanel(props: {
         </span>
       </div>
 
+      {score.bonuses.length > 0 && (
+        <>
+          <div className="mt-3 divide-y divide-slate-800 border-t border-slate-800 pt-1">
+            {score.bonuses.map((bonus) => (
+              <div
+                key={bonus.label}
+                className="flex items-baseline justify-between gap-2 py-2 text-sm font-semibold"
+              >
+                <span className="min-w-0 truncate text-slate-200">
+                  {bonus.label}
+                </span>
+
+                <span className="shrink-0 text-emerald-300">
+                  +{bonus.points}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-1 flex items-center justify-between border-t border-slate-800 pt-3 text-sm">
+            <span className="text-slate-400">Σύνολο μπόνους</span>
+            <span className="font-semibold text-emerald-300">
+              +{totalBonusPoints}
+            </span>
+          </div>
+        </>
+      )}
+
       <div className="mt-2 flex items-center justify-between text-base">
         <span className="font-bold text-slate-100">Τελική βαθμολογία</span>
         <span className="font-bold text-emerald-300">
           {score.score} / 100
         </span>
       </div>
+
+      {wasClamped && (
+        <p className="mt-1 text-xs text-slate-500">
+          Η βαθμολογία περιορίζεται στο εύρος 0-100.
+        </p>
+      )}
     </section>
   );
 }

@@ -86,6 +86,11 @@ export interface ScoreDeduction {
   evidenceAvailable: boolean;
 }
 
+export interface ScoreBonus {
+  label: string;
+  points: number;
+}
+
 export interface ScoreBreakdown {
   score: number | null;
   band:
@@ -96,7 +101,7 @@ export interface ScoreBreakdown {
     | "high_attention"
     | "insufficient_data";
   deductions: ScoreDeduction[];
-  bonuses: string[];
+  bonuses: ScoreBonus[];
   confidence: number;
   /**
    * Set when the ingredient text was accepted on shaky evidence (no

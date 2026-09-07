@@ -138,7 +138,7 @@ test("does not add safety bonus when something is high_attention", () => {
   });
 
   assert.ok(
-    !result.bonuses.some((bonus) => bonus.includes("όρια ασφαλείας")),
+    !result.bonuses.some((bonus) => bonus.label.includes("όρια ασφαλείας")),
     "did not expect the no-deviation safety bonus",
   );
 });

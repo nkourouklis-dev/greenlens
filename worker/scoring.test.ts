@@ -190,9 +190,30 @@ test("does not add the additive bonus when an E-number is flagged", () => {
 
   assert.ok(
     !result.bonuses.some((bonus) =>
-      bonus.includes("πρόσθετα"),
+      bonus.label.includes("πρόσθετα"),
     ),
     "did not expect the additive-free bonus",
+  );
+});
+
+test("bonuses carry their own points", () => {
+  const result = scoreInterpretation(
+    validText,
+    0.9,
+    {
+      ...base,
+      positives: ["a", "b"],
+      ingredientFindings: [attentionFinding],
+    },
+  );
+
+  assert.ok(
+    result.bonuses.every(
+      (bonus) =>
+        typeof bonus.label === "string" &&
+        typeof bonus.points === "number" &&
+        bonus.points > 0,
+    ),
   );
 });
 

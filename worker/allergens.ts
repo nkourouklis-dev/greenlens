@@ -260,6 +260,71 @@ const ALLERGEN_GROUPS: AllergenGroup[] = [
   },
 ];
 
+/**
+ * The 26 fragrance substances EU cosmetics regulation (1223/2009, Annex III)
+ * requires labelling by name above a concentration threshold — the
+ * cosmetics-world counterpart to the 14 food allergen groups above. Unlike
+ * food allergens, these are labelled by their INCI (Latin-script) name
+ * everywhere in the EU regardless of local language, so patterns are
+ * English/Latin only.
+ *
+ * This exists so `addDeclaredAllergens` never has to trust an arbitrary
+ * AI-supplied name as "an official EU allergen" — see the regression this
+ * guards against: an AI once put "Benzalkonium Chloride" (an antiseptic,
+ * not a legally designated allergen) in `potentialAllergens`, and the old
+ * unconditional raw-name fallback displayed it as one.
+ */
+// Order matters: "cinnamal" alone is a word-boundary substring of both
+// "amyl cinnamal" and "hexyl cinnamal", so those two more specific
+// compounds must be checked first or their text would wrongly match the
+// bare "Cinnamal" entry instead.
+const FRAGRANCE_ALLERGENS: Array<{ label: string; patterns: string[] }> = [
+  { label: "Amyl Cinnamal", patterns: ["amyl cinnamal", "amylcinnamaldehyde"] },
+  { label: "Hexyl Cinnamal", patterns: ["hexyl cinnamal", "hexylcinnamaldehyde", "hexyl cinnamic aldehyde"] },
+  { label: "Amylcinnamyl Alcohol", patterns: ["amylcinnamyl alcohol"] },
+  { label: "Anise Alcohol", patterns: ["anise alcohol", "anisyl alcohol"] },
+  { label: "Benzyl Alcohol", patterns: ["benzyl alcohol"] },
+  { label: "Benzyl Benzoate", patterns: ["benzyl benzoate"] },
+  { label: "Benzyl Cinnamate", patterns: ["benzyl cinnamate"] },
+  { label: "Benzyl Salicylate", patterns: ["benzyl salicylate"] },
+  { label: "Cinnamal", patterns: ["cinnamal", "cinnamaldehyde"] },
+  { label: "Cinnamyl Alcohol", patterns: ["cinnamyl alcohol"] },
+  { label: "Citral", patterns: ["citral"] },
+  { label: "Citronellol", patterns: ["citronellol"] },
+  { label: "Coumarin", patterns: ["coumarin"] },
+  { label: "Eugenol", patterns: ["eugenol"] },
+  { label: "Farnesol", patterns: ["farnesol"] },
+  { label: "Geraniol", patterns: ["geraniol"] },
+  { label: "Hydroxycitronellal", patterns: ["hydroxycitronellal"] },
+  {
+    label: "Hydroxyisohexyl 3-Cyclohexene Carboxaldehyde (HICC)",
+    patterns: ["hydroxyisohexyl 3-cyclohexene carboxaldehyde", "hydroxyisohexyl cyclohexene carboxaldehyde", "lyral"],
+  },
+  { label: "Isoeugenol", patterns: ["isoeugenol"] },
+  { label: "Limonene", patterns: ["limonene", "d-limonene"] },
+  { label: "Linalool", patterns: ["linalool"] },
+  { label: "Methyl 2-Octynoate", patterns: ["methyl 2-octynoate", "methyl heptine carbonate"] },
+  { label: "Alpha-Isomethyl Ionone", patterns: ["alpha-isomethyl ionone", "alpha isomethyl ionone"] },
+  { label: "Evernia Furfuracea Extract (Treemoss)", patterns: ["evernia furfuracea", "treemoss"] },
+  { label: "Evernia Prunastri Extract (Oakmoss)", patterns: ["evernia prunastri", "oakmoss"] },
+  {
+    label: "Butylphenyl Methylpropional (Lilial)",
+    patterns: ["butylphenyl methylpropional", "butylphenyl methylpropionaldehyde", "lilial"],
+  },
+];
+
+export function matchFragranceAllergen(text: string): string | null {
+  const normalized = normalizeForMatching(text);
+
+  for (const substance of FRAGRANCE_ALLERGENS) {
+    if (matchesAny(normalized, substance.patterns)) {
+      return substance.label;
+    }
+  }
+
+  return null;
+}
+
 /** Wording that means "allergy/intolerance", the only concern this layer neutralises. */
 const ALLERGY_KEYWORDS = [
   "αλλεργ",
@@ -316,11 +381,9 @@ const REAL_CONCERN_KEYWORDS = [
 
 export interface AllergenNotice {
   /**
-   * One of the 14 food groups for a matched entry, or the accent-stripped
-   * name itself for an AI-declared allergen this registry doesn't
-   * recognise (e.g. a cosmetic fragrance allergen like Limonene) — kept so
-   * that information is never silently dropped, only ever relocated into
-   * this one notice.
+   * One of the 14 food group keys for a matched food allergen, or the
+   * accent-stripped label for a matched EU cosmetic fragrance allergen
+   * (see FRAGRANCE_ALLERGENS) — never an arbitrary, unverified name.
    */
   keys: string[];
   labels: string[];
@@ -470,10 +533,16 @@ export function classifyAllergenFindings<F extends AllergenFindingLike>(
 /**
  * Records every name the AI (or the ingredient text itself) already calls
  * an allergen. A name matching one of the 14 EU food groups is folded into
- * that group; anything else — a cosmetic fragrance allergen such as
- * Limonene or Linalool, which EU cosmetics law requires labelling by its
- * own name rather than a group — is kept verbatim under its own key, so
- * declaring it is never silently lost.
+ * that group; a name matching one of the 26 EU cosmetic fragrance
+ * allergens is kept under its own label.
+ *
+ * Anything matching *neither* list is dropped, deliberately — the AI's
+ * `potentialAllergens` field isn't reliably restricted to actual legal
+ * allergens (it has been observed containing things like "Benzalkonium
+ * Chloride", an antiseptic with irritant potential but not an EU-declared
+ * allergen), so treating any unmatched name as "an officially recognised
+ * EU allergen" — which the notice explicitly claims — would be a false
+ * regulatory claim, not just a missed one.
  */
 function addDeclaredAllergens(
   groups: Map<string, string>,
@@ -493,10 +562,10 @@ function addDeclaredAllergens(
       continue;
     }
 
-    const key = normalizeForMatching(trimmed);
+    const fragranceLabel = matchFragranceAllergen(trimmed);
 
-    if (!groups.has(key)) {
-      groups.set(key, trimmed);
+    if (fragranceLabel) {
+      groups.set(normalizeForMatching(fragranceLabel), fragranceLabel);
     }
   }
 }
@@ -532,12 +601,12 @@ function buildNotice(groups: Map<string, string>): AllergenNotice | null {
  * Builds the notice alone, for callers that only have names to read and
  * nothing to reclassify (legacy records rendered on the client).
  *
- * `candidateNames` is matched group-only (safe for arbitrary ingredient or
- * nutrient names — a name that isn't actually one of the 14 EU groups is
- * structurally guaranteed to be ignored). `declaredNames` additionally
- * accepts the raw-name fallback, so pass only names the AI already flagged
- * as an allergen there (e.g. `potentialAllergens`) — passing arbitrary
- * ingredient names through it would surface "Νερό" as an allergen.
+ * Both `candidateNames` and `declaredNames` are matched only against the 14
+ * EU food groups and the 26 EU fragrance allergens — never trusted as-is —
+ * so either can safely be given arbitrary ingredient/nutrient names (e.g. an
+ * ordinary ingredient like "Νερό" is structurally guaranteed to be ignored).
+ * They're kept as two parameters only so callers can be explicit about
+ * which list a name came from.
  */
 export function buildAllergenNotice(
   candidateNames: string[],

@@ -5,6 +5,7 @@ import {
   classifyAllergenFindings,
   isAllergenDeclarationOnly,
   matchAllergenGroup,
+  matchFragranceAllergen,
   withoutAllergenOnlyItems,
 } from "./allergens";
 
@@ -196,6 +197,29 @@ test("keeps a cosmetic fragrance allergen outside the food-14 by its own name", 
   );
 
   assert.deepEqual(result.notice?.labels, ["Limonene", "Linalool"]);
+});
+
+test("does not claim an arbitrary AI-flagged name is an official EU allergen", () => {
+  // Regression: the AI once put "Benzalkonium Chloride" (an antiseptic,
+  // not a legally designated EU allergen) into potentialAllergens, and the
+  // old unconditional raw-name fallback displayed it in the "Επίσημα
+  // αναγνωρισμένα αλλεργιογόνα της ΕΕ" notice as if it were one.
+  const result = classifyAllergenFindings(
+    [finding({ ingredientName: "Σύκο", normalizedName: "fig", severity: "info" })],
+    displayName,
+    ["Benzalkonium Chloride"],
+  );
+
+  assert.equal(result.notice, null);
+});
+
+test("recognises EU fragrance allergens beyond Limonene/Linalool", () => {
+  assert.equal(matchFragranceAllergen("Hexyl Cinnamal"), "Hexyl Cinnamal");
+  assert.equal(matchFragranceAllergen("Lyral"), "Hydroxyisohexyl 3-Cyclohexene Carboxaldehyde (HICC)");
+  assert.equal(matchFragranceAllergen("Lilial"), "Butylphenyl Methylpropional (Lilial)");
+  assert.equal(matchFragranceAllergen("Oakmoss extract"), "Evernia Prunastri Extract (Oakmoss)");
+  assert.equal(matchFragranceAllergen("Benzalkonium Chloride"), null);
+  assert.equal(matchFragranceAllergen("Ζάχαρη"), null);
 });
 
 test("does not duplicate a fragrance allergen already matched as a food group", () => {

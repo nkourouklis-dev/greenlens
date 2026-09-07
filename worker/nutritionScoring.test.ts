@@ -135,7 +135,7 @@ test("does not add additive bonus when an E-number is flagged", () => {
   });
 
   assert.ok(
-    !result.bonuses.some((bonus) => bonus.includes("πρόσθετα")),
+    !result.bonuses.some((bonus) => bonus.label.includes("πρόσθετα")),
     "did not expect the additive-free bonus",
   );
 });

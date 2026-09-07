@@ -104,11 +104,14 @@ export function scoreChemicalComposition(
     0,
   );
 
-  const bonuses: string[] = [];
+  const bonuses: WorkerScore["bonuses"] = [];
   let bonusPoints = 0;
 
   if (analysis.positives.length >= 2) {
-    bonuses.push("Πολλαπλά θετικά χαρακτηριστικά σύστασης");
+    bonuses.push({
+      label: "Πολλαπλά θετικά χαρακτηριστικά σύστασης",
+      points: 3,
+    });
     bonusPoints += 3;
   }
 
@@ -117,7 +120,10 @@ export function scoreChemicalComposition(
   );
 
   if (!hasHighAttention) {
-    bonuses.push("Δεν εντοπίστηκαν σοβαρές αποκλίσεις από όρια ασφαλείας");
+    bonuses.push({
+      label: "Δεν εντοπίστηκαν σοβαρές αποκλίσεις από όρια ασφαλείας",
+      points: 5,
+    });
     bonusPoints += 5;
   }
 
