@@ -57,7 +57,10 @@ interface CameraContextValue {
 // cameras — tune if it proves noisy in practice.
 const BLUR_VARIANCE_THRESHOLD = 15;
 
-function estimateSharpness(
+// Exported so PhotoCapture.tsx can reuse the same gradient-variance metric
+// for its live "too far to read" framing hint — same signal, sampled more
+// often and at lower resolution while the user is still aiming.
+export function estimateSharpness(
   imageData: ImageData,
 ): number {
   const { data, width, height } = imageData;
@@ -155,6 +158,52 @@ function logCaptureDebug(
   }
 }
 
+// Highest-resolution attempt first, then a widely-supported fallback, then
+// no resolution constraint at all (today's behaviour) as a last resort.
+// "ideal" constraints don't normally throw even when unmet — the browser
+// just picks the closest supported resolution — but a small, defensive
+// staircase costs nothing and protects against stricter browsers/devices
+// that do reject a constraint they can't satisfy.
+const CAMERA_CONSTRAINT_ATTEMPTS: MediaStreamConstraints[] = [
+  {
+    audio: false,
+    video: {
+      facingMode: { ideal: "environment" },
+      width: { ideal: 3840 },
+      height: { ideal: 2160 },
+    },
+  },
+  {
+    audio: false,
+    video: {
+      facingMode: { ideal: "environment" },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+    },
+  },
+  {
+    audio: false,
+    video: { facingMode: { ideal: "environment" } },
+  },
+];
+
+async function requestCameraStream(): Promise<MediaStream> {
+  let lastError: unknown = null;
+
+  for (const constraints of CAMERA_CONSTRAINT_ATTEMPTS) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (caughtError) {
+      lastError = caughtError;
+    }
+  }
+
+  throw (
+    lastError ??
+    new Error("Δεν ήταν δυνατή η πρόσβαση στην κάμερα.")
+  );
+}
+
 const CameraContext = createContext<CameraContextValue | null>(null);
 
 export function CameraProvider({ children }: { children: ReactNode }) {
@@ -197,12 +246,20 @@ export function CameraProvider({ children }: { children: ReactNode }) {
     const attempt = (async () => {
       setError("");
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { facingMode: { ideal: "environment" } },
-        });
+        const stream = await requestCameraStream();
 
         streamRef.current = stream;
+
+        // Diagnostic-only: confirms what resolution the browser actually
+        // granted, since "ideal" constraints are a request, not a
+        // guarantee — useful to tell "we asked for 4K and got it" apart
+        // from "the device capped us lower" when debugging OCR quality.
+        const settings = stream.getVideoTracks()[0]?.getSettings();
+        console.info("camera_stream_settings", {
+          width: settings?.width ?? null,
+          height: settings?.height ?? null,
+          facingMode: settings?.facingMode ?? null,
+        });
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;

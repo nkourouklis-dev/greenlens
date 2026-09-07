@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useCameraViewport } from "../contexts/CameraContext";
+import { useEffect, useRef, useState } from "react";
+import { estimateSharpness, useCameraViewport } from "../contexts/CameraContext";
 
 interface PhotoCaptureProps {
   title: string;
@@ -66,6 +66,15 @@ function PackFrameIcon() {
   );
 }
 
+// Below this, the live frame is treated as too flat/empty to contain
+// readable text at this distance — most likely the label isn't filling the
+// frame yet. Deliberately conservative (only flags a clearly sparse frame)
+// since, like BLUR_VARIANCE_THRESHOLD in CameraContext.tsx, it isn't
+// calibrated against real device cameras — tune if it proves noisy.
+const LIVE_FAR_VARIANCE_THRESHOLD = 4;
+const LIVE_FRAMING_SAMPLE_INTERVAL_MS = 400;
+const LIVE_FRAMING_SAMPLE_SIZE = 96;
+
 export default function PhotoCapture({
   title,
   description,
@@ -80,6 +89,7 @@ export default function PhotoCapture({
     isActive: isCameraActive,
     error: cameraError,
     captureFrame,
+    videoRef,
   } = useCameraViewport();
 
   const [file, setFile] = useState<File | null>(null);
@@ -87,12 +97,60 @@ export default function PhotoCapture({
   const [isCapturing, setIsCapturing] = useState(false);
   const [isBlurry, setIsBlurry] = useState(false);
   const [captureError, setCaptureError] = useState(false);
+  const [seemsTooFar, setSeemsTooFar] = useState(false);
+  const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  // Live, non-blocking "you're probably too far away" hint while framing a
+  // text-heavy shot (the ingredients list) — only a nudge, never a gate.
+  // Samples the live video at low resolution on an interval and reuses the
+  // same edge-density metric CameraContext.tsx computes once at capture
+  // time for blur, just applied continuously and more cheaply here.
+  useEffect(() => {
+    if (icon !== "list" || !isCameraActive || previewUrl) {
+      setSeemsTooFar(false);
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      const video = videoRef.current;
+
+      if (!video || video.videoWidth === 0 || video.readyState < 2) {
+        return;
+      }
+
+      if (!sampleCanvasRef.current) {
+        sampleCanvasRef.current = document.createElement("canvas");
+      }
+
+      const canvas = sampleCanvasRef.current;
+      const aspect = video.videoWidth / video.videoHeight;
+
+      canvas.width = LIVE_FRAMING_SAMPLE_SIZE;
+      canvas.height = Math.max(
+        1,
+        Math.round(LIVE_FRAMING_SAMPLE_SIZE / aspect),
+      );
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const density = estimateSharpness(
+        ctx.getImageData(0, 0, canvas.width, canvas.height),
+      );
+
+      setSeemsTooFar(density < LIVE_FAR_VARIANCE_THRESHOLD);
+    }, LIVE_FRAMING_SAMPLE_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [icon, isCameraActive, previewUrl, videoRef]);
 
   async function takePhoto() {
     setIsCapturing(true);
@@ -172,6 +230,17 @@ export default function PhotoCapture({
           <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-4 pb-3 pt-8">
             <p className="text-center text-xs font-semibold leading-5 text-white drop-shadow">
               {description}
+            </p>
+          </div>
+        )}
+
+        {/* Live, best-effort distance nudge — see the effect above for how
+            it's computed. Placed at the top since the bottom is already the
+            description banner. */}
+        {!previewUrl && isCameraActive && seemsTooFar && (
+          <div className="pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-black/70 to-transparent px-4 pb-8 pt-3">
+            <p className="text-center text-xs font-semibold leading-5 text-white drop-shadow">
+              Πλησίασε περισσότερο ώστε το κείμενο να γεμίζει το πλαίσιο
             </p>
           </div>
         )}

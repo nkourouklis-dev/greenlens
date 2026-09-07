@@ -73,6 +73,16 @@ import {
 type AzureVisionEnvironment = Env & {
   AZURE_VISION_ENDPOINT: string;
   AZURE_VISION_KEY: string;
+  /**
+   * Optional single-language hint for Azure's Read OCR (e.g. "el", "en").
+   * Left unset by default: Azure auto-detects language per line when no
+   * hint is given, which is what GreenLens labels need since they mix
+   * Greek copy with Latin/English INCI ingredient names in the same
+   * photo — forcing one language would very likely make the *other*
+   * script read worse, not better. Only set this if testing on real
+   * labels shows auto-detect is actually the weaker option.
+   */
+  AZURE_VISION_LANGUAGE?: string;
 };
 
 const visionModel =
@@ -362,6 +372,7 @@ async function runOcr(
         image,
         azureEnv.AZURE_VISION_ENDPOINT,
         azureEnv.AZURE_VISION_KEY,
+        azureEnv.AZURE_VISION_LANGUAGE,
       );
 
     const evaluation =

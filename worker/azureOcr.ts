@@ -21,6 +21,11 @@ export async function extractWithAzureOcr(
   image: File,
   endpoint: string,
   apiKey: string,
+  // Optional single-language hint. Omitted by default so Azure keeps
+  // auto-detecting per line — see the AZURE_VISION_LANGUAGE comment in
+  // worker/index.ts for why forcing one language is risky on labels that
+  // mix Greek copy with Latin/English INCI names.
+  language?: string,
 ): Promise<OcrResponse> {
   const normalizedEndpoint =
     endpoint.trim().replace(/\/+$/, "");
@@ -37,11 +42,16 @@ export async function extractWithAzureOcr(
     );
   }
 
+  const normalizedLanguage = language?.trim();
+
   const requestUrl =
     `${normalizedEndpoint}` +
     "/computervision/imageanalysis:analyze" +
     `?api-version=${AZURE_API_VERSION}` +
-    "&features=read";
+    "&features=read" +
+    (normalizedLanguage
+      ? `&language=${encodeURIComponent(normalizedLanguage)}`
+      : "");
 
   const controller = new AbortController();
 

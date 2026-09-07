@@ -6,7 +6,11 @@ const HISTORY_KEY =
 const MAX_STORAGE_IMAGE_SIZE = 800;
 const STORAGE_IMAGE_QUALITY = 0.55;
 
-const MAX_OCR_IMAGE_SIZE = 2200;
+// Raised from 2200 alongside the higher-resolution camera capture request
+// (CameraContext.tsx) — a bottleneck here would just re-discard the detail
+// the higher-res capture now provides, defeating that fix for small print
+// like ingredient lists.
+const MAX_OCR_IMAGE_SIZE = 3200;
 const OCR_IMAGE_QUALITY = 0.9;
 
 const MAX_HISTORY_ITEMS = 20;
