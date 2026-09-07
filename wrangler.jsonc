@@ -6,6 +6,13 @@
   "ai": {
     "binding": "AI"
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "greenlens-db",
+      "database_id": "e0501454-1e29-448e-9c05-217adf1958b7"
+    }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
