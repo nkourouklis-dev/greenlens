@@ -196,6 +196,13 @@ export default function PhotoCapture({
         </p>
       )}
 
+      {previewUrl && (
+        <p className="text-center text-xs font-semibold text-ink-muted">
+          Αυτή ακριβώς η φωτογραφία θα σταλεί για ανάλυση. Ελέγξτε την πριν
+          συνεχίσετε.
+        </p>
+      )}
+
       {previewUrl ? (
         <button
           type="button"

@@ -48,6 +48,17 @@ export default function IngredientsPhoto() {
         prepareImageForOcr(file),
       ]);
 
+      // Ground truth for what is actually sent for OCR — paste
+      // ocrImageDataUrl into a browser address bar to view the exact
+      // bytes leaving the client, independent of what OCR reports back.
+      console.info("ingredients_ocr_upload_debug", {
+        productId,
+        barcode,
+        sourceFileSizeBytes: file.size,
+        sourceFileType: file.type,
+        ocrImageDataUrl: ocrImage,
+      });
+
       saveIngredientsDraft(
         barcode,
         storageImage,

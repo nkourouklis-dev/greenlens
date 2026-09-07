@@ -105,6 +105,56 @@ function estimateSharpness(
   return sumSquares / count - mean * mean;
 }
 
+// Downscaled thumbnail of exactly what was drawn to the capture canvas,
+// logged alongside the geometry that produced it. This is the ground
+// truth for "what did the camera actually capture" — independent of what
+// OCR reports afterwards, so a bad OCR read can be told apart from a bad
+// capture.
+const CAPTURE_DEBUG_THUMBNAIL_WIDTH = 240;
+
+function logCaptureDebug(
+  sourceCanvas: HTMLCanvasElement,
+  geometry: {
+    videoWidth: number;
+    videoHeight: number;
+    displayWidth: number;
+    displayHeight: number;
+    sourceX: number;
+    sourceY: number;
+    sourceWidth: number;
+    sourceHeight: number;
+  },
+): void {
+  try {
+    const thumbnailHeight = Math.round(
+      (CAPTURE_DEBUG_THUMBNAIL_WIDTH * sourceCanvas.height) /
+        sourceCanvas.width,
+    );
+
+    const thumbnailCanvas = document.createElement("canvas");
+    thumbnailCanvas.width = CAPTURE_DEBUG_THUMBNAIL_WIDTH;
+    thumbnailCanvas.height = thumbnailHeight;
+
+    const thumbnailCtx = thumbnailCanvas.getContext("2d");
+    thumbnailCtx?.drawImage(
+      sourceCanvas,
+      0,
+      0,
+      CAPTURE_DEBUG_THUMBNAIL_WIDTH,
+      thumbnailHeight,
+    );
+
+    console.info("camera_capture_debug", {
+      ...geometry,
+      capturedWidth: sourceCanvas.width,
+      capturedHeight: sourceCanvas.height,
+      thumbnailDataUrl: thumbnailCanvas.toDataURL("image/jpeg", 0.6),
+    });
+  } catch (loggingError) {
+    console.error("camera_capture_debug_failed", loggingError);
+  }
+}
+
 const CameraContext = createContext<CameraContextValue | null>(null);
 
 export function CameraProvider({ children }: { children: ReactNode }) {
@@ -188,7 +238,16 @@ export function CameraProvider({ children }: { children: ReactNode }) {
   const captureFrame = useCallback(async (): Promise<CapturedPhoto | null> => {
     const video = videoRef.current;
 
-    if (!video || video.videoWidth === 0) {
+    // HAVE_CURRENT_DATA (2): the element has decoded at least one frame at
+    // the current playback position. Below that, drawImage() would read a
+    // black/blank or stale buffer instead of what's actually on screen.
+    if (!video || video.videoWidth === 0 || video.readyState < 2) {
+      console.error("camera_capture_not_ready", {
+        hasVideo: Boolean(video),
+        videoWidth: video?.videoWidth ?? 0,
+        videoHeight: video?.videoHeight ?? 0,
+        readyState: video?.readyState ?? -1,
+      });
       return null;
     }
 
@@ -260,6 +319,21 @@ export function CameraProvider({ children }: { children: ReactNode }) {
           canvas.height,
         ),
       ) < BLUR_VARIANCE_THRESHOLD;
+
+    // Diagnostic-only: proves what pixels actually reached the canvas,
+    // independent of what the OCR step later reports back. Paste
+    // thumbnailDataUrl into a browser address bar to view it directly —
+    // it's the exact crop drawn above, just downscaled for log size.
+    logCaptureDebug(canvas, {
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
+      displayWidth,
+      displayHeight,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+    });
 
     return new Promise((resolve) => {
       canvas.toBlob(
