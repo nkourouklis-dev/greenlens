@@ -55,7 +55,7 @@ export default function ShareScanButton({
 
     bullets("Θετικά:", positives);
     bullets("Προσοχή:", attentionItems);
-    bullets("Πιθανά αλλεργιογόνα:", allergens);
+    bullets("Περιέχει αλλεργιογόνα:", allergens);
 
     if (barcode?.trim()) {
       lines.push("", `Barcode: ${barcode.trim()}`);

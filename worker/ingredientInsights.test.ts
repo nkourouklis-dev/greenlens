@@ -4,6 +4,7 @@ import {
   buildExecutiveSummary,
   buildIngredientInsights,
 } from "./ingredientInsights";
+import { classifyAllergenFindings } from "./allergens";
 import { scoreInterpretation } from "./scoring";
 import type { WorkerAnalysisResult } from "./analysis";
 
@@ -133,14 +134,33 @@ test("executive summary highlights absence of parabens and sulfates", () => {
   assert.ok(summary.highlights.includes("Δεν εντοπίστηκαν sulfates"));
 });
 
-test("executive summary flags potential allergens in watchOutFor", () => {
+test("executive summary no longer repeats allergens in watchOutFor", () => {
+  // Declared allergens get their own notice above the summary now (see
+  // worker/allergens.ts) instead of a generic watchOutFor line, so a
+  // near-duplicate sentence doesn't appear in both places.
   const score = scoreInterpretation(validText, 0.9, base);
   const insights = buildIngredientInsights(base, score);
   const summary = buildExecutiveSummary(base, score, insights);
 
   assert.ok(
-    summary.watchOutFor.includes("Περιέχει πιθανά αλλεργιογόνα αρωμάτων"),
+    !summary.watchOutFor.some((item) => item.includes("αλλεργιογόνα")),
   );
+});
+
+test("cosmetic fragrance allergens outside the EU food-14 still surface in the notice", () => {
+  // Limonene/Linalool are on the EU's separate 26-substance cosmetic
+  // fragrance-allergen list, not the food list this registry recognises by
+  // group — they must still show up, just via the raw-name fallback rather
+  // than a matched group.
+  const { notice } = classifyAllergenFindings(
+    base.ingredientFindings,
+    (finding) => finding.ingredientName,
+    base.potentialAllergens,
+  );
+
+  assert.ok(notice !== null);
+  assert.ok(notice?.labels.includes("Limonene"));
+  assert.ok(notice?.labels.includes("Linalool"));
 });
 
 test("executive summary verdict matches the score band", () => {

@@ -140,6 +140,41 @@ test("does not add additive bonus when an E-number is flagged", () => {
   );
 });
 
+test("does not deduct for a declared allergen row", () => {
+  const result = scoreNutrition(validText, 0.9, {
+    ...base,
+    nutritionFindings: [
+      {
+        ...attentionFinding,
+        nutrient: "Γάλα",
+        normalizedName: "milk",
+        title: "Προσοχή σε γαλακτοκομικά",
+        explanation: "Μπορεί να προκαλέσει αλλεργία.",
+      },
+    ],
+  });
+
+  assert.equal(result.deductions.length, 0);
+});
+
+test("still deducts for high sugar next to an allergen row", () => {
+  const result = scoreNutrition(validText, 0.9, {
+    ...base,
+    nutritionFindings: [
+      {
+        ...attentionFinding,
+        nutrient: "Αυγό",
+        normalizedName: "egg",
+        explanation: "Μπορεί να προκαλέσει αλλεργία.",
+      },
+      attentionFinding,
+    ],
+  });
+
+  assert.equal(result.deductions.length, 1);
+  assert.equal(result.deductions[0].code, "attention:sugar");
+});
+
 test("returns the scoring version", () =>
   assert.equal(
     scoreNutrition(validText, 0.9, {

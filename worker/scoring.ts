@@ -1,6 +1,13 @@
 import type { WorkerAnalysisResult } from "./analysis";
+import { isAllergenDeclarationOnly } from "./allergens";
 
-export const scoringVersion = "2026.08.3";
+export const scoringVersion = "2026.09.1";
+
+/**
+ * E-numbers, the marker this codebase uses for "flagged artificial additive".
+ * Shared with the nutrition path so both score the same thing the same way.
+ */
+export const ARTIFICIAL_ADDITIVE_PATTERN = /\be[\s-]?[1-9]\d{2,3}\b/i;
 
 export interface WorkerScore {
   score: number | null;
@@ -108,7 +115,20 @@ export function scoreInterpretation(
 
   const seen = new Set<string>();
 
-  const deductions = analysis.ingredientFindings
+  // "This is wheat/milk/egg" is a declaration, not a defect. The analysis
+  // path already downgrades these to info before scoring; filtering again
+  // here means no caller can reintroduce the penalty by scoring findings
+  // that were never classified.
+  const scorableFindings =
+    analysis.ingredientFindings.filter(
+      (finding) =>
+        !isAllergenDeclarationOnly(
+          finding,
+          finding.ingredientName,
+        ),
+    );
+
+  const deductions = scorableFindings
     .flatMap((finding) => {
       if (
         finding.severity !== "attention" &&
@@ -173,11 +193,26 @@ export function scoreInterpretation(
     bonusPoints += 3;
   }
 
-  if (
-    analysis.potentialAllergens.length === 0
-  ) {
+  // Deliberately *not* keyed on potentialAllergens any more: rewarding the
+  // absence of milk/wheat/egg is the same -5 penalty for containing them,
+  // just spelled backwards. What still earns the bonus is the absence of
+  // flagged artificial additives, matching the nutrition path.
+  const hasFlaggedAdditive =
+    scorableFindings.some(
+      (finding) =>
+        (finding.severity === "attention" ||
+          finding.severity === "high_attention") &&
+        (ARTIFICIAL_ADDITIVE_PATTERN.test(
+          finding.normalizedName,
+        ) ||
+          ARTIFICIAL_ADDITIVE_PATTERN.test(
+            finding.ingredientName,
+          )),
+    );
+
+  if (!hasFlaggedAdditive) {
     bonuses.push(
-      "Δεν εντοπίστηκαν γνωστά αλλεργιογόνα",
+      "Δεν εντοπίστηκαν προβληματικά πρόσθετα (E-numbers)",
     );
     bonusPoints += 5;
   }

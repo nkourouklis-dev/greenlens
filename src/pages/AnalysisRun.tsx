@@ -99,6 +99,7 @@ function buildAnalysisRecord(
       score: result.score,
       ingredientInsights: result.ingredientInsights,
       executiveSummary: result.executiveSummary,
+      allergenNotice: result.allergenNotice,
     };
   }
 
@@ -109,6 +110,7 @@ function buildAnalysisRecord(
       contentCategory: "nutrition",
       score: result.score,
       executiveSummary: result.executiveSummary,
+      allergenNotice: result.allergenNotice,
       nutritionAnalysis: {
         structured: result.structured,
         score: result.score,

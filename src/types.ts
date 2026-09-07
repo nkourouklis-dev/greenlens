@@ -138,6 +138,18 @@ export interface IngredientInsight {
   evidenceAvailable: boolean;
 }
 
+/**
+ * The one place declared EU allergens are shown. Presence of these is
+ * information for people with an allergy or intolerance, never a score
+ * deduction — see worker/allergens.ts for the rule.
+ */
+export interface AllergenNotice {
+  keys: string[];
+  labels: string[];
+  headline: string;
+  note: string;
+}
+
 export interface ExecutiveSummary {
   overallVerdict: string;
   safeIngredients: number;
@@ -266,6 +278,13 @@ export interface ProductAnalysisRecord {
    */
   ingredientInsights?: IngredientInsight[];
   executiveSummary?: ExecutiveSummary;
+  /**
+   * Declared EU allergens for this scan, on every path that can have them.
+   * Missing on records saved before the notice existed and null when the
+   * product declares none — Product.tsx derives it locally in the first
+   * case (src/utils/ingredientInsights.ts).
+   */
+  allergenNotice?: AllergenNotice | null;
   /**
    * Populated only when contentCategory is "nutrition"/"chemical_composition"
    * respectively — siblings of the ingredients-shaped fields above rather

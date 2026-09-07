@@ -1,11 +1,14 @@
-import { scoringVersion, type WorkerScore } from "./scoring";
+import {
+  ARTIFICIAL_ADDITIVE_PATTERN,
+  scoringVersion,
+  type WorkerScore,
+} from "./scoring";
+import { isAllergenDeclarationOnly } from "./allergens";
 import type { WorkerNutritionResult } from "./nutritionAnalysis";
 
 const MIN_OCR_CONFIDENCE = 0.4;
 const MIN_TEXT_LENGTH = 15;
 const MAX_DEDUCTIONS = 6;
-
-const ARTIFICIAL_ADDITIVE_PATTERN = /\be[\s-]?[1-9]\d{2,3}\b/i;
 
 /**
  * Same severity → points → band algorithm as scoreInterpretation
@@ -65,7 +68,13 @@ export function scoreNutrition(
 
   const seen = new Set<string>();
 
-  const deductions = analysis.nutritionFindings
+  // Same rule as the ingredients path (worker/scoring.ts): a declared EU
+  // allergen is information, never a deduction.
+  const scorableFindings = analysis.nutritionFindings.filter(
+    (finding) => !isAllergenDeclarationOnly(finding, finding.nutrient),
+  );
+
+  const deductions = scorableFindings
     .flatMap((finding) => {
       if (
         finding.severity !== "attention" &&
@@ -113,7 +122,7 @@ export function scoreNutrition(
     bonusPoints += 3;
   }
 
-  const hasFlaggedAdditive = analysis.nutritionFindings.some(
+  const hasFlaggedAdditive = scorableFindings.some(
     (finding) =>
       (finding.severity === "attention" ||
         finding.severity === "high_attention") &&

@@ -1,5 +1,6 @@
 import type { WorkerAnalysisResult } from "./analysis";
 import type { WorkerScore } from "./scoring";
+import { withoutAllergenOnlyItems } from "./allergens";
 import {
   lookupIngredientKnowledge,
   type EvidenceLevel,
@@ -191,11 +192,10 @@ export function buildExecutiveSummary(
     highlights.push("Δεν εντοπίστηκαν sulfates");
   }
 
-  const watchOutFor = [...analysis.attentionItems];
-
-  if (analysis.potentialAllergens.length > 0) {
-    watchOutFor.push("Περιέχει πιθανά αλλεργιογόνα αρωμάτων");
-  }
+  // Declared allergens are no longer listed here: they get their own
+  // single notice above the summary (see worker/allergens.ts), so repeating
+  // them as a "watch out" line would be the same noise in a second place.
+  const watchOutFor = withoutAllergenOnlyItems(analysis.attentionItems);
 
   return {
     overallVerdict: verdictByBand[score.band],

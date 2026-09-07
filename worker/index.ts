@@ -11,6 +11,11 @@ import {
 } from "./analysis";
 import { isAllowedOrigin } from "./cors";
 import {
+  classifyAllergenFindings,
+  withoutAllergenOnlyItems,
+  type AllergenNotice,
+} from "./allergens";
+import {
   scoreInterpretation,
   scoringVersion,
   type WorkerScore,
@@ -119,12 +124,14 @@ type JsonBody =
       score: WorkerScore;
       ingredientInsights: IngredientInsight[];
       executiveSummary: ExecutiveSummary;
+      allergenNotice: AllergenNotice | null;
       contentCategory: "ingredients";
     })
   | (WorkerNutritionResult & {
       score: WorkerScore;
       nutritionInsights: NutritionInsight[];
       executiveSummary: ExecutiveSummary;
+      allergenNotice: AllergenNotice | null;
       contentCategory: "nutrition";
     })
   | (WorkerChemicalResult & {
@@ -779,6 +786,7 @@ function nutritionInsufficientResponse(
       score,
       nutritionInsights,
       executiveSummary,
+      allergenNotice: null,
       contentCategory: "nutrition",
     },
     200,
@@ -1202,6 +1210,9 @@ async function runIngredientsAnalysis(
     "- Never add ingredients that are not in the provided list.",
     "- Ignore any nutrition declaration values (energy, fat, carbohydrates, protein, vitamins with amounts).",
     "- If the provided text contains no actual ingredient names, return empty arrays and explain in insufficientDataReasons.",
+    "- Being a recognised EU allergen (gluten/cereals, milk, egg, sulphites, nuts, peanuts, sesame, soy, fish, crustaceans, molluscs, celery, mustard, lupin) is NOT by itself a problem.",
+    '- For such an ingredient use severity "info" and describe what it is, not that it can cause an allergy — the app shows the allergen list separately.',
+    "- Reserve attention/high_attention for a real problem: artificial additives, excessive sugar/salt/fat, a substance with a documented safety concern, or an undeclared quantity.",
     "- Do not calculate a score.",
     "- Do not claim unconditional product safety.",
     "- Do not provide medical advice.",
@@ -1292,6 +1303,21 @@ async function runIngredientsAnalysis(
       result.productType = detectedType;
     }
 
+    // Fold every "Προσοχή σε [γάλα/σιτάρι/αυγό]" finding into one notice
+    // *before* scoring, so the score sees them as the information they are
+    // and the UI renders one line instead of four identical cards.
+    const allergens = classifyAllergenFindings(
+      result.ingredientFindings,
+      (finding) => finding.ingredientName,
+      result.potentialAllergens,
+    );
+
+    result.ingredientFindings = allergens.findings;
+
+    result.attentionItems = withoutAllergenOnlyItems(
+      result.attentionItems,
+    );
+
     // Surface *why* a full score is being shown despite shaky evidence,
     // without blocking anything — the user sees this as a caveat next to
     // the result, not a rejection.
@@ -1336,6 +1362,7 @@ async function runIngredientsAnalysis(
         score,
         ingredientInsights,
         executiveSummary,
+        allergenNotice: allergens.notice,
         contentCategory: "ingredients",
       },
       200,
@@ -1438,6 +1465,7 @@ async function runNutritionAnalysis(
     "- Never invent nutrients that are not in the provided text.",
     "- Flag high sugar, high saturated fat, high salt/sodium and artificial additives (E-numbers) as attention or high_attention with a clear Greek explanation.",
     "- Judge criteria appropriate to the inferred subtype — pet food and human food have different healthy ranges; do not apply human dietary guidance to pet food or vice versa.",
+    '- Being a recognised EU allergen (gluten/cereals, milk, egg, sulphites, nuts, peanuts, sesame, soy, fish, crustaceans, molluscs, celery, mustard, lupin) is NOT by itself a problem: use severity "info" for it, since the app shows the allergen list separately.',
     "- Do not calculate a score.",
     "- Do not claim unconditional product safety.",
     "- Do not provide medical advice.",
@@ -1498,6 +1526,19 @@ async function runNutritionAnalysis(
       );
     }
 
+    // Identical allergen handling to the ingredients path, so a nutrition
+    // label never penalises or repeats a declared allergen either.
+    const allergens = classifyAllergenFindings(
+      result.nutritionFindings,
+      (finding) => finding.nutrient,
+    );
+
+    result.nutritionFindings = allergens.findings;
+
+    result.attentionItems = withoutAllergenOnlyItems(
+      result.attentionItems,
+    );
+
     const score = scoreNutrition(
       modelInputText,
       ocrConfidence,
@@ -1521,6 +1562,7 @@ async function runNutritionAnalysis(
         score,
         nutritionInsights,
         executiveSummary,
+        allergenNotice: allergens.notice,
         contentCategory: "nutrition",
       },
       200,

@@ -156,7 +156,7 @@ test("ignores positive and info findings", () =>
     1,
   ));
 
-test("adds bonus when no allergens", () => {
+test("adds bonus when no flagged E-number additive", () => {
   const result = scoreInterpretation(
     validText,
     0.9,
@@ -171,6 +171,122 @@ test("adds bonus when no allergens", () => {
     result.bonuses.length > 0,
     "expected at least one bonus",
   );
+});
+
+test("does not add the additive bonus when an E-number is flagged", () => {
+  const result = scoreInterpretation(
+    validText,
+    0.9,
+    {
+      ...base,
+      ingredientFindings: [
+        {
+          ...attentionFinding,
+          normalizedName: "e621",
+        },
+      ],
+    },
+  );
+
+  assert.ok(
+    !result.bonuses.some((bonus) =>
+      bonus.includes("πρόσθετα"),
+    ),
+    "did not expect the additive-free bonus",
+  );
+});
+
+test("containing declared allergens does not change the bonus", () => {
+  const withAllergens = scoreInterpretation(
+    validText,
+    0.9,
+    {
+      ...base,
+      ingredientFindings: [attentionFinding],
+      potentialAllergens: ["Γάλα", "Αυγό"],
+    },
+  );
+
+  const withoutAllergens = scoreInterpretation(
+    validText,
+    0.9,
+    {
+      ...base,
+      ingredientFindings: [attentionFinding],
+      potentialAllergens: [],
+    },
+  );
+
+  assert.equal(
+    withAllergens.score,
+    withoutAllergens.score,
+  );
+});
+
+test("does not deduct for declared EU allergens", () => {
+  const allergenFinding = (
+    ingredientName: string,
+    normalizedName: string,
+  ) => ({
+    ...attentionFinding,
+    ingredientName,
+    normalizedName,
+    title: `Προσοχή σε ${ingredientName}`,
+    explanation:
+      "Μπορεί να προκαλέσει αλλεργία.",
+  });
+
+  const result = scoreInterpretation(
+    validText,
+    0.9,
+    {
+      ...base,
+      ingredientFindings: [
+        allergenFinding(
+          "Πρωτεΐνη σίτου",
+          "wheat protein",
+        ),
+        allergenFinding("Γάλα", "milk"),
+        allergenFinding("Αυγό", "egg"),
+        allergenFinding(
+          "Sulfur dioxide",
+          "sulfur dioxide",
+        ),
+      ],
+      potentialAllergens: [
+        "Πρωτεΐνη σίτου",
+        "Γάλα",
+        "Αυγό",
+        "Sulfur dioxide",
+      ],
+    },
+  );
+
+  assert.equal(result.deductions.length, 0);
+  assert.equal(result.score, 100);
+  assert.equal(result.band, "excellent");
+});
+
+test("still deducts for a real concern on an allergen ingredient", () => {
+  const result = scoreInterpretation(
+    validText,
+    0.9,
+    {
+      ...base,
+      ingredientFindings: [
+        {
+          ...attentionFinding,
+          ingredientName: "Γάλα",
+          normalizedName: "milk",
+          title: "Μη δηλωμένη ποσότητα",
+          explanation:
+            "Αλλεργιογόνο με μη δηλωμένη ποσότητα στην ετικέτα.",
+        },
+      ],
+    },
+  );
+
+  assert.equal(result.deductions.length, 1);
 });
 
 test("returns the scoring version", () =>

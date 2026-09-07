@@ -1,4 +1,9 @@
+import {
+  buildAllergenNotice,
+  withoutAllergenOnlyItems,
+} from "../../worker/allergens";
 import type {
+  AllergenNotice,
   ExecutiveSummary,
   IngredientCategory,
   IngredientFinding,
@@ -65,6 +70,10 @@ export function deriveIngredientInsights(
   const seen = new Set<string>();
   const insights: IngredientInsight[] = [];
 
+  // Findings are read as stored, deliberately: the score saved with a
+  // legacy record was computed from those exact severities, so downgrading
+  // them here would make the score breakdown stop adding up. Re-running the
+  // analysis is what moves an old scan onto the new allergen rules.
   for (const finding of structured.ingredientFindings) {
     if (seen.has(finding.normalizedName)) {
       continue;
@@ -130,11 +139,9 @@ export function deriveExecutiveSummary(
     highlights.push("Δεν εντοπίστηκαν sulfates");
   }
 
-  const watchOutFor = [...structured.attentionItems];
-
-  if (structured.potentialAllergens.length > 0) {
-    watchOutFor.push("Περιέχει πιθανά αλλεργιογόνα αρωμάτων");
-  }
+  // Declared allergens live in their own notice above the summary, so they
+  // are not repeated as "watch out" lines here.
+  const watchOutFor = withoutAllergenOnlyItems(structured.attentionItems);
 
   return {
     overallVerdict: verdictByBand[score.band],
@@ -144,4 +151,24 @@ export function deriveExecutiveSummary(
     highlights: Array.from(new Set(highlights)),
     watchOutFor: Array.from(new Set(watchOutFor)),
   };
+}
+
+/**
+ * Rebuilds the allergen notice for a record saved before the Worker sent
+ * one (or by a deployment that predates it). Reads only what is already
+ * stored locally — the same matcher the Worker uses, so the wording on an
+ * old scan matches a fresh one.
+ *
+ * `candidateNames` (ingredient/nutrient names) are matched group-only, so
+ * an ordinary ingredient like "Νερό" or "Μέλι" can never be mistaken for an
+ * allergen. `declaredNames` (the AI's own `potentialAllergens` list) are
+ * already a declaration, so they also accept the raw-name fallback for a
+ * substance outside the 14 food groups (e.g. a cosmetic fragrance allergen
+ * like Limonene).
+ */
+export function deriveAllergenNotice(
+  candidateNames: string[],
+  declaredNames: string[] = [],
+): AllergenNotice | null {
+  return buildAllergenNotice(candidateNames, declaredNames);
 }

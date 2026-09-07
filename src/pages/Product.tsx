@@ -12,6 +12,7 @@ import {
 import { askProductQuestion } from "../services/analysisClient";
 import { getHistoryItem } from "../services/historyService";
 import {
+  deriveAllergenNotice,
   deriveExecutiveSummary,
   deriveIngredientInsights,
 } from "../utils/ingredientInsights";
@@ -21,6 +22,7 @@ import type {
   ScoreBreakdown,
 } from "../types";
 import ShareScanButton from "../components/ShareScanButton";
+import AllergenNoticeCard from "../components/AllergenNoticeCard";
 import ExecutiveSummaryCard from "../components/ExecutiveSummaryCard";
 import IngredientCard from "../components/IngredientCard";
 import NutritionCard from "../components/NutritionCard";
@@ -329,7 +331,10 @@ export default function Product() {
           summary={item.analysis?.structured?.summary}
           positives={item.analysis?.structured?.positives}
           attentionItems={item.analysis?.structured?.attentionItems}
-          allergens={item.analysis?.structured?.potentialAllergens}
+          allergens={
+            item.analysis?.allergenNotice?.labels ??
+            item.analysis?.structured?.potentialAllergens
+          }
         />
 
         <div className="grid grid-cols-2 gap-3">
@@ -431,6 +436,28 @@ function Result(props: {
         ? (props.record.chemicalAnalysis?.structured.summary ?? "")
         : (props.record.structured?.summary ?? "");
 
+  // Declared allergens are shown once, at the top, for every path that can
+  // have them. A record saved before the Worker sent the notice gets it
+  // derived from the names already stored on the device.
+  const allergenNotice =
+    props.record.allergenNotice !== undefined
+      ? props.record.allergenNotice
+      : category === "ingredients"
+        ? deriveAllergenNotice(
+            (props.record.structured?.ingredientFindings ?? []).map(
+              (finding) => finding.ingredientName,
+            ),
+            props.record.structured?.potentialAllergens ?? [],
+          )
+        : category === "nutrition"
+          ? deriveAllergenNotice(
+              (
+                props.record.nutritionAnalysis?.structured
+                  .nutritionFindings ?? []
+              ).map((finding) => finding.nutrient),
+            )
+          : null;
+
   const nutritionInsights =
     props.record.nutritionAnalysis?.insights ?? [];
 
@@ -515,6 +542,8 @@ function Result(props: {
           </button>
         </section>
       )}
+
+      <AllergenNoticeCard notice={allergenNotice} />
 
       <ExecutiveSummaryCard
         summary={executiveSummary}

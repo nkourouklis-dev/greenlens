@@ -10,5 +10,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["index.ts", "ocr.ts", "analysis.ts", "cors.ts", "scoring.ts", "ingredientKnowledge.ts", "ingredientInsights.ts", "contentCategory.ts", "nutritionExtraction.ts", "nutritionAnalysis.ts", "nutritionScoring.ts", "nutritionInsights.ts", "chemicalExtraction.ts", "chemicalAnalysis.ts", "chemicalScoring.ts", "chemicalInsights.ts", "worker-configuration.d.ts"]
+  "include": ["index.ts", "ocr.ts", "analysis.ts", "cors.ts", "allergens.ts", "scoring.ts", "ingredientKnowledge.ts", "ingredientInsights.ts", "contentCategory.ts", "nutritionExtraction.ts", "nutritionAnalysis.ts", "nutritionScoring.ts", "nutritionInsights.ts", "chemicalExtraction.ts", "chemicalAnalysis.ts", "chemicalScoring.ts", "chemicalInsights.ts", "worker-configuration.d.ts"]
 }

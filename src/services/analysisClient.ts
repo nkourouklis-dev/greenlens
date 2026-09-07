@@ -1,6 +1,7 @@
 import { analysisVersion, apiBaseUrl, apiConfigurationError } from "../config";
 import { UserFacingError } from "./errors";
 import type {
+  AllergenNotice,
   ChemicalInsight,
   ContentCategory,
   ExecutiveSummary,
@@ -76,6 +77,7 @@ export type AnalysisApiResult =
       score: ScoreBreakdown;
       ingredientInsights: IngredientInsight[];
       executiveSummary: ExecutiveSummary;
+      allergenNotice: AllergenNotice | null;
     }
   | {
       contentCategory: "nutrition";
@@ -83,6 +85,7 @@ export type AnalysisApiResult =
       score: ScoreBreakdown;
       nutritionInsights: NutritionInsight[];
       executiveSummary: ExecutiveSummary;
+      allergenNotice: AllergenNotice | null;
     }
   | {
       contentCategory: "chemical_composition";
@@ -107,6 +110,7 @@ interface RawAnalysisResponse {
   ingredientInsights?: IngredientInsight[];
   nutritionInsights?: NutritionInsight[];
   chemicalInsights?: ChemicalInsight[];
+  allergenNotice?: AllergenNotice | null;
   insufficientDataReasons?: string[];
   [key: string]: unknown;
 }
@@ -168,6 +172,9 @@ export async function runAnalysis(
       score: response.score ?? defaultScore,
       nutritionInsights: response.nutritionInsights ?? [],
       executiveSummary: response.executiveSummary ?? defaultExecutiveSummary,
+      // Older Worker deployments don't send this during a rolling release;
+      // Product.tsx then derives the notice from the findings instead.
+      allergenNotice: response.allergenNotice ?? null,
     };
   }
 
@@ -213,6 +220,7 @@ export async function runAnalysis(
     // release, so default to empty rather than letting the UI crash.
     ingredientInsights: response.ingredientInsights ?? [],
     executiveSummary: response.executiveSummary ?? defaultExecutiveSummary,
+    allergenNotice: response.allergenNotice ?? null,
   };
 }
 

@@ -1,4 +1,5 @@
 import type { WorkerScore } from "./scoring";
+import { withoutAllergenOnlyItems } from "./allergens";
 import type { ExecutiveSummary } from "./ingredientInsights";
 import type { NutritionFinding, WorkerNutritionResult } from "./nutritionAnalysis";
 
@@ -118,7 +119,7 @@ export function buildNutritionExecutiveSummary(
     cautionIngredients,
     highImpactIngredients,
     highlights: dedupe(analysis.positives),
-    watchOutFor: dedupe(analysis.attentionItems),
+    watchOutFor: dedupe(withoutAllergenOnlyItems(analysis.attentionItems)),
   };
 }
 
