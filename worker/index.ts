@@ -26,6 +26,7 @@ import {
   type ExecutiveSummary,
   type IngredientInsight,
 } from "./ingredientInsights";
+import { type D1Like } from "./ingredientKnowledge";
 import {
   identifyPrompt,
   parseProductIdentity,
@@ -689,20 +690,25 @@ function insufficientScore(
 // response missing `score` reads to the client as a malformed/unknown
 // response and gets replaced with a generic, unhelpful placeholder instead
 // of the specific reason computed here.
-function insufficientResponse(
+async function insufficientResponse(
   reasons: string[] | undefined,
   ocrConfidence: number,
+  db: D1Like,
   origin: string | null,
   requestId: string,
-): Response {
+): Promise<Response> {
   const result = insufficientAnalysis(reasons);
   const score = insufficientScore(
     result.insufficientDataReasons,
     ocrConfidence,
   );
-  const ingredientInsights = buildIngredientInsights(
+  // result.ingredientFindings is always empty on this path, so this never
+  // actually reaches D1 — kept as a real call (not skipped) so this stays
+  // the single code path building an ingredients response envelope.
+  const ingredientInsights = await buildIngredientInsights(
     result,
     score,
+    db,
   );
   const executiveSummary = buildExecutiveSummary(
     result,
@@ -892,6 +898,7 @@ async function runAnalysis(
     return insufficientResponse(
       undefined,
       requestBody.ocrConfidence,
+      env.DB,
       origin,
       requestId,
     );
@@ -1144,6 +1151,7 @@ async function runIngredientsAnalysis(
         "Δεν εντοπίστηκε λίστα συστατικών σε αυτή τη φωτογραφία. Ξαναφωτογράφισε την πίσω πλευρά της συσκευασίας.",
       ],
       ocrConfidence,
+      env.DB,
       origin,
       requestId,
     );
@@ -1345,9 +1353,10 @@ async function runIngredientsAnalysis(
     // Explanation-only enrichment layer. It reads `result` (the AI's
     // findings) and `score` (the Worker's own deductions) but never
     // computes or overrides a score itself — see ingredientInsights.ts.
-    const ingredientInsights = buildIngredientInsights(
+    const ingredientInsights = await buildIngredientInsights(
       result,
       score,
+      env.DB,
     );
 
     const executiveSummary = buildExecutiveSummary(

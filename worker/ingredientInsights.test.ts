@@ -4,9 +4,118 @@ import {
   buildExecutiveSummary,
   buildIngredientInsights,
 } from "./ingredientInsights";
+import type { D1Like, D1PreparedStatementLike } from "./ingredientKnowledge";
 import { classifyAllergenFindings } from "./allergens";
 import { scoreInterpretation } from "./scoring";
 import type { WorkerAnalysisResult } from "./analysis";
+
+interface FakeEntry {
+  category: string;
+  short_description: string;
+  benefits: string[];
+  concerns: string[];
+  evidence_level: string;
+  aliases: string[];
+}
+
+// Stands in for D1 in a plain-Node test run (tsx --test, not the Workers
+// runtime, so a real D1Database can't exist here). Mirrors the exact two
+// queries lookupIngredientKnowledgeBatch issues: a join resolving aliases
+// to their canonical entry, then a second lookup for that entry's full
+// alias list — same shape the real ingredient_knowledge/ingredient_aliases
+// tables answer.
+function createFakeD1(entries: Record<string, FakeEntry>): D1Like {
+  const aliasToCanonical = new Map<string, string>();
+
+  for (const [canonical, entry] of Object.entries(entries)) {
+    aliasToCanonical.set(canonical, canonical);
+
+    for (const alias of entry.aliases) {
+      aliasToCanonical.set(alias, canonical);
+    }
+  }
+
+  return {
+    prepare(sql: string): D1PreparedStatementLike {
+      const isJoinQuery = sql.includes("JOIN ingredient_knowledge");
+
+      const statement: D1PreparedStatementLike = {
+        bind(...values: unknown[]): D1PreparedStatementLike {
+          const boundValues = values as string[];
+
+          return {
+            bind: statement.bind,
+            async all<T>() {
+              if (isJoinQuery) {
+                const results = boundValues.flatMap((alias) => {
+                  const canonical = aliasToCanonical.get(alias);
+                  const entry = canonical ? entries[canonical] : undefined;
+
+                  if (!canonical || !entry) {
+                    return [];
+                  }
+
+                  return [
+                    {
+                      alias,
+                      normalized_name: canonical,
+                      category: entry.category,
+                      short_description: entry.short_description,
+                      benefits: JSON.stringify(entry.benefits),
+                      concerns: JSON.stringify(entry.concerns),
+                      evidence_level: entry.evidence_level,
+                    },
+                  ];
+                });
+
+                return { results: results as T[] };
+              }
+
+              const results = boundValues.flatMap((canonical) => {
+                const entry = entries[canonical];
+
+                if (!entry) {
+                  return [];
+                }
+
+                return [
+                  { alias: canonical, normalized_name: canonical },
+                  ...entry.aliases.map((alias) => ({
+                    alias,
+                    normalized_name: canonical,
+                  })),
+                ];
+              });
+
+              return { results: results as T[] };
+            },
+          };
+        },
+        all<T>() {
+          return statement.bind().all<T>();
+        },
+      };
+
+      return statement;
+    },
+  };
+}
+
+// Only "limonene" is seeded — matches the one static-registry entry these
+// tests actually rely on; every other ingredient here (aqua, parfum,
+// benzalkonium chloride) is deliberately left unmatched to exercise the
+// no-curated-match fallback path.
+const fakeDb = createFakeD1({
+  limonene: {
+    category: "fragrance",
+    short_description:
+      "Αρωματική ουσία φυσικής προέλευσης, συνηθισμένη σε εσπεριδοειδή.",
+    benefits: ["Προσδίδει φρέσκο, εσπεριδοειδές άρωμα"],
+    concerns: ["Αναγνωρισμένο αλλεργιογόνο αρωμάτων στην ΕΕ"],
+    evidence_level: "high",
+    aliases: ["d-limonene"],
+  },
+});
 
 const base: WorkerAnalysisResult = {
   productType: "cosmetic",
@@ -56,9 +165,9 @@ const base: WorkerAnalysisResult = {
 const validText =
   "Aqua, Parfum, Limonene, Linalool, Glycerin";
 
-test("insights carry a scoreImpact that matches the Worker's own deductions", () => {
+test("insights carry a scoreImpact that matches the Worker's own deductions", async () => {
   const score = scoreInterpretation(validText, 0.9, base);
-  const insights = buildIngredientInsights(base, score);
+  const insights = await buildIngredientInsights(base, score, fakeDb);
 
   const parfum = insights.find((insight) => insight.normalizedName === "parfum");
   const matchingDeduction = score.deductions.find((deduction) => deduction.code === "attention:parfum");
@@ -68,9 +177,9 @@ test("insights carry a scoreImpact that matches the Worker's own deductions", ()
   assert.equal(parfum?.scoreImpact, -matchingDeduction!.points);
 });
 
-test("ingredients with no deduction get a zero score impact", () => {
+test("ingredients with no deduction get a zero score impact", async () => {
   const score = scoreInterpretation(validText, 0.9, base);
-  const insights = buildIngredientInsights(base, score);
+  const insights = await buildIngredientInsights(base, score, fakeDb);
 
   const aqua = insights.find((insight) => insight.normalizedName === "aqua");
 
@@ -78,9 +187,9 @@ test("ingredients with no deduction get a zero score impact", () => {
   assert.equal(aqua?.rating, "neutral");
 });
 
-test("known ingredients are enriched from the static registry", () => {
+test("known ingredients are enriched from D1", async () => {
   const score = scoreInterpretation(validText, 0.9, base);
-  const insights = buildIngredientInsights(base, score);
+  const insights = await buildIngredientInsights(base, score, fakeDb);
 
   const limonene = insights.find((insight) => insight.normalizedName === "limonene");
 
@@ -89,7 +198,7 @@ test("known ingredients are enriched from the static registry", () => {
   assert.equal(limonene?.evidenceLevel, "high");
 });
 
-test("deduplicates repeated ingredient findings", () => {
+test("deduplicates repeated ingredient findings", async () => {
   const score = scoreInterpretation(validText, 0.9, {
     ...base,
     ingredientFindings: [
@@ -98,7 +207,7 @@ test("deduplicates repeated ingredient findings", () => {
     ],
   });
 
-  const insights = buildIngredientInsights(
+  const insights = await buildIngredientInsights(
     {
       ...base,
       ingredientFindings: [
@@ -107,6 +216,7 @@ test("deduplicates repeated ingredient findings", () => {
       ],
     },
     score,
+    fakeDb,
   );
 
   assert.equal(
@@ -115,9 +225,9 @@ test("deduplicates repeated ingredient findings", () => {
   );
 });
 
-test("executive summary counts ingredients by severity", () => {
+test("executive summary counts ingredients by severity", async () => {
   const score = scoreInterpretation(validText, 0.9, base);
-  const insights = buildIngredientInsights(base, score);
+  const insights = await buildIngredientInsights(base, score, fakeDb);
   const summary = buildExecutiveSummary(base, score, insights);
 
   assert.equal(summary.safeIngredients, 1);
@@ -125,21 +235,21 @@ test("executive summary counts ingredients by severity", () => {
   assert.equal(summary.highImpactIngredients, 0);
 });
 
-test("executive summary highlights absence of parabens and sulfates", () => {
+test("executive summary highlights absence of parabens and sulfates", async () => {
   const score = scoreInterpretation(validText, 0.9, base);
-  const insights = buildIngredientInsights(base, score);
+  const insights = await buildIngredientInsights(base, score, fakeDb);
   const summary = buildExecutiveSummary(base, score, insights);
 
   assert.ok(summary.highlights.includes("Δεν εντοπίστηκαν parabens"));
   assert.ok(summary.highlights.includes("Δεν εντοπίστηκαν sulfates"));
 });
 
-test("executive summary no longer repeats allergens in watchOutFor", () => {
+test("executive summary no longer repeats allergens in watchOutFor", async () => {
   // Declared allergens get their own notice above the summary now (see
   // worker/allergens.ts) instead of a generic watchOutFor line, so a
   // near-duplicate sentence doesn't appear in both places.
   const score = scoreInterpretation(validText, 0.9, base);
-  const insights = buildIngredientInsights(base, score);
+  const insights = await buildIngredientInsights(base, score, fakeDb);
   const summary = buildExecutiveSummary(base, score, insights);
 
   assert.ok(
@@ -163,8 +273,8 @@ test("cosmetic fragrance allergens outside the EU food-14 still surface in the n
   assert.ok(notice?.labels.includes("Linalool"));
 });
 
-test("does not repeat the explanation as a concern for an unregistered ingredient", () => {
-  // Benzalkonium Chloride has no entry in worker/ingredientKnowledge.ts.
+test("does not repeat the explanation as a concern for an unregistered ingredient", async () => {
+  // Benzalkonium Chloride has no entry in ingredient_knowledge (D1).
   // Before this fix, the fallback set concerns to [finding.explanation] —
   // the exact same sentence whyRated already shows — so the card rendered
   // it a second time under "ΣΗΜΕΙΑ ΠΡΟΣΟΧΗΣ" for no added information.
@@ -186,7 +296,7 @@ test("does not repeat the explanation as a concern for an unregistered ingredien
   };
 
   const score = scoreInterpretation(validText, 0.9, unregistered);
-  const insights = buildIngredientInsights(unregistered, score);
+  const insights = await buildIngredientInsights(unregistered, score, fakeDb);
   const insight = insights[0];
 
   assert.equal(insight.whyRated, "Μπορεί να προκαλέσει αλλεργικές αντιδράσεις.");
@@ -194,9 +304,28 @@ test("does not repeat the explanation as a concern for an unregistered ingredien
   assert.deepEqual(insight.benefits, []);
 });
 
-test("executive summary verdict matches the score band", () => {
+test("a D1 failure degrades to no curated match instead of throwing", async () => {
+  const throwingDb: D1Like = {
+    prepare() {
+      throw new Error("simulated D1 outage");
+    },
+  };
+
   const score = scoreInterpretation(validText, 0.9, base);
-  const insights = buildIngredientInsights(base, score);
+  const insights = await buildIngredientInsights(base, score, throwingDb);
+
+  const limonene = insights.find((insight) => insight.normalizedName === "limonene");
+
+  // No crash and no curated data leaks through — same shape as a genuine
+  // no-match, not the fake DB's fixture data.
+  assert.ok(limonene);
+  assert.deepEqual(limonene?.concerns, []);
+  assert.deepEqual(limonene?.benefits, []);
+});
+
+test("executive summary verdict matches the score band", async () => {
+  const score = scoreInterpretation(validText, 0.9, base);
+  const insights = await buildIngredientInsights(base, score, fakeDb);
   const summary = buildExecutiveSummary(base, score, insights);
 
   assert.equal(typeof summary.overallVerdict, "string");

@@ -2,7 +2,8 @@ import type { WorkerAnalysisResult } from "./analysis";
 import type { WorkerScore } from "./scoring";
 import { withoutAllergenOnlyItems } from "./allergens";
 import {
-  lookupIngredientKnowledge,
+  lookupIngredientKnowledgeBatch,
+  type D1Like,
   type EvidenceLevel,
   type IngredientCategory,
 } from "./ingredientKnowledge";
@@ -102,32 +103,44 @@ function inferEvidenceLevel(finding: Finding): EvidenceLevel {
  * function matches each finding to its deduction using the exact same
  * `severity:normalizedName` code that scoring.ts already produces, and
  * never derives a number any other way.
+ *
+ * Curated knowledge is fetched from D1 in one batched pair of queries
+ * (lookupIngredientKnowledgeBatch) covering every distinct ingredient in
+ * this analysis, rather than one query per ingredient.
  */
-export function buildIngredientInsights(
+export async function buildIngredientInsights(
   analysis: WorkerAnalysisResult,
   score: WorkerScore,
-): IngredientInsight[] {
+  db: D1Like,
+): Promise<IngredientInsight[]> {
   const deductionsByCode = new Map(
     score.deductions.map((deduction) => [deduction.code, deduction]),
   );
 
   const seen = new Set<string>();
-  const insights: IngredientInsight[] = [];
 
-  for (const finding of analysis.ingredientFindings) {
+  const dedupedFindings = analysis.ingredientFindings.filter((finding) => {
     if (seen.has(finding.normalizedName)) {
-      continue;
+      return false;
     }
 
     seen.add(finding.normalizedName);
+    return true;
+  });
 
+  const knowledgeByName = await lookupIngredientKnowledgeBatch(
+    db,
+    dedupedFindings.map((finding) => finding.normalizedName),
+  );
+
+  return dedupedFindings.map((finding) => {
     const code = `${finding.severity}:${finding.normalizedName}`;
     const deduction = deductionsByCode.get(code) ?? null;
-    const knowledge = lookupIngredientKnowledge(finding.normalizedName);
+    const knowledge = knowledgeByName.get(finding.normalizedName) ?? null;
 
     const rating = ratingBySeverity[finding.severity] ?? "neutral";
 
-    insights.push({
+    return {
       name: finding.ingredientName,
       normalizedName: finding.normalizedName,
       category: knowledge?.category ?? inferCategoryFromText(`${finding.title} ${finding.explanation}`),
@@ -138,19 +151,17 @@ export function buildIngredientInsights(
       // No fallback to [finding.explanation] here: whyRated above already
       // *is* finding.explanation, so that fallback used to render the
       // model's one sentence twice — once as the card body, once again
-      // under "Οφέλη"/"ΣΗΜΕΙΑ ΠΡΟΣΟΧΗΣ" — for every ingredient the static
-      // registry doesn't cover. An empty list here just means the card
-      // shows no bullets beyond whyRated, which is the correct amount of
+      // under "Οφέλη"/"ΣΗΜΕΙΑ ΠΡΟΣΟΧΗΣ" — for every ingredient with no
+      // curated D1 match. An empty list here just means the card shows no
+      // bullets beyond whyRated, which is the correct amount of
       // information when there's nothing extra to add.
       benefits: knowledge?.benefits ?? [],
       concerns: knowledge?.concerns ?? [],
       aliases: knowledge?.aliases ?? [],
       evidenceLevel: knowledge?.evidenceLevel ?? inferEvidenceLevel(finding),
       evidenceAvailable: finding.evidenceType !== "none",
-    });
-  }
-
-  return insights;
+    };
+  });
 }
 
 const PARABEN_PATTERN = /paraben/;
