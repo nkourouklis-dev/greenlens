@@ -4,15 +4,22 @@ import {
   useParams,
 } from "react-router-dom";
 import { analysisVersion } from "../config";
-import { runAnalysis } from "../services/analysisClient";
+import { runAnalysis, type AnalysisApiResult } from "../services/analysisClient";
 import { UserFacingError } from "../services/errors";
 import { normalizeIngredients } from "../services/ingredientNormalizer";
 import { extractIngredientText } from "../../worker/ingredientText";
+import { detectContentCategoryHeuristic } from "../../worker/contentCategory";
 import {
   getHistoryItem,
   updateHistoryItem,
 } from "../services/historyService";
-import type { ScoreBreakdown } from "../types";
+import type {
+  ContentCategory,
+  NormalizedIngredient,
+  ProductAnalysisRecord,
+  ScanHistoryItem,
+  ScoreBreakdown,
+} from "../types";
 
 const GENERIC_ANALYSIS_ERROR =
   "Κάτι πήγε στραβά κατά την ανάλυση. Δοκιμάστε ξανά.";
@@ -62,6 +69,83 @@ const insufficientScore = (
   scoringVersion: analysisVersion,
 });
 
+function buildAnalysisRecord(
+  result: AnalysisApiResult,
+  id: string,
+  item: ScanHistoryItem,
+  text: string,
+  ingredients: NormalizedIngredient[],
+  confidence: number,
+): ProductAnalysisRecord {
+  const base = {
+    productId: id,
+    barcode: item.barcode,
+    confirmedIngredientText: text,
+    normalizedIngredients: ingredients,
+    ocrConfidence: confidence,
+    analyzedAt: new Date().toISOString(),
+    analysisVersion:
+      result.contentCategory !== "unknown"
+        ? (result.score.scoringVersion ?? analysisVersion)
+        : analysisVersion,
+  };
+
+  if (result.contentCategory === "ingredients") {
+    return {
+      ...base,
+      productType: result.structured.productType,
+      contentCategory: "ingredients",
+      structured: result.structured,
+      score: result.score,
+      ingredientInsights: result.ingredientInsights,
+      executiveSummary: result.executiveSummary,
+    };
+  }
+
+  if (result.contentCategory === "nutrition") {
+    return {
+      ...base,
+      productType: "unknown",
+      contentCategory: "nutrition",
+      score: result.score,
+      executiveSummary: result.executiveSummary,
+      nutritionAnalysis: {
+        structured: result.structured,
+        score: result.score,
+        insights: result.nutritionInsights,
+        executiveSummary: result.executiveSummary,
+      },
+    };
+  }
+
+  if (result.contentCategory === "chemical_composition") {
+    return {
+      ...base,
+      productType: "unknown",
+      contentCategory: "chemical_composition",
+      score: result.score,
+      executiveSummary: result.executiveSummary,
+      chemicalAnalysis: {
+        structured: result.structured,
+        score: result.score,
+        insights: result.chemicalInsights,
+        executiveSummary: result.executiveSummary,
+      },
+    };
+  }
+
+  return {
+    ...base,
+    productType: "unknown",
+    contentCategory: "unknown",
+    unknownCategoryMessage: result.message,
+    score: insufficientScore(
+      result.insufficientDataReasons[0] ?? result.message,
+      confidence,
+    ),
+  };
+}
+
 export default function AnalysisRun() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -92,21 +176,37 @@ export default function AnalysisRun() {
     const confidence = item.ocrConfidence ?? 0;
 
     const labelType = readLabelType(item);
+    const categoryOverride: ContentCategory | undefined =
+      item.categoryOverride;
 
     const ingredients = normalizeIngredients(
       text,
       confidence,
     );
 
+    // Which category this text is headed for, purely to decide which
+    // client-side quick-gate to apply below — the Worker is always the
+    // real authority (it re-resolves the category itself, heuristic then
+    // AI fallback). An explicit override wins; otherwise this mirrors the
+    // Worker's own heuristic so nutrition/chemical text isn't wrongly
+    // blocked by the ingredients-only check.
+    const likelyCategory: ContentCategory =
+      categoryOverride && categoryOverride !== "unknown"
+        ? categoryOverride
+        : detectContentCategoryHeuristic(text).category;
+
     // The naive comma-splitting normalizer above can come back empty even
     // when the text itself is a valid ingredient list (e.g. OCR text
-    // missing commas between entries). extractIngredientText is the same
-    // robust, tested validator the review screen and the Worker use — it
-    // is the actual authority on whether the text is analyzable, not the
-    // size of the normalized array.
+    // missing commas). extractIngredientText is the same robust, tested
+    // validator the review screen and the Worker use — it is the actual
+    // authority on whether *ingredients* text is analyzable. For
+    // nutrition/chemical composition text it does not apply — the Worker's
+    // own category-specific extraction is the real validator there, so we
+    // only require non-empty text client-side.
     const isAnalyzable =
       text.trim().length > 0 &&
-      extractIngredientText(text, confidence).isValid;
+      (likelyCategory !== "ingredients" ||
+        extractIngredientText(text, confidence).isValid);
 
     if (!isAnalyzable) {
       updateHistoryItem(id, {
@@ -114,6 +214,7 @@ export default function AnalysisRun() {
           productId: id,
           barcode: item.barcode,
           productType: "unknown",
+          contentCategory: "ingredients",
           confirmedIngredientText: text,
           normalizedIngredients: ingredients,
           ocrConfidence: confidence,
@@ -156,7 +257,7 @@ export default function AnalysisRun() {
     }
 
     setMessage(
-      "Αναλύω τα επιβεβαιωμένα συστατικά. Μπορεί να διαρκέσει έως 30 δευτερόλεπτα.",
+      "Αναλύω το επιβεβαιωμένο κείμενο. Μπορεί να διαρκέσει έως 30 δευτερόλεπτα.",
     );
 
     runAnalysis({
@@ -171,6 +272,7 @@ export default function AnalysisRun() {
       // the label from scratch.
       ocrLabelType: labelType,
       ocrTextLength: text.trim().length,
+      categoryOverride,
     })
       .then((result) => {
         // Guards against any unexpected shape in `result` (a malformed or
@@ -178,26 +280,19 @@ export default function AnalysisRun() {
         // defaults) turning into a raw JS error shown to the user instead
         // of the friendly message below.
         try {
-          const { structured, score, ingredientInsights, executiveSummary } =
-            result;
+          const analysis = buildAnalysisRecord(
+            result,
+            id,
+            item,
+            text,
+            ingredients,
+            confidence,
+          );
 
           const wasSaved = updateHistoryItem(id, {
             normalizedIngredients: ingredients,
-            analysis: {
-              productId: id,
-              barcode: item.barcode,
-              productType: structured.productType,
-              confirmedIngredientText: text,
-              normalizedIngredients: ingredients,
-              ocrConfidence: confidence,
-              structured,
-              score,
-              ingredientInsights,
-              executiveSummary,
-              analyzedAt: new Date().toISOString(),
-              analysisVersion:
-                score?.scoringVersion ?? analysisVersion,
-            },
+            categoryOverride,
+            analysis,
           });
 
           if (!wasSaved) {
@@ -243,7 +338,7 @@ export default function AnalysisRun() {
         </p>
 
         <h1 className="mt-3 text-2xl font-bold">
-          Ανάλυση συστατικών
+          Ανάλυση προϊόντος
         </h1>
 
         {error ? (

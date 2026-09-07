@@ -31,12 +31,14 @@ function parseFinding(value: unknown): WorkerAnalysisResult["ingredientFindings"
   return { ingredientName: value.ingredientName, normalizedName: value.normalizedName, severity: value.severity, title: value.title, explanation: value.explanation, evidenceType: value.evidenceType, sourceName: value.sourceName, sourceUrl, confidence: value.confidence };
 }
 
-function parseJson(value: string): unknown { try { return JSON.parse(value) as unknown; } catch { return null; } }
-function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null; }
-function isText(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
-function isStrings(value: unknown): value is string[] { return Array.isArray(value) && value.every(isText); }
-function isConfidence(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1; }
+export function parseJson(value: string): unknown { try { return JSON.parse(value) as unknown; } catch { return null; } }
+export function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null; }
+export function isText(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
+export function isStrings(value: unknown): value is string[] { return Array.isArray(value) && value.every(isText); }
+export function isConfidence(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1; }
 function isProductType(value: unknown): value is WorkerAnalysisResult["productType"] { return value === "food" || value === "cosmetic" || value === "unknown"; }
-function isSeverity(value: unknown): value is WorkerAnalysisResult["ingredientFindings"][number]["severity"] { return value === "positive" || value === "info" || value === "attention" || value === "high_attention" || value === "unknown"; }
-function isEvidenceType(value: unknown): value is WorkerAnalysisResult["ingredientFindings"][number]["evidenceType"] { return value === "regulatory" || value === "scientific" || value === "label" || value === "none"; }
-function isSafeUrl(value: string): boolean { try { return new URL(value).protocol === "https:"; } catch { return false; } }
+export type FindingSeverity = WorkerAnalysisResult["ingredientFindings"][number]["severity"];
+export type EvidenceType = WorkerAnalysisResult["ingredientFindings"][number]["evidenceType"];
+export function isSeverity(value: unknown): value is FindingSeverity { return value === "positive" || value === "info" || value === "attention" || value === "high_attention" || value === "unknown"; }
+export function isEvidenceType(value: unknown): value is EvidenceType { return value === "regulatory" || value === "scientific" || value === "label" || value === "none"; }
+export function isSafeUrl(value: string): boolean { try { return new URL(value).protocol === "https:"; } catch { return false; } }

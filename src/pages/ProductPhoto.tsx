@@ -42,7 +42,7 @@ export default function ProductPhoto() {
             .trim()
         : "";
 
-      const wasSaved = saveHistoryItem({ id: scanId, barcode, status: "unknown", scannedAt: new Date().toISOString(), ingredientsPhoto, productPhoto,productName: displayName || undefined,ocrRawText: ocrDraft?.result.rawText, ocrConfidence: ocrDraft?.result.confidence });
+      const wasSaved = saveHistoryItem({ id: scanId, barcode, status: "unknown", scannedAt: new Date().toISOString(), ingredientsPhoto, productPhoto,productName: displayName || undefined,ocrRawText: ocrDraft?.result.rawText, ocrConfidence: ocrDraft?.result.confidence, categoryOverride: ocrDraft?.categoryOverride });
       if (!wasSaved) {
         setError("Ο χώρος αποθήκευσης της συσκευής δεν επαρκεί. Δοκίμασε μικρότερη φωτογραφία.");
         return;

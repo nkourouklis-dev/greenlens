@@ -16,13 +16,31 @@ import {
   deriveIngredientInsights,
 } from "../utils/ingredientInsights";
 import type {
+  ContentCategory,
   ProductAnalysisRecord,
   ScoreBreakdown,
 } from "../types";
 import ShareScanButton from "../components/ShareScanButton";
 import ExecutiveSummaryCard from "../components/ExecutiveSummaryCard";
 import IngredientCard from "../components/IngredientCard";
+import NutritionCard from "../components/NutritionCard";
+import ChemicalCard from "../components/ChemicalCard";
 import ScoreBreakdownPanel from "../components/ScoreBreakdownPanel";
+
+// Records saved before contentCategory existed predate every path except
+// ingredients, so a missing field always means "ingredients".
+function readContentCategory(
+  record: ProductAnalysisRecord,
+): ContentCategory {
+  return record.contentCategory ?? "ingredients";
+}
+
+const sectionTitleByCategory: Record<ContentCategory, string> = {
+  ingredients: "Συστατικά",
+  nutrition: "Διατροφικά στοιχεία",
+  chemical_composition: "Χημική Ανάλυση",
+  unknown: "",
+};
 
 const bands: Record<
   ScoreBreakdown["band"],
@@ -168,7 +186,7 @@ export default function Product() {
               ).toLocaleString("el-GR")}
             </p>
 
-            {record && (
+            {record && readContentCategory(record) === "ingredients" && (
               <p className="mt-2 inline-block rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">
                 {record.productType === "food"
                   ? "Τρόφιμο"
@@ -176,6 +194,12 @@ export default function Product() {
                       "cosmetic"
                     ? "Καλλυντικό"
                     : "Άγνωστη κατηγορία"}
+              </p>
+            )}
+            {record && readContentCategory(record) !== "ingredients" && (
+              <p className="mt-2 inline-block rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">
+                {sectionTitleByCategory[readContentCategory(record)] ||
+                  "Άγνωστο περιεχόμενο"}
               </p>
             )}
           </div>
@@ -344,26 +368,81 @@ function Result(props: {
   onReanalyze: () => void;
   onRetakePhoto: () => void;
 }) {
+  const category = readContentCategory(props.record);
+
+  if (category === "unknown") {
+    return (
+      <section className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-4">
+        <p className="text-sm leading-6 text-amber-50">
+          {props.record.unknownCategoryMessage ||
+            "Δεν αναγνωρίστηκε ο τύπος περιεχομένου - δοκίμασε να φωτογραφίσεις πιο καθαρά τη λίστα συστατικών/διατροφικό πίνακα."}
+        </p>
+
+        <button
+          type="button"
+          onClick={props.onRetakePhoto}
+          className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 font-bold text-slate-950"
+        >
+          <Camera size={18} />
+          Ξαναπροσπάθησε
+        </button>
+      </section>
+    );
+  }
+
   const [label, color, borderColor] =
     bands[props.score.band];
 
   const isInsufficientData =
     props.score.band === "insufficient_data";
 
-  const insights =
-    props.record.ingredientInsights ??
-    deriveIngredientInsights(
-      props.record.structured,
-      props.score,
-    );
+  const ingredientInsights =
+    category === "ingredients"
+      ? (props.record.ingredientInsights ??
+        (props.record.structured
+          ? deriveIngredientInsights(
+              props.record.structured,
+              props.score,
+            )
+          : []))
+      : [];
 
   const executiveSummary =
     props.record.executiveSummary ??
-    deriveExecutiveSummary(
-      props.record.structured,
-      props.score,
-      insights,
-    );
+    (category === "ingredients" && props.record.structured
+      ? deriveExecutiveSummary(
+          props.record.structured,
+          props.score,
+          ingredientInsights,
+        )
+      : {
+          overallVerdict: "",
+          safeIngredients: 0,
+          cautionIngredients: 0,
+          highImpactIngredients: 0,
+          highlights: [],
+          watchOutFor: [],
+        });
+
+  const summary =
+    category === "nutrition"
+      ? (props.record.nutritionAnalysis?.structured.summary ?? "")
+      : category === "chemical_composition"
+        ? (props.record.chemicalAnalysis?.structured.summary ?? "")
+        : (props.record.structured?.summary ?? "");
+
+  const nutritionInsights =
+    props.record.nutritionAnalysis?.insights ?? [];
+
+  const chemicalInsights =
+    props.record.chemicalAnalysis?.insights ?? [];
+
+  const itemCount =
+    category === "ingredients"
+      ? ingredientInsights.length
+      : category === "nutrition"
+        ? nutritionInsights.length
+        : chemicalInsights.length;
 
   return (
     <>
@@ -442,36 +521,57 @@ function Result(props: {
         finalScore={props.score.score}
       />
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-        <h2 className="font-bold">Περίληψη</h2>
+      {summary && (
+        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <h2 className="font-bold">Περίληψη</h2>
 
-        <p className="mt-2 text-sm leading-6 text-slate-300">
-          {props.record.structured.summary}
-        </p>
-      </section>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            {summary}
+          </p>
+        </section>
+      )}
 
       <section>
         <div className="flex items-baseline justify-between px-1">
-          <h2 className="font-bold">Συστατικά</h2>
+          <h2 className="font-bold">
+            {sectionTitleByCategory[category]}
+          </h2>
 
           <span className="text-xs text-slate-400">
-            {insights.length} αναλύθηκαν
+            {itemCount} αναλύθηκαν
           </span>
         </div>
 
         <div className="mt-3 space-y-2">
-          {insights.map((insight) => (
-            <IngredientCard
-              key={insight.normalizedName}
-              insight={insight}
-            />
-          ))}
+          {category === "ingredients" &&
+            ingredientInsights.map((insight) => (
+              <IngredientCard
+                key={insight.normalizedName}
+                insight={insight}
+              />
+            ))}
+
+          {category === "nutrition" &&
+            nutritionInsights.map((insight) => (
+              <NutritionCard
+                key={insight.normalizedName}
+                insight={insight}
+              />
+            ))}
+
+          {category === "chemical_composition" &&
+            chemicalInsights.map((insight) => (
+              <ChemicalCard
+                key={insight.normalizedName}
+                insight={insight}
+              />
+            ))}
         </div>
       </section>
 
       <ScoreBreakdownPanel
         score={props.score}
-        insights={insights}
+        insights={category === "ingredients" ? ingredientInsights : []}
       />
 
       <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">

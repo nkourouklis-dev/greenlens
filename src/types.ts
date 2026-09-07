@@ -147,6 +147,96 @@ export interface ExecutiveSummary {
   watchOutFor: string[];
 }
 
+export type ContentCategory =
+  | "ingredients"
+  | "nutrition"
+  | "chemical_composition"
+  | "unknown";
+
+export interface NutritionFinding {
+  nutrient: string;
+  normalizedName: string;
+  amount: string | null;
+  severity: FindingSeverity;
+  title: string;
+  explanation: string;
+  evidenceType:
+    | "regulatory"
+    | "scientific"
+    | "label"
+    | "none";
+  sourceName: string | null;
+  sourceUrl: string | null;
+  confidence: number;
+}
+
+export interface StructuredNutritionAnalysis {
+  subtype: "human_food" | "pet_food" | "unknown";
+  summary: string;
+  positives: string[];
+  attentionItems: string[];
+  nutritionFindings: NutritionFinding[];
+  insufficientDataReasons: string[];
+  confidence: number;
+}
+
+export interface NutritionInsight {
+  name: string;
+  normalizedName: string;
+  amount: string | null;
+  rating: IngredientRating;
+  scoreImpact: number;
+  description: string;
+  whyRated: string;
+  evidenceLevel: EvidenceLevel;
+  evidenceAvailable: boolean;
+}
+
+export interface ChemicalFinding {
+  substance: string;
+  normalizedName: string;
+  concentration: string | null;
+  referenceLimit: string | null;
+  severity: FindingSeverity;
+  title: string;
+  explanation: string;
+  evidenceType:
+    | "regulatory"
+    | "scientific"
+    | "label"
+    | "none";
+  sourceName: string | null;
+  sourceUrl: string | null;
+  confidence: number;
+}
+
+export interface StructuredChemicalAnalysis {
+  sourceType:
+    | "drinking_water"
+    | "mineral_water"
+    | "raw_material"
+    | "unknown";
+  summary: string;
+  positives: string[];
+  attentionItems: string[];
+  chemicalFindings: ChemicalFinding[];
+  insufficientDataReasons: string[];
+  confidence: number;
+}
+
+export interface ChemicalInsight {
+  substance: string;
+  normalizedName: string;
+  concentration: string | null;
+  referenceLimit: string | null;
+  rating: IngredientRating;
+  scoreImpact: number;
+  description: string;
+  whyRated: string;
+  evidenceLevel: EvidenceLevel;
+  evidenceAvailable: boolean;
+}
+
 export interface ProductAnalysisRecord {
   productId: string;
   barcode: string;
@@ -154,7 +244,20 @@ export interface ProductAnalysisRecord {
   confirmedIngredientText: string;
   normalizedIngredients: NormalizedIngredient[];
   ocrConfidence: number;
-  structured: StructuredAnalysis;
+  /**
+   * Which analysis path produced this record. Missing on records saved
+   * before this field existed — those are always treated as "ingredients"
+   * (see readContentCategory in Product.tsx), the only path that existed
+   * then.
+   */
+  contentCategory?: ContentCategory;
+  /**
+   * Populated only when contentCategory is "ingredients" (the default when
+   * the field is missing, for records saved before content categories
+   * existed). See nutritionAnalysis/chemicalAnalysis below for the other
+   * two paths' structured results.
+   */
+  structured?: StructuredAnalysis;
   score: ScoreBreakdown;
   /**
    * Optional because history items analyzed before this field existed
@@ -163,6 +266,25 @@ export interface ProductAnalysisRecord {
    */
   ingredientInsights?: IngredientInsight[];
   executiveSummary?: ExecutiveSummary;
+  /**
+   * Populated only when contentCategory is "nutrition"/"chemical_composition"
+   * respectively — siblings of the ingredients-shaped fields above rather
+   * than a replacement, so old records and the ingredients path never need
+   * to change shape.
+   */
+  nutritionAnalysis?: {
+    structured: StructuredNutritionAnalysis;
+    score: ScoreBreakdown;
+    insights: NutritionInsight[];
+    executiveSummary: ExecutiveSummary;
+  };
+  chemicalAnalysis?: {
+    structured: StructuredChemicalAnalysis;
+    score: ScoreBreakdown;
+    insights: ChemicalInsight[];
+    executiveSummary: ExecutiveSummary;
+  };
+  unknownCategoryMessage?: string;
   analyzedAt: string;
   analysisVersion: string;
 }
@@ -190,6 +312,12 @@ export interface ScanHistoryItem {
   ocrConfidence?: number;
   ocrLabelType?: OcrLabelType;
   userCorrectedText?: string;
+  /**
+   * The user's manual correction of the detected content category from the
+   * review screen, if they used the override dropdown. Undefined means
+   * "let the Worker decide" (heuristic, then AI fallback).
+   */
+  categoryOverride?: ContentCategory;
   normalizedIngredients?: NormalizedIngredient[];
   analysis?: ProductAnalysisRecord;
 }

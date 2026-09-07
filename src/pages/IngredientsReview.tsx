@@ -3,9 +3,22 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   clearOcrDraft,
   getOcrDraft,
+  updateOcrDraftCategoryOverride,
   updateOcrDraftText,
 } from "../services/captureDraftService";
 import { extractIngredientText } from "../../worker/ingredientText";
+import { detectContentCategoryHeuristic } from "../../worker/contentCategory";
+import type { ContentCategory } from "../types";
+
+const categoryOptions: Array<{
+  value: "auto" | Exclude<ContentCategory, "unknown">;
+  label: string;
+}> = [
+  { value: "auto", label: "Αυτόματος εντοπισμός (προτεινόμενο)" },
+  { value: "ingredients", label: "Συστατικά" },
+  { value: "nutrition", label: "Διατροφικά" },
+  { value: "chemical_composition", label: "Χημική Ανάλυση" },
+];
 
 // Reasons that describe extra noise on the label (manufacturer, website,
 // storage advice) are shown as a quiet notice: the analysis strips them
@@ -121,6 +134,23 @@ export default function IngredientsReview() {
     [text, draft?.result.confidence],
   );
 
+  const detectedCategory = useMemo(
+    () => detectContentCategoryHeuristic(text).category,
+    [text],
+  );
+
+  const [categoryOverride, setCategoryOverride] = useState<
+    ContentCategory | undefined
+  >(() => draft?.categoryOverride);
+
+  function selectCategory(
+    value: "auto" | Exclude<ContentCategory, "unknown">,
+  ) {
+    const next = value === "auto" ? undefined : value;
+    setCategoryOverride(next);
+    updateOcrDraftCategoryOverride(id, next);
+  }
+
   if (!draft) {
     return (
       <main className="bg-canvas px-4 py-6 text-ink">
@@ -173,6 +203,15 @@ export default function IngredientsReview() {
   const confirmedIngredientList =
     textQuality.canContinue && !nutritionOnly;
 
+  // The ingredients-specific quality checks below (extractIngredientText)
+  // only make sense when the user actually intends this to be an
+  // ingredient list. Once they've manually picked nutrition/chemical
+  // composition, showing "no ingredient list found" would just be
+  // confusing noise — the Worker's own category-specific validator is the
+  // real gate for those paths.
+  const isIngredientsIntent =
+    !categoryOverride || categoryOverride === "ingredients";
+
   function retake() {
     clearOcrDraft(id);
     navigate(
@@ -221,7 +260,7 @@ export default function IngredientsReview() {
           className="max-h-[40vh] w-full rounded-2xl border border-line object-contain"
         />
 
-        {confirmedIngredientList ? (
+        {isIngredientsIntent && (confirmedIngredientList ? (
           <div className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface p-3">
             <span className="text-sm font-semibold text-ink">
               {label}
@@ -238,9 +277,9 @@ export default function IngredientsReview() {
               με λίστα συστατικών
             </span>
           </div>
-        )}
+        ))}
 
-        {nutritionOnly && (
+        {isIngredientsIntent && nutritionOnly && (
           <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-2.5 text-xs text-amber-50">
             Εντοπίστηκε διατροφικός πίνακας, όχι
             λίστα συστατικών. Φωτογραφίστε την
@@ -248,14 +287,14 @@ export default function IngredientsReview() {
           </p>
         )}
 
-        {ocrDraft.result.labelType === "mixed" && (
+        {isIngredientsIntent && ocrDraft.result.labelType === "mixed" && (
           <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-2.5 text-xs text-amber-50">
             Ελέγξτε ότι το κείμενο περιλαμβάνει
             ολόκληρη τη λίστα συστατικών.
           </p>
         )}
 
-        {textQuality.notice && (
+        {isIngredientsIntent && textQuality.notice && (
           <p
             className="rounded-lg border border-line bg-surface p-2.5 text-xs text-ink-muted"
             aria-live="polite"
@@ -264,7 +303,7 @@ export default function IngredientsReview() {
           </p>
         )}
 
-        {textQuality.blockingReason && (
+        {isIngredientsIntent && textQuality.blockingReason && (
           <div
             className="rounded-lg border border-red-400/40 bg-red-400/10 p-2.5 text-xs text-red-50"
             role="alert"
@@ -322,6 +361,44 @@ export default function IngredientsReview() {
             Μη αναγνώσιμα: {ocrDraft.result.unreadableSegments.join(", ")}
           </p>
         )}
+
+        <div>
+          <label
+            htmlFor="category-override"
+            className="block text-xs font-semibold uppercase tracking-wide text-ink-faint"
+          >
+            Τύπος περιεχομένου
+          </label>
+          <select
+            id="category-override"
+            value={categoryOverride ?? "auto"}
+            onChange={(event) =>
+              selectCategory(
+                event.target.value as
+                  | "auto"
+                  | Exclude<ContentCategory, "unknown">,
+              )
+            }
+            className="mt-2 h-11 w-full rounded-lg border border-line bg-surface px-3 text-sm text-ink"
+          >
+            {categoryOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          {!categoryOverride && detectedCategory !== "unknown" && (
+            <p className="mt-1 text-xs text-ink-faintest">
+              Εντοπίστηκε αυτόματα ως:{" "}
+              {detectedCategory === "ingredients"
+                ? "Συστατικά"
+                : detectedCategory === "nutrition"
+                  ? "Διατροφικά"
+                  : "Χημική Ανάλυση"}
+              . Αν δεν είναι σωστό, διόρθωσέ το παραπάνω.
+            </p>
+          )}
+        </div>
 
         <div className="flex flex-col gap-2">
           <button

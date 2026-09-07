@@ -1,4 +1,4 @@
-import type { OcrResult } from "../types";
+import type { ContentCategory, OcrResult } from "../types";
 
 const draftKey = (barcode: string) => `greenlens.capture-draft.v1.${barcode}`;
 const ocrDraftKey = (productId: string) => `greenlens.ocr-draft.v1.${productId}`;
@@ -7,6 +7,11 @@ export interface OcrDraft {
   barcode: string;
   image: string;
   result: OcrResult;
+  /**
+   * Set only when the user manually overrides the auto-detected content
+   * category on the review screen. Undefined means "let the Worker decide".
+   */
+  categoryOverride?: ContentCategory;
 }
 
 export function saveIngredientsDraft(barcode: string, image: string): void {
@@ -42,6 +47,15 @@ export function updateOcrDraftText(productId: string, text: string): void {
   const draft = getOcrDraft(productId);
   if (!draft) return;
   saveOcrDraft(productId, { ...draft, result: { ...draft.result, rawText: text } });
+}
+
+export function updateOcrDraftCategoryOverride(
+  productId: string,
+  categoryOverride: ContentCategory | undefined,
+): void {
+  const draft = getOcrDraft(productId);
+  if (!draft) return;
+  saveOcrDraft(productId, { ...draft, categoryOverride });
 }
 
 export interface ConfirmedIngredientsDraft {

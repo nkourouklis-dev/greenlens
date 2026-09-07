@@ -32,6 +32,43 @@ import {
 import {
   extractIngredientText,
 } from "./ingredientText";
+import {
+  detectContentCategoryHeuristic,
+  buildCategoryClassificationPrompt,
+  parseCategoryClassification,
+  type ContentCategory,
+  type ContentCategoryResult,
+} from "./contentCategory";
+import {
+  extractNutritionData,
+} from "./nutritionExtraction";
+import {
+  parseNutritionAnalysis,
+  type WorkerNutritionResult,
+} from "./nutritionAnalysis";
+import {
+  scoreNutrition,
+} from "./nutritionScoring";
+import {
+  buildNutritionInsights,
+  buildNutritionExecutiveSummary,
+  type NutritionInsight,
+} from "./nutritionInsights";
+import {
+  extractChemicalComposition,
+} from "./chemicalExtraction";
+import {
+  parseChemicalAnalysis,
+  type WorkerChemicalResult,
+} from "./chemicalAnalysis";
+import {
+  scoreChemicalComposition,
+} from "./chemicalScoring";
+import {
+  buildChemicalInsights,
+  buildChemicalExecutiveSummary,
+  type ChemicalInsight,
+} from "./chemicalInsights";
 
 type AzureVisionEnvironment = Env & {
   AZURE_VISION_ENDPOINT: string;
@@ -72,7 +109,25 @@ type JsonBody =
       score: WorkerScore;
       ingredientInsights: IngredientInsight[];
       executiveSummary: ExecutiveSummary;
+      contentCategory: "ingredients";
     })
+  | (WorkerNutritionResult & {
+      score: WorkerScore;
+      nutritionInsights: NutritionInsight[];
+      executiveSummary: ExecutiveSummary;
+      contentCategory: "nutrition";
+    })
+  | (WorkerChemicalResult & {
+      score: WorkerScore;
+      chemicalInsights: ChemicalInsight[];
+      executiveSummary: ExecutiveSummary;
+      contentCategory: "chemical_composition";
+    })
+  | {
+      contentCategory: "unknown";
+      message: string;
+      insufficientDataReasons: string[];
+    }
   | {
       status: "ok";
       service: "greenlens-ocr";
@@ -506,9 +561,7 @@ async function readJson(
   }
 }
 
-function isAnalysisRequest(
-  value: unknown,
-): value is {
+interface AnalysisRequestBody {
   productId: string;
   barcode: string;
   productType:
@@ -520,7 +573,12 @@ function isAnalysisRequest(
   ocrConfidence: number;
   ocrLabelType?: LabelType;
   ocrTextLength?: number;
-} {
+  categoryOverride?: ContentCategory;
+}
+
+function isAnalysisRequest(
+  value: unknown,
+): value is AnalysisRequestBody {
   return (
     isRecord(value) &&
     isText(value.productId) &&
@@ -543,7 +601,12 @@ function isAnalysisRequest(
       value.ocrLabelType === "mixed" ||
       value.ocrLabelType === "unknown") &&
     (value.ocrTextLength === undefined ||
-      typeof value.ocrTextLength === "number")
+      typeof value.ocrTextLength === "number") &&
+    (value.categoryOverride === undefined ||
+      value.categoryOverride === "ingredients" ||
+      value.categoryOverride === "nutrition" ||
+      value.categoryOverride === "chemical_composition" ||
+      value.categoryOverride === "unknown")
   );
 }
 
@@ -635,6 +698,128 @@ function insufficientResponse(
       score,
       ingredientInsights,
       executiveSummary,
+      contentCategory: "ingredients",
+    },
+    200,
+    origin,
+    requestId,
+  );
+}
+
+function unknownCategoryResponse(
+  origin: string | null,
+  requestId: string,
+): Response {
+  return json(
+    {
+      contentCategory: "unknown",
+      message:
+        "Δεν αναγνωρίστηκε ο τύπος περιεχομένου - δοκίμασε να φωτογραφίσεις πιο καθαρά τη λίστα συστατικών/διατροφικό πίνακα.",
+      insufficientDataReasons: [
+        "Δεν αναγνωρίστηκε ο τύπος περιεχομένου.",
+      ],
+    },
+    200,
+    origin,
+    requestId,
+  );
+}
+
+function nutritionInsufficientResponse(
+  reasons: string[],
+  ocrConfidence: number,
+  origin: string | null,
+  requestId: string,
+): Response {
+  const result: WorkerNutritionResult = {
+    subtype: "unknown",
+    summary:
+      "Δεν υπάρχουν αρκετά στοιχεία για αξιόπιστη διατροφική ανάλυση.",
+    positives: [],
+    attentionItems: [],
+    nutritionFindings: [],
+    insufficientDataReasons:
+      reasons.length > 0
+        ? reasons
+        : [
+            "Λείπει επιβεβαιωμένος και επαρκής διατροφικός πίνακας.",
+          ],
+    confidence: 0,
+  };
+
+  const score = insufficientScore(
+    result.insufficientDataReasons,
+    ocrConfidence,
+  );
+
+  const nutritionInsights = buildNutritionInsights(
+    result,
+    score,
+  );
+
+  const executiveSummary = buildNutritionExecutiveSummary(
+    result,
+    score,
+  );
+
+  return json(
+    {
+      ...result,
+      score,
+      nutritionInsights,
+      executiveSummary,
+      contentCategory: "nutrition",
+    },
+    200,
+    origin,
+    requestId,
+  );
+}
+
+function chemicalInsufficientResponse(
+  reasons: string[],
+  ocrConfidence: number,
+  origin: string | null,
+  requestId: string,
+): Response {
+  const result: WorkerChemicalResult = {
+    sourceType: "unknown",
+    summary:
+      "Δεν υπάρχουν αρκετά στοιχεία για αξιόπιστη χημική ανάλυση.",
+    positives: [],
+    attentionItems: [],
+    chemicalFindings: [],
+    insufficientDataReasons:
+      reasons.length > 0
+        ? reasons
+        : [
+            "Λείπει επιβεβαιωμένη και επαρκής χημική ανάλυση.",
+          ],
+    confidence: 0,
+  };
+
+  const score = insufficientScore(
+    result.insufficientDataReasons,
+    ocrConfidence,
+  );
+
+  const chemicalInsights = buildChemicalInsights(
+    result,
+    score,
+  );
+
+  const executiveSummary = buildChemicalExecutiveSummary(
+    result,
+    score,
+  );
+
+  return json(
+    {
+      ...result,
+      score,
+      chemicalInsights,
+      executiveSummary,
+      contentCategory: "chemical_composition",
     },
     200,
     origin,
@@ -693,6 +878,126 @@ async function runAnalysis(
     );
   }
 
+  const category = await resolveContentCategory(
+    confirmedText,
+    requestBody.categoryOverride,
+    env,
+    requestId,
+  );
+
+  console.log("content_category_resolved", {
+    requestId,
+    category: category.category,
+    confidence: category.confidence,
+    source: category.source,
+  });
+
+  switch (category.category) {
+    case "ingredients":
+      return runIngredientsAnalysis(
+        requestBody,
+        confirmedText,
+        env,
+        origin,
+        requestId,
+      );
+    case "nutrition":
+      return runNutritionAnalysis(
+        requestBody,
+        confirmedText,
+        env,
+        origin,
+        requestId,
+      );
+    case "chemical_composition":
+      return runChemicalAnalysisPath(
+        requestBody,
+        confirmedText,
+        env,
+        origin,
+        requestId,
+      );
+    default:
+      return unknownCategoryResponse(origin, requestId);
+  }
+}
+
+// Resolution order: an explicit client override wins outright; otherwise the
+// cheap deterministic heuristic; only when that is inconclusive does one AI
+// classification call run. Keeps the common case (heuristic decides) free of
+// extra latency/cost.
+async function resolveContentCategory(
+  confirmedText: string,
+  categoryOverride: ContentCategory | undefined,
+  env: Env,
+  requestId: string,
+): Promise<ContentCategoryResult> {
+  if (
+    categoryOverride === "ingredients" ||
+    categoryOverride === "nutrition" ||
+    categoryOverride === "chemical_composition"
+  ) {
+    return { category: categoryOverride, confidence: 1, source: "override" };
+  }
+
+  const heuristic = detectContentCategoryHeuristic(confirmedText);
+
+  if (heuristic.category !== "unknown") {
+    return heuristic;
+  }
+
+  try {
+    const modelOutput = await env.AI.run(textModel, {
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a label-content classifier. You always return a single valid JSON object and nothing else.",
+        },
+        {
+          role: "user",
+          content: buildCategoryClassificationPrompt(confirmedText),
+        },
+      ],
+      max_tokens: 64,
+      temperature: 0,
+    });
+
+    const modelText = extractModelText(modelOutput);
+    const cleanedText = modelText ? stripCodeFences(modelText) : null;
+
+    const aiCategory =
+      parseCategoryClassification(modelOutput) ??
+      (cleanedText ? parseCategoryClassification(cleanedText) : null);
+
+    console.log("content_category_ai_fallback", {
+      requestId,
+      aiCategory,
+    });
+
+    if (aiCategory && aiCategory !== "unknown") {
+      return { category: aiCategory, confidence: 0.6, source: "ai" };
+    }
+  } catch (caughtError) {
+    console.error("content_category_ai_failed", {
+      requestId,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 200),
+    });
+  }
+
+  return { category: "unknown", confidence: 0, source: "ai" };
+}
+
+async function runIngredientsAnalysis(
+  requestBody: AnalysisRequestBody,
+  confirmedText: string,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
   const ocrLabelType: LabelType =
     requestBody.ocrLabelType ?? "unknown";
 
@@ -1020,6 +1325,7 @@ async function runAnalysis(
         score,
         ingredientInsights,
         executiveSummary,
+        contentCategory: "ingredients",
       },
       200,
       origin,
@@ -1027,6 +1333,377 @@ async function runAnalysis(
     );
   } catch (caughtError) {
     console.error("analysis_run_failed", {
+      requestId,
+      name:
+        caughtError instanceof Error
+          ? caughtError.name
+          : "unknown",
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
+async function runNutritionAnalysis(
+  requestBody: AnalysisRequestBody,
+  confirmedText: string,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const ocrConfidence = requestBody.ocrConfidence;
+
+  const extraction = extractNutritionData(
+    confirmedText,
+    ocrConfidence,
+  );
+
+  if (!extraction.isValid) {
+    console.log("nutrition_validation_rejected", {
+      requestId,
+      reasons: extraction.reasons,
+      textLength: confirmedText.length,
+      ocrConfidence,
+    });
+
+    return nutritionInsufficientResponse(
+      extraction.reasons,
+      ocrConfidence,
+      origin,
+      requestId,
+    );
+  }
+
+  const modelInputText =
+    extraction.nutritionText ?? confirmedText;
+
+  const prompt = [
+    "Analyze the confirmed nutrition information below.",
+    "",
+    "Return ONLY this exact JSON structure:",
+    "{",
+    '  "subtype": "human_food",',
+    '  "summary": "short neutral summary in Greek",',
+    '  "positives": ["short Greek phrase"],',
+    '  "attentionItems": ["short Greek phrase"],',
+    '  "nutritionFindings": [',
+    "    {",
+    '      "nutrient": "Ζάχαρη",',
+    '      "normalizedName": "sugar",',
+    '      "amount": "12g ανά 100g",',
+    '      "severity": "attention",',
+    '      "title": "short Greek title",',
+    '      "explanation": "short Greek explanation",',
+    '      "evidenceType": "none",',
+    '      "sourceName": null,',
+    '      "sourceUrl": null,',
+    '      "confidence": 0.5',
+    "    }",
+    "  ],",
+    '  "insufficientDataReasons": [],',
+    '  "confidence": 0.6',
+    "}",
+    "",
+    "Field rules:",
+    "- subtype must be exactly one of: human_food, pet_food, unknown.",
+    "- Infer subtype from the text itself (mentions of dogs/cats/pet food vs ordinary human nutrition facts).",
+    "- severity must be exactly one of: positive, info, attention, high_attention, unknown.",
+    "- evidenceType must be exactly one of: regulatory, scientific, label, none.",
+    "- confidence must be a number between 0 and 1.",
+    "- sourceName and sourceUrl must be null unless you have verified evidence.",
+    '- amount should carry the value and unit exactly as printed (e.g. "12g", "450 kcal ανά 100g"), or null if not given.',
+    "",
+    "Content rules:",
+    "- Only analyze nutrients/values that appear in the provided text.",
+    "- Never invent nutrients that are not in the provided text.",
+    "- Flag high sugar, high saturated fat, high salt/sodium and artificial additives (E-numbers) as attention or high_attention with a clear Greek explanation.",
+    "- Judge criteria appropriate to the inferred subtype — pet food and human food have different healthy ranges; do not apply human dietary guidance to pet food or vice versa.",
+    "- Do not calculate a score.",
+    "- Do not claim unconditional product safety.",
+    "- Do not provide medical advice.",
+    "- Do not make pregnancy or child-safety conclusions.",
+    "- Do not invent regulatory status, source names or URLs.",
+    '- Use severity "unknown" and evidenceType "none" when evidence is unavailable.',
+    "- Write summary, title and explanation in Greek.",
+    "- Include between 4 and 12 entries in nutritionFindings, covering every value present in the text.",
+    "- Keep title under 40 characters.",
+    "- Keep explanation under 120 characters.",
+    "- Return ONLY the JSON object. No commentary. No Markdown. No code fences.",
+    "",
+    "Confirmed nutrition information:",
+    modelInputText,
+  ].join("\n");
+
+  try {
+    const startedAt = Date.now();
+
+    const modelOutput = await env.AI.run(textModel, {
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a nutrition analysis assistant. You always return a single valid JSON object and nothing else.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      max_tokens: 2048,
+      temperature: 0.2,
+    });
+
+    const modelText = extractModelText(modelOutput);
+    const cleanedText = modelText ? stripCodeFences(modelText) : null;
+
+    const result =
+      parseNutritionAnalysis(modelOutput) ??
+      (cleanedText ? parseNutritionAnalysis(cleanedText) : null);
+
+    console.log("nutrition_analysis_model_completed", {
+      requestId,
+      model: textModel,
+      durationMs: Date.now() - startedAt,
+      parsed: result !== null,
+      findings: result?.nutritionFindings?.length ?? 0,
+      extractedLength: modelText?.length ?? 0,
+    });
+
+    if (!result) {
+      return error(
+        "Η ανάλυση δεν ολοκληρώθηκε αξιόπιστα. Δοκιμάστε ξανά.",
+        502,
+        origin,
+        requestId,
+      );
+    }
+
+    const score = scoreNutrition(
+      modelInputText,
+      ocrConfidence,
+      result,
+      { extractionConfidence: extraction.confidence },
+    );
+
+    const nutritionInsights = buildNutritionInsights(
+      result,
+      score,
+    );
+
+    const executiveSummary = buildNutritionExecutiveSummary(
+      result,
+      score,
+    );
+
+    return json(
+      {
+        ...result,
+        score,
+        nutritionInsights,
+        executiveSummary,
+        contentCategory: "nutrition",
+      },
+      200,
+      origin,
+      requestId,
+    );
+  } catch (caughtError) {
+    console.error("nutrition_analysis_run_failed", {
+      requestId,
+      name:
+        caughtError instanceof Error
+          ? caughtError.name
+          : "unknown",
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
+async function runChemicalAnalysisPath(
+  requestBody: AnalysisRequestBody,
+  confirmedText: string,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const ocrConfidence = requestBody.ocrConfidence;
+
+  const extraction = extractChemicalComposition(
+    confirmedText,
+    ocrConfidence,
+  );
+
+  if (!extraction.isValid) {
+    console.log("chemical_validation_rejected", {
+      requestId,
+      reasons: extraction.reasons,
+      textLength: confirmedText.length,
+      ocrConfidence,
+    });
+
+    return chemicalInsufficientResponse(
+      extraction.reasons,
+      ocrConfidence,
+      origin,
+      requestId,
+    );
+  }
+
+  const modelInputText =
+    extraction.chemicalText ?? confirmedText;
+
+  const prompt = [
+    "Analyze the confirmed chemical composition data below.",
+    "",
+    "Return ONLY this exact JSON structure:",
+    "{",
+    '  "sourceType": "drinking_water",',
+    '  "summary": "short neutral summary in Greek",',
+    '  "positives": ["short Greek phrase"],',
+    '  "attentionItems": ["short Greek phrase"],',
+    '  "chemicalFindings": [',
+    "    {",
+    '      "substance": "Νιτρικά (NO3)",',
+    '      "normalizedName": "nitrate",',
+    '      "concentration": "12 mg/L",',
+    '      "referenceLimit": "≤ 50 mg/L (EU 2020/2184)",',
+    '      "severity": "info",',
+    '      "title": "short Greek title",',
+    '      "explanation": "short Greek explanation",',
+    '      "evidenceType": "none",',
+    '      "sourceName": null,',
+    '      "sourceUrl": null,',
+    '      "confidence": 0.5',
+    "    }",
+    "  ],",
+    '  "insufficientDataReasons": [],',
+    '  "confidence": 0.6',
+    "}",
+    "",
+    "Field rules:",
+    "- sourceType must be exactly one of: drinking_water, mineral_water, raw_material, unknown.",
+    "- Infer sourceType from the text itself.",
+    "- severity must be exactly one of: positive, info, attention, high_attention, unknown.",
+    "- evidenceType must be exactly one of: regulatory, scientific, label, none.",
+    "- confidence must be a number between 0 and 1.",
+    "- sourceName and sourceUrl must be null unless you have verified evidence.",
+    '- concentration should carry the value and unit exactly as printed (e.g. "12 mg/L"), or null if not given.',
+    "- referenceLimit must be null unless you have verified, cite-worthy evidence for a real safety/regulatory limit for that exact substance and sourceType — never invent a plausible-sounding number.",
+    "",
+    "Content rules:",
+    "- Only analyze elements/compounds that appear in the provided text.",
+    "- Never invent substances that are not in the provided text.",
+    "- Flag concentrations that exceed a well-established safety/regulatory limit as attention or high_attention, citing the limit in referenceLimit and explanation when you do.",
+    "- When you are not certain a concentration is unsafe, use severity info or unknown rather than attention — do not guess at toxicity.",
+    "- Do not calculate a score.",
+    "- Do not claim unconditional product safety.",
+    "- Do not provide medical advice.",
+    "- Do not invent regulatory status, source names or URLs.",
+    '- Use severity "unknown" and evidenceType "none" when evidence is unavailable.',
+    "- Write summary, title and explanation in Greek.",
+    "- Include between 3 and 12 entries in chemicalFindings, covering every value present in the text.",
+    "- Keep title under 40 characters.",
+    "- Keep explanation under 120 characters.",
+    "- Return ONLY the JSON object. No commentary. No Markdown. No code fences.",
+    "",
+    "Confirmed chemical composition data:",
+    modelInputText,
+  ].join("\n");
+
+  try {
+    const startedAt = Date.now();
+
+    const modelOutput = await env.AI.run(textModel, {
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a chemical composition analysis assistant. You always return a single valid JSON object and nothing else.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      max_tokens: 2048,
+      temperature: 0.2,
+    });
+
+    const modelText = extractModelText(modelOutput);
+    const cleanedText = modelText ? stripCodeFences(modelText) : null;
+
+    const result =
+      parseChemicalAnalysis(modelOutput) ??
+      (cleanedText ? parseChemicalAnalysis(cleanedText) : null);
+
+    console.log("chemical_analysis_model_completed", {
+      requestId,
+      model: textModel,
+      durationMs: Date.now() - startedAt,
+      parsed: result !== null,
+      findings: result?.chemicalFindings?.length ?? 0,
+      extractedLength: modelText?.length ?? 0,
+    });
+
+    if (!result) {
+      return error(
+        "Η ανάλυση δεν ολοκληρώθηκε αξιόπιστα. Δοκιμάστε ξανά.",
+        502,
+        origin,
+        requestId,
+      );
+    }
+
+    const score = scoreChemicalComposition(
+      modelInputText,
+      ocrConfidence,
+      result,
+      { extractionConfidence: extraction.confidence },
+    );
+
+    const chemicalInsights = buildChemicalInsights(
+      result,
+      score,
+    );
+
+    const executiveSummary = buildChemicalExecutiveSummary(
+      result,
+      score,
+    );
+
+    return json(
+      {
+        ...result,
+        score,
+        chemicalInsights,
+        executiveSummary,
+        contentCategory: "chemical_composition",
+      },
+      200,
+      origin,
+      requestId,
+    );
+  } catch (caughtError) {
+    console.error("chemical_analysis_run_failed", {
       requestId,
       name:
         caughtError instanceof Error
