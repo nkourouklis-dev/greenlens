@@ -158,6 +158,24 @@ function logCaptureDebug(
   }
 }
 
+// `focusMode` is a real, shipping capability (Chrome/Android; part of the
+// Media Capture "Image Capture" extensions) but missing from this TS
+// version's DOM lib types. An unsupported entry inside `advanced` is
+// simply ignored by the browser per spec — never a rejected constraint —
+// so requesting it costs nothing on a browser that doesn't understand it.
+interface ExtendedTrackConstraintSet
+  extends MediaTrackConstraintSet {
+  focusMode?: "continuous" | "single-shot" | "manual" | "none";
+}
+
+// Continuous autofocus matters most for this stream: it's shared between
+// framing a static photo (where the user consciously holds still) and the
+// live barcode decode loop below, which needs the lens to keep adjusting
+// on its own while frames are captured in quick succession.
+const CONTINUOUS_FOCUS: ExtendedTrackConstraintSet = {
+  focusMode: "continuous",
+};
+
 // Highest-resolution attempt first, then a widely-supported fallback, then
 // no resolution constraint at all (today's behaviour) as a last resort.
 // "ideal" constraints don't normally throw even when unmet — the browser
@@ -171,6 +189,7 @@ const CAMERA_CONSTRAINT_ATTEMPTS: MediaStreamConstraints[] = [
       facingMode: { ideal: "environment" },
       width: { ideal: 3840 },
       height: { ideal: 2160 },
+      advanced: [CONTINUOUS_FOCUS],
     },
   },
   {
@@ -179,11 +198,15 @@ const CAMERA_CONSTRAINT_ATTEMPTS: MediaStreamConstraints[] = [
       facingMode: { ideal: "environment" },
       width: { ideal: 1920 },
       height: { ideal: 1080 },
+      advanced: [CONTINUOUS_FOCUS],
     },
   },
   {
     audio: false,
-    video: { facingMode: { ideal: "environment" } },
+    video: {
+      facingMode: { ideal: "environment" },
+      advanced: [CONTINUOUS_FOCUS],
+    },
   },
 ];
 

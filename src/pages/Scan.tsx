@@ -14,6 +14,15 @@ import { buildAnalysisRecord } from "../services/analysisRecord";
 import type { ScanHistoryItem } from "../types";
 import { useCameraViewport } from "../contexts/CameraContext";
 
+// How many consecutive frame decodes must agree on the same value before a
+// camera-scanned barcode is accepted. A single frame can misread digits
+// (e.g. warped/blurred bars) and still land on a value that happens to
+// pass EAN-13 checksum validation, so checksum alone can't catch this —
+// requiring a short run of identical reads does, at the cost of a few
+// extra frames' worth of latency (imperceptible at typical decode rates
+// once the barcode is steady in frame).
+const REQUIRED_CONSECUTIVE_MATCHES = 3;
+
 export default function Scan() {
   const {
     containerRef,
@@ -33,6 +42,16 @@ export default function Scan() {
   const decodeStartingRef = useRef(false);
   const detectedRef = useRef(false);
   const scanRunRef = useRef(0);
+
+  // Tracks the current run of consecutive successful decodes that all
+  // agree on the same value. A live 1D scan attempts many frames a second;
+  // a single misread frame can still pass EAN-13 checksum validation (a
+  // corrupted-but-checksum-consistent read), so accepting on the very
+  // first decode is not reliable — see REQUIRED_CONSECUTIVE_MATCHES below.
+  const pendingBarcodeRef =
+    useRef<{ value: string; count: number } | null>(
+      null,
+    );
 
   const [barcode, setBarcode] = useState("");
   // Separate from `barcode` on purpose: `barcode` means "a camera scan
@@ -71,6 +90,7 @@ export default function Scan() {
     scanRunRef.current = scanRun;
     decodeStartingRef.current = true;
     detectedRef.current = false;
+    pendingBarcodeRef.current = null;
 
     setDecodeError("");
     setBarcode("");
@@ -107,6 +127,24 @@ export default function Scan() {
               result.getText();
 
             if (!scannedBarcode) {
+              return;
+            }
+
+            const pending = pendingBarcodeRef.current;
+
+            if (pending && pending.value === scannedBarcode) {
+              pending.count += 1;
+            } else {
+              pendingBarcodeRef.current = {
+                value: scannedBarcode,
+                count: 1,
+              };
+            }
+
+            if (
+              (pendingBarcodeRef.current?.count ?? 0) <
+              REQUIRED_CONSECUTIVE_MATCHES
+            ) {
               return;
             }
 
