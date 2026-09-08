@@ -14,6 +14,10 @@ const History = lazy(() => import("./pages/History"));
 const IngredientsReview = lazy(() => import("./pages/IngredientsReview"));
 const AnalysisRun = lazy(() => import("./pages/AnalysisRun"));
 const AdminCapture = lazy(() => import("./pages/AdminCapture"));
+const AdminProducts = lazy(() => import("./pages/AdminProducts"));
+const AdminProductDetail = lazy(
+  () => import("./pages/AdminProductDetail"),
+);
 
 function PageFallback() {
   return (
@@ -44,6 +48,15 @@ export default function App() {
               <Route path="/product/:id/analysis" element={<AnalysisRun />} />
               <Route path="/history" element={<History />} />
               <Route path="/admin/capture" element={<AdminCapture />} />
+              <Route path="/admin" element={<AdminProducts />} />
+              <Route
+                path="/admin/products"
+                element={<AdminProducts />}
+              />
+              <Route
+                path="/admin/products/:barcode"
+                element={<AdminProductDetail />}
+              />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>

@@ -41,6 +41,15 @@ import {
   type ProductPhotoRow,
 } from "./productPhotos";
 import {
+  listAdminProducts,
+  getAdminProduct,
+  saveVerifiedProduct,
+  deleteAdminProduct,
+  validateVerifiedAnalysisResult,
+  type AdminProductListItem,
+  type AdminProductDetail,
+} from "./adminProducts";
+import {
   identifyPrompt,
   parseProductIdentity,
   type ProductIdentity,
@@ -180,7 +189,15 @@ type JsonBody =
   | { found: false }
   | { found: true; result: JsonBody }
   | { r2Key: string }
-  | { photos: ProductPhotoRow[] };
+  | { photos: ProductPhotoRow[] }
+  | {
+      items: AdminProductListItem[];
+      page: number;
+      pageSize: number;
+      totalCount: number;
+    }
+  | { product: AdminProductDetail | null }
+  | { success: true };
 
 export default {
   async fetch(
@@ -410,11 +427,64 @@ function matchAdminPhotosPath(
   }
 }
 
+// Matches /api/admin/products/<barcode> exactly — the PIM detail/edit/
+// delete route (GET/PUT/DELETE; method decides which).
+function matchAdminProductPath(
+  pathname: string,
+): string | null {
+  const segments = pathname.split("/");
+
+  const matches =
+    segments.length === 5 &&
+    segments[0] === "" &&
+    segments[1] === "api" &&
+    segments[2] === "admin" &&
+    segments[3] === "products" &&
+    segments[4].length > 0;
+
+  if (!matches) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(segments[4]);
+  } catch {
+    return null;
+  }
+}
+
+// Matches /api/admin/products/<barcode>/analyze.
+function matchAdminProductAnalyzePath(
+  pathname: string,
+): string | null {
+  const segments = pathname.split("/");
+
+  const matches =
+    segments.length === 6 &&
+    segments[0] === "" &&
+    segments[1] === "api" &&
+    segments[2] === "admin" &&
+    segments[3] === "products" &&
+    segments[4].length > 0 &&
+    segments[5] === "analyze";
+
+  if (!matches) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(segments[4]);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Sub-router for the whole /api/admin/* surface (the bulk in-store photo
- * capture flow). Every route here shares one gate: a shared-secret header
- * checked before any route is even matched, so a new route added below
- * can never accidentally ship unauthenticated.
+ * capture flow, and the PIM list/detail/edit screens built on top of it).
+ * Every route here shares one gate: a shared-secret header checked before
+ * any route is even matched, so a new route added below can never
+ * accidentally ship unauthenticated.
  */
 async function runAdminRequest(
   request: Request,
@@ -480,6 +550,68 @@ async function runAdminRequest(
       origin,
       requestId,
     );
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname === "/api/admin/products"
+  ) {
+    return runAdminListProducts(
+      url,
+      env,
+      origin,
+      requestId,
+    );
+  }
+
+  const analyzeBarcode = matchAdminProductAnalyzePath(
+    url.pathname,
+  );
+
+  if (
+    analyzeBarcode !== null &&
+    request.method === "POST"
+  ) {
+    return runAdminAnalyzeProduct(
+      analyzeBarcode,
+      env,
+      origin,
+      requestId,
+    );
+  }
+
+  const productBarcode = matchAdminProductPath(
+    url.pathname,
+  );
+
+  if (productBarcode !== null) {
+    if (request.method === "GET") {
+      return runAdminGetProduct(
+        productBarcode,
+        env,
+        origin,
+        requestId,
+      );
+    }
+
+    if (request.method === "PUT") {
+      return runAdminUpdateProduct(
+        productBarcode,
+        request,
+        env,
+        origin,
+        requestId,
+      );
+    }
+
+    if (request.method === "DELETE") {
+      return runAdminDeleteProduct(
+        productBarcode,
+        env,
+        origin,
+        requestId,
+      );
+    }
   }
 
   return error(
@@ -726,6 +858,401 @@ async function runAdminServePhoto(
       ...corsHeaders(origin),
     },
   });
+}
+
+async function runAdminListProducts(
+  url: URL,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const pageParam = Number.parseInt(
+    url.searchParams.get("page") ?? "1",
+    10,
+  );
+
+  try {
+    const list = await listAdminProducts(env.DB, {
+      status: url.searchParams.get("status") ?? undefined,
+      barcodeSearch:
+        url.searchParams.get("search") ?? undefined,
+      page: Number.isFinite(pageParam) ? pageParam : 1,
+    });
+
+    return json(list, 200, origin, requestId);
+  } catch (caughtError) {
+    console.error("admin_product_list_failed", {
+      requestId,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Η λίστα προϊόντων δεν φορτώθηκε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
+async function runAdminGetProduct(
+  barcode: string,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  try {
+    const product = await getAdminProduct(env.DB, barcode);
+
+    if (!product) {
+      return error(
+        "Το προϊόν δεν βρέθηκε.",
+        404,
+        origin,
+        requestId,
+      );
+    }
+
+    return json({ product }, 200, origin, requestId);
+  } catch (caughtError) {
+    console.error("admin_product_get_failed", {
+      requestId,
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Το προϊόν δεν φορτώθηκε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
+async function runAdminUpdateProduct(
+  barcode: string,
+  request: Request,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const body = await readJson(request);
+
+  if (!isRecord(body)) {
+    return error(
+      "Το αίτημα δεν είναι έγκυρο.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  const validated = validateVerifiedAnalysisResult(
+    body.analysisResult,
+  );
+
+  if (!validated) {
+    return error(
+      "Το αποτέλεσμα ανάλυσης δεν έχει έγκυρη μορφή. Ελέγξτε ότι κάθε πεδίο (περίληψη, ευρήματα, βαθμολογία) είναι συμπληρωμένο σωστά.",
+      422,
+      origin,
+      requestId,
+    );
+  }
+
+  const category =
+    typeof body.category === "string"
+      ? body.category
+      : undefined;
+
+  try {
+    await saveVerifiedProduct(env.DB, {
+      barcode,
+      category,
+      analysisResult: validated,
+    });
+
+    const product = await getAdminProduct(env.DB, barcode);
+
+    if (!product) {
+      return error(
+        "Το προϊόν δεν βρέθηκε.",
+        404,
+        origin,
+        requestId,
+      );
+    }
+
+    console.log("admin_product_verified", {
+      requestId,
+      barcode,
+    });
+
+    return json({ product }, 200, origin, requestId);
+  } catch (caughtError) {
+    console.error("admin_product_update_failed", {
+      requestId,
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Η αποθήκευση απέτυχε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
+async function runAdminDeleteProduct(
+  barcode: string,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  try {
+    await deleteAdminProduct(env.DB, env.PHOTOS, barcode);
+
+    console.log("admin_product_deleted", {
+      requestId,
+      barcode,
+    });
+
+    return json(
+      { success: true },
+      200,
+      origin,
+      requestId,
+    );
+  } catch (caughtError) {
+    console.error("admin_product_delete_failed", {
+      requestId,
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Η διαγραφή απέτυχε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
+/**
+ * Re-runs OCR + AI analysis for a draft product from its already-captured
+ * photos in R2 — the PIM's "Ανάλυση τώρα" button. Reuses the exact same
+ * analyzeIngredientsCore/analyzeNutritionCore pipeline the live
+ * /api/analysis/run endpoint uses (including its cache-write, which is
+ * also what correctly flips a 'draft' row to 'ai_generated' — see the
+ * comment on saveProductResult), so nothing about the analysis itself is
+ * duplicated here — this function only sources the OCR input differently
+ * (an R2 object instead of a live upload).
+ *
+ * Category is chosen from whichever photo exists: an 'ingredients' photo
+ * wins over a 'nutrition' one if both are present, since ingredients is
+ * this app's primary path. There is no chemical_composition option here
+ * — the capture flow's photo_type enum (front/ingredients/nutrition/
+ * other) has no slot for it, so a chemical-composition product can't
+ * reach this endpoint with an analyzable photo at all.
+ */
+async function runAdminAnalyzeProduct(
+  barcode: string,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  let photos: ProductPhotoRow[];
+
+  try {
+    photos = await listProductPhotos(env.DB, barcode);
+  } catch (caughtError) {
+    console.error("admin_analyze_photo_lookup_failed", {
+      requestId,
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Δεν ήταν δυνατή η ανάκτηση των φωτογραφιών.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+
+  const ingredientsPhoto = photos.find(
+    (photo) => photo.photoType === "ingredients",
+  );
+
+  const nutritionPhoto = photos.find(
+    (photo) => photo.photoType === "nutrition",
+  );
+
+  const chosen = ingredientsPhoto
+    ? { category: "ingredients" as const, photo: ingredientsPhoto }
+    : nutritionPhoto
+      ? { category: "nutrition" as const, photo: nutritionPhoto }
+      : null;
+
+  if (!chosen) {
+    return error(
+      "Δεν υπάρχει φωτογραφία συστατικών ή διατροφικού πίνακα για αυτό το barcode.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  const azureEnv = env as AzureVisionEnvironment;
+
+  if (
+    !azureEnv.AZURE_VISION_ENDPOINT ||
+    !azureEnv.AZURE_VISION_KEY
+  ) {
+    return error(
+      "Η υπηρεσία OCR δεν έχει ρυθμιστεί σωστά στον διακομιστή (AZURE_VISION).",
+      503,
+      origin,
+      requestId,
+    );
+  }
+
+  let object: R2ObjectBody | null;
+
+  try {
+    object = await env.PHOTOS.get(chosen.photo.r2Key);
+  } catch (caughtError) {
+    console.error("admin_analyze_photo_fetch_failed", {
+      requestId,
+      barcode,
+      r2Key: chosen.photo.r2Key,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Η ανάκτηση της φωτογραφίας απέτυχε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+
+  if (!object) {
+    return error(
+      "Η φωτογραφία δεν βρέθηκε στο αποθηκευτικό χώρο.",
+      404,
+      origin,
+      requestId,
+    );
+  }
+
+  const imageFile = new File(
+    [await object.arrayBuffer()],
+    "capture.jpg",
+    {
+      type: object.httpMetadata?.contentType || "image/jpeg",
+    },
+  );
+
+  let ocrResult: OcrResponse;
+
+  try {
+    ocrResult = await extractWithAzureOcr(
+      imageFile,
+      azureEnv.AZURE_VISION_ENDPOINT,
+      azureEnv.AZURE_VISION_KEY,
+      azureEnv.AZURE_VISION_LANGUAGE,
+    );
+  } catch (caughtError) {
+    console.error("admin_analyze_ocr_failed", {
+      requestId,
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      caughtError instanceof Error
+        ? caughtError.message
+        : "Το OCR απέτυχε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+
+  const outcome =
+    chosen.category === "ingredients"
+      ? await analyzeIngredientsCore(
+          barcode,
+          ocrResult.rawText,
+          ocrResult.confidence,
+          ocrResult.labelType,
+          env,
+          requestId,
+        )
+      : await analyzeNutritionCore(
+          barcode,
+          ocrResult.rawText,
+          ocrResult.confidence,
+          env,
+          requestId,
+        );
+
+  if (!outcome.ok) {
+    if (outcome.kind === "insufficient") {
+      return error(
+        outcome.reasons.join(" ") ||
+          "Δεν υπήρχαν αρκετά στοιχεία στη φωτογραφία για ανάλυση.",
+        422,
+        origin,
+        requestId,
+      );
+    }
+
+    return error(
+      outcome.kind === "model_failed"
+        ? "Η ανάλυση δεν ολοκληρώθηκε αξιόπιστα. Δοκιμάστε ξανά."
+        : "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+
+  const product = await getAdminProduct(env.DB, barcode);
+
+  console.log("admin_product_analyzed", {
+    requestId,
+    barcode,
+    category: chosen.category,
+  });
+
+  return json({ product }, 200, origin, requestId);
 }
 
 async function runOcr(
@@ -1037,7 +1564,7 @@ function corsHeaders(
     headers["Access-Control-Allow-Origin"] =
       origin;
     headers["Access-Control-Allow-Methods"] =
-      "GET, POST, OPTIONS";
+      "GET, POST, PUT, DELETE, OPTIONS";
     headers["Access-Control-Allow-Headers"] =
       "Content-Type, X-Admin-Password";
   }
@@ -1525,18 +2052,38 @@ async function resolveContentCategory(
   return { category: "unknown", confidence: 0, source: "ai" };
 }
 
-async function runIngredientsAnalysis(
-  requestBody: AnalysisRequestBody,
+type IngredientsAnalysisOutcome =
+  | {
+      ok: true;
+      responseBody: WorkerAnalysisResult & {
+        score: WorkerScore;
+        ingredientInsights: IngredientInsight[];
+        executiveSummary: ExecutiveSummary;
+        allergenNotice: AllergenNotice | null;
+        contentCategory: "ingredients";
+      };
+    }
+  | { ok: false; kind: "insufficient"; reasons: string[] }
+  | { ok: false; kind: "model_failed" }
+  | { ok: false; kind: "exception" };
+
+/**
+ * The actual OCR-text-in, scored-result-out ingredients pipeline — same
+ * prompt, parsing, allergen handling, scoring and cache-write regardless
+ * of caller. Shared by the live /api/analysis/run endpoint
+ * (runIngredientsAnalysis below, a thin Response-shaping wrapper) and the
+ * admin re-analyze endpoint (runAdminAnalyzeProduct), so a photo captured
+ * by the bulk in-store flow and later analyzed from the PIM goes through
+ * the exact same logic a live scan would.
+ */
+async function analyzeIngredientsCore(
+  barcode: string,
   confirmedText: string,
+  ocrConfidence: number,
+  ocrLabelType: LabelType,
   env: Env,
-  origin: string | null,
   requestId: string,
-): Promise<Response> {
-  const ocrLabelType: LabelType =
-    requestBody.ocrLabelType ?? "unknown";
-
-  const ocrConfidence = requestBody.ocrConfidence;
-
+): Promise<IngredientsAnalysisOutcome> {
   // Single shared evaluation of the label text, identical to the OCR gate.
   const evaluation =
     evaluateLabelText(confirmedText);
@@ -1654,15 +2201,13 @@ async function runIngredientsAnalysis(
       },
     );
 
-    return insufficientResponse(
-      [
+    return {
+      ok: false,
+      kind: "insufficient",
+      reasons: [
         "Δεν εντοπίστηκε λίστα συστατικών σε αυτή τη φωτογραφία. Ξαναφωτογράφισε την πίσω πλευρά της συσκευασίας.",
       ],
-      ocrConfidence,
-      env.DB,
-      origin,
-      requestId,
-    );
+    };
   }
 
   if (overrideNutritionRejection) {
@@ -1804,12 +2349,7 @@ async function runIngredientsAnalysis(
     });
 
     if (!result) {
-      return error(
-        "Η ανάλυση δεν ολοκληρώθηκε αξιόπιστα. Δοκιμάστε ξανά.",
-        502,
-        origin,
-        requestId,
-      );
+      return { ok: false, kind: "model_failed" };
     }
 
     const detectedType =
@@ -1850,7 +2390,7 @@ async function runIngredientsAnalysis(
 
     const score = scoreInterpretation(
       analysisText,
-      requestBody.ocrConfidence,
+      ocrConfidence,
       result,
       {
         extractionConfidence: extraction.confidence,
@@ -1890,18 +2430,13 @@ async function runIngredientsAnalysis(
     // "insufficient data" answer forever.
     if (score.score !== null) {
       await saveProductResult(env.DB, {
-        barcode: requestBody.barcode,
+        barcode,
         category: "ingredients",
         analysisResult: responseBody,
       });
     }
 
-    return json(
-      responseBody,
-      200,
-      origin,
-      requestId,
-    );
+    return { ok: true, responseBody };
   } catch (caughtError) {
     console.error("analysis_run_failed", {
       requestId,
@@ -1915,24 +2450,82 @@ async function runIngredientsAnalysis(
           : String(caughtError).slice(0, 300),
     });
 
-    return error(
-      "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.",
-      502,
-      origin,
-      requestId,
-    );
+    return { ok: false, kind: "exception" };
   }
 }
 
-async function runNutritionAnalysis(
+async function runIngredientsAnalysis(
   requestBody: AnalysisRequestBody,
   confirmedText: string,
   env: Env,
   origin: string | null,
   requestId: string,
 ): Promise<Response> {
-  const ocrConfidence = requestBody.ocrConfidence;
+  const outcome = await analyzeIngredientsCore(
+    requestBody.barcode,
+    confirmedText,
+    requestBody.ocrConfidence,
+    requestBody.ocrLabelType ?? "unknown",
+    env,
+    requestId,
+  );
 
+  if (!outcome.ok) {
+    if (outcome.kind === "insufficient") {
+      return insufficientResponse(
+        outcome.reasons,
+        requestBody.ocrConfidence,
+        env.DB,
+        origin,
+        requestId,
+      );
+    }
+
+    return error(
+      outcome.kind === "model_failed"
+        ? "Η ανάλυση δεν ολοκληρώθηκε αξιόπιστα. Δοκιμάστε ξανά."
+        : "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+
+  return json(
+    outcome.responseBody,
+    200,
+    origin,
+    requestId,
+  );
+}
+
+type NutritionAnalysisOutcome =
+  | {
+      ok: true;
+      responseBody: WorkerNutritionResult & {
+        score: WorkerScore;
+        nutritionInsights: NutritionInsight[];
+        executiveSummary: ExecutiveSummary;
+        allergenNotice: AllergenNotice | null;
+        contentCategory: "nutrition";
+      };
+    }
+  | { ok: false; kind: "insufficient"; reasons: string[] }
+  | { ok: false; kind: "model_failed" }
+  | { ok: false; kind: "exception" };
+
+/**
+ * Same role as analyzeIngredientsCore, for the nutrition path — shared by
+ * the live endpoint (runNutritionAnalysis, a thin wrapper) and the admin
+ * re-analyze endpoint.
+ */
+async function analyzeNutritionCore(
+  barcode: string,
+  confirmedText: string,
+  ocrConfidence: number,
+  env: Env,
+  requestId: string,
+): Promise<NutritionAnalysisOutcome> {
   const extraction = extractNutritionData(
     confirmedText,
     ocrConfidence,
@@ -1946,12 +2539,11 @@ async function runNutritionAnalysis(
       ocrConfidence,
     });
 
-    return nutritionInsufficientResponse(
-      extraction.reasons,
-      ocrConfidence,
-      origin,
-      requestId,
-    );
+    return {
+      ok: false,
+      kind: "insufficient",
+      reasons: extraction.reasons,
+    };
   }
 
   const modelInputText =
@@ -2051,12 +2643,7 @@ async function runNutritionAnalysis(
     });
 
     if (!result) {
-      return error(
-        "Η ανάλυση δεν ολοκληρώθηκε αξιόπιστα. Δοκιμάστε ξανά.",
-        502,
-        origin,
-        requestId,
-      );
+      return { ok: false, kind: "model_failed" };
     }
 
     // Identical allergen handling to the ingredients path, so a nutrition
@@ -2103,18 +2690,13 @@ async function runNutritionAnalysis(
     // and that's a fact about this scan, not the product.
     if (score.score !== null) {
       await saveProductResult(env.DB, {
-        barcode: requestBody.barcode,
+        barcode,
         category: "nutrition",
         analysisResult: responseBody,
       });
     }
 
-    return json(
-      responseBody,
-      200,
-      origin,
-      requestId,
-    );
+    return { ok: true, responseBody };
   } catch (caughtError) {
     console.error("nutrition_analysis_run_failed", {
       requestId,
@@ -2128,13 +2710,51 @@ async function runNutritionAnalysis(
           : String(caughtError).slice(0, 300),
     });
 
+    return { ok: false, kind: "exception" };
+  }
+}
+
+async function runNutritionAnalysis(
+  requestBody: AnalysisRequestBody,
+  confirmedText: string,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const outcome = await analyzeNutritionCore(
+    requestBody.barcode,
+    confirmedText,
+    requestBody.ocrConfidence,
+    env,
+    requestId,
+  );
+
+  if (!outcome.ok) {
+    if (outcome.kind === "insufficient") {
+      return nutritionInsufficientResponse(
+        outcome.reasons,
+        requestBody.ocrConfidence,
+        origin,
+        requestId,
+      );
+    }
+
     return error(
-      "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.",
+      outcome.kind === "model_failed"
+        ? "Η ανάλυση δεν ολοκληρώθηκε αξιόπιστα. Δοκιμάστε ξανά."
+        : "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.",
       502,
       origin,
       requestId,
     );
   }
+
+  return json(
+    outcome.responseBody,
+    200,
+    origin,
+    requestId,
+  );
 }
 
 async function runChemicalAnalysisPath(

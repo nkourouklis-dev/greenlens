@@ -183,13 +183,13 @@ export async function incrementProductScanCount(
 }
 
 /**
- * Saves a freshly computed analysis result for future cache hits. Only
- * ever called after a cache miss for this barcode, so a plain insert would
- * normally suffice — the upsert only exists to survive two concurrent
- * first-time requests for the same never-before-seen barcode racing each
- * other. The `WHERE status != 'verified'` guard means a future
- * human-verified entry (no code path sets that status yet — prep for the
- * PIM review flow) can never be silently clobbered by a routine rescan.
+ * Saves a freshly computed analysis result for future cache hits. Also the
+ * one place a 'draft' row (photos captured in-store, no analysis yet — see
+ * worker/productPhotos.ts) or a 'needs_review' row transitions back to
+ * 'ai_generated': a fresh, real analysis supersedes either. The
+ * `WHERE status != 'verified'` guard means a human-verified entry (set by
+ * the admin PUT endpoint) can never be silently clobbered by a routine
+ * rescan or a re-analyze call — the whole UPDATE is skipped for it.
  *
  * Never throws — a failure to cache must not fail the request that already
  * has a perfectly good, freshly computed result to return.
@@ -212,6 +212,7 @@ export async function saveProductResult(
            product_name = excluded.product_name,
            category = excluded.category,
            analysis_result = excluded.analysis_result,
+           status = 'ai_generated',
            updated_at = datetime('now')
          WHERE products.status != 'verified'`,
       )
