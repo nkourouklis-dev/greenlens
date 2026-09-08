@@ -61,6 +61,12 @@ import {
   extractIngredientText,
 } from "./ingredientText";
 import {
+  evaluateContentGate,
+} from "./contentGate";
+import {
+  filterIrrelevantSegments,
+} from "./contentFilter";
+import {
   detectContentCategoryHeuristic,
   buildCategoryClassificationPrompt,
   parseCategoryClassification,
@@ -1205,6 +1211,11 @@ async function runAdminAnalyzeProduct(
     );
   }
 
+  // Best-effort only — a lookup miss or D1 failure just means the noise
+  // filter below has no title to match against, same as any other scan.
+  const cachedForTitle = await lookupCachedProduct(env.DB, barcode);
+  const productTitle = cachedForTitle?.productName ?? undefined;
+
   const outcome =
     chosen.category === "ingredients"
       ? await analyzeIngredientsCore(
@@ -1214,6 +1225,7 @@ async function runAdminAnalyzeProduct(
           ocrResult.labelType,
           env,
           requestId,
+          productTitle,
         )
       : await analyzeNutritionCore(
           barcode,
@@ -1221,6 +1233,7 @@ async function runAdminAnalyzeProduct(
           ocrResult.confidence,
           env,
           requestId,
+          productTitle,
         );
 
   if (!outcome.ok) {
@@ -1595,6 +1608,12 @@ interface AnalysisRequestBody {
   ocrLabelType?: LabelType;
   ocrTextLength?: number;
   categoryOverride?: ContentCategory;
+  // Product title/brand already known from an earlier step (barcode lookup
+  // or vision identify), if any — used only to filter that same text out of
+  // the extracted ingredients/nutrition/chemical block when OCR captures it
+  // there too. Never treated as authoritative; a missing value just means
+  // that particular filter has nothing to compare against.
+  productTitle?: string;
 }
 
 function isAnalysisRequest(
@@ -1627,7 +1646,10 @@ function isAnalysisRequest(
       value.categoryOverride === "ingredients" ||
       value.categoryOverride === "nutrition" ||
       value.categoryOverride === "chemical_composition" ||
-      value.categoryOverride === "unknown")
+      value.categoryOverride === "unknown") &&
+    (value.productTitle === undefined ||
+      (typeof value.productTitle === "string" &&
+        value.productTitle.length <= 200))
   );
 }
 
@@ -2083,6 +2105,7 @@ async function analyzeIngredientsCore(
   ocrLabelType: LabelType,
   env: Env,
   requestId: string,
+  productTitle?: string,
 ): Promise<IngredientsAnalysisOutcome> {
   // Single shared evaluation of the label text, identical to the OCR gate.
   const evaluation =
@@ -2154,6 +2177,27 @@ async function analyzeIngredientsCore(
       ? "ocr_confirmed_ingredients"
       : "server_text_evidence";
 
+  // A nutrition-only rejection overridden by our own evidence is accepted
+  // on strength proportional to *why* it was overridden: OCR itself having
+  // confidently called this "ingredients" is strong corroborating evidence,
+  // while disagreeing with the deterministic validator on text shape alone
+  // is weaker. Feeding this through the same evaluateContentGate used below
+  // (and by the nutrition/chemical paths) means there is exactly one place
+  // that decides "confident enough to score" for every acceptance route,
+  // instead of the override silently bypassing that decision.
+  const effectiveExtraction = overrideNutritionRejection
+    ? {
+        isValid: true,
+        confidence:
+          overrideReason === "ocr_confirmed_ingredients"
+            ? ocrConfidence
+            : Math.min(ocrConfidence * 0.6, 0.6),
+        reasons: [] as string[],
+      }
+    : extraction;
+
+  const gate = evaluateContentGate(effectiveExtraction);
+
   console.log("ingredient_validation_diagnostics", {
     requestId,
     endpoint: "/api/analysis/run",
@@ -2176,21 +2220,20 @@ async function analyzeIngredientsCore(
     validationReasons: reasons,
     overrideApplied: overrideNutritionRejection,
     overrideReason,
-    extractionQuality:
-      extraction.isValid || overrideNutritionRejection
-        ? "high"
-        : "fallback",
+    gatePassed: gate.passed,
+    gateConfidence: gate.confidence,
   });
 
-  if (
-    !extraction.isValid &&
-    !overrideNutritionRejection
-  ) {
+  // Single decision point: either this passes the gate and gets a full
+  // score + allergen list + verdict, or it doesn't and the caller renders
+  // only the reasons below — never both at once.
+  if (!gate.passed) {
     console.log(
       "ingredient_validation_rejected",
       {
         requestId,
         reasons,
+        gateReasons: gate.reasons,
         textLength: analysisText.length,
         ocrLabelType,
         ocrConfidence,
@@ -2204,9 +2247,13 @@ async function analyzeIngredientsCore(
     return {
       ok: false,
       kind: "insufficient",
-      reasons: [
-        "Δεν εντοπίστηκε λίστα συστατικών σε αυτή τη φωτογραφία. Ξαναφωτογράφισε την πίσω πλευρά της συσκευασίας.",
-      ],
+      reasons: extraction.isValid
+        ? [
+            "Δεν εντοπίστηκε ένδειξη «Συστατικά» στο κείμενο — η ανάγνωση μπορεί να είναι αβέβαιη. Ξαναφωτογράφισε την πίσω πλευρά της συσκευασίας.",
+          ]
+        : [
+            "Δεν εντοπίστηκε λίστα συστατικών σε αυτή τη φωτογραφία. Ξαναφωτογράφισε την πίσω πλευρά της συσκευασίας.",
+          ],
     };
   }
 
@@ -2226,6 +2273,27 @@ async function analyzeIngredientsCore(
           evaluation.numericUnitCount,
       },
     );
+  }
+
+  // Deterministic filter: drops the product's own brand/title, legal/
+  // origin boilerplate and meaningless short codes before this text ever
+  // reaches the model, so none of it can be mistaken for an ingredient.
+  const filtered = filterIrrelevantSegments(
+    modelInputText,
+    "ingredients",
+    { productTitle },
+  );
+
+  const filteredModelInputText =
+    filtered.text.trim().length >= 12
+      ? filtered.text
+      : modelInputText;
+
+  if (filtered.removedSegments.length > 0) {
+    console.log("ingredient_noise_filtered", {
+      requestId,
+      removedSegments: filtered.removedSegments,
+    });
   }
 
   const prompt = [
@@ -2271,6 +2339,7 @@ async function analyzeIngredientsCore(
     "- Never add ingredients that are not in the provided list.",
     "- Ignore any nutrition declaration values (energy, fat, carbohydrates, protein, vitamins with amounts).",
     "- If the provided text contains no actual ingredient names, return empty arrays and explain in insufficientDataReasons.",
+    "- Ignore brand names, manufacturer/legal/country-of-origin text, and meaningless short codes or symbols — these are not ingredients.",
     "- Being a recognised EU allergen (gluten/cereals, milk, egg, sulphites, nuts, peanuts, sesame, soy, fish, crustaceans, molluscs, celery, mustard, lupin) is NOT by itself a problem.",
     '- For such an ingredient use severity "info" and describe what it is, not that it can cause an allergy — the app shows the allergen list separately.',
     "- Reserve attention/high_attention for a real problem: artificial additives, excessive sugar/salt/fat, a substance with a documented safety concern, or an undeclared quantity.",
@@ -2291,7 +2360,7 @@ async function analyzeIngredientsCore(
     "- Return ONLY the JSON object. No commentary. No Markdown. No code fences.",
     "",
     "Confirmed ingredients:",
-    modelInputText,
+    filteredModelInputText,
   ].join("\n");
 
   try {
@@ -2374,27 +2443,18 @@ async function analyzeIngredientsCore(
       result.attentionItems,
     );
 
-    // Surface *why* a full score is being shown despite shaky evidence,
-    // without blocking anything — the user sees this as a caveat next to
-    // the result, not a rejection.
-    const acceptedWithoutHeading =
-      extraction.isValid &&
-      !evaluation.hasIngredientHeading;
-
-    const lowConfidenceReason: string | null =
-      overrideNutritionRejection
-        ? "Το κείμενο μοιάζει και με διατροφικό πίνακα — ελέγξτε ότι είναι όντως η λίστα συστατικών."
-        : acceptedWithoutHeading
-          ? "Δεν εντοπίστηκε ένδειξη «Συστατικά» στο κείμενο — η ανάγνωση μπορεί να είναι αβέβαιη."
-          : null;
-
+    // No caveat to surface here any more: reaching this point already means
+    // the content gate above passed, so there is no "shown despite shaky
+    // evidence" state left to flag — a caller only ever sees a full score
+    // (this path) or the gate's rejection reasons (the early return above),
+    // never both.
     const score = scoreInterpretation(
       analysisText,
       ocrConfidence,
       result,
       {
-        extractionConfidence: extraction.confidence,
-        lowConfidenceReason,
+        extractionConfidence: gate.confidence,
+        lowConfidenceReason: null,
       },
     );
 
@@ -2468,6 +2528,7 @@ async function runIngredientsAnalysis(
     requestBody.ocrLabelType ?? "unknown",
     env,
     requestId,
+    requestBody.productTitle,
   );
 
   if (!outcome.ok) {
@@ -2525,16 +2586,23 @@ async function analyzeNutritionCore(
   ocrConfidence: number,
   env: Env,
   requestId: string,
+  productTitle?: string,
 ): Promise<NutritionAnalysisOutcome> {
   const extraction = extractNutritionData(
     confirmedText,
     ocrConfidence,
   );
 
-  if (!extraction.isValid) {
+  // Same shared decision point as the ingredients path: pass, or render
+  // only the reasons below — never a score alongside a low-confidence
+  // message.
+  const gate = evaluateContentGate(extraction);
+
+  if (!gate.passed) {
     console.log("nutrition_validation_rejected", {
       requestId,
       reasons: extraction.reasons,
+      gateReasons: gate.reasons,
       textLength: confirmedText.length,
       ocrConfidence,
     });
@@ -2542,12 +2610,30 @@ async function analyzeNutritionCore(
     return {
       ok: false,
       kind: "insufficient",
-      reasons: extraction.reasons,
+      reasons: gate.reasons,
     };
   }
 
   const modelInputText =
     extraction.nutritionText ?? confirmedText;
+
+  const filtered = filterIrrelevantSegments(
+    modelInputText,
+    "nutrition",
+    { productTitle },
+  );
+
+  const filteredModelInputText =
+    filtered.text.trim().length >= 12
+      ? filtered.text
+      : modelInputText;
+
+  if (filtered.removedSegments.length > 0) {
+    console.log("nutrition_noise_filtered", {
+      requestId,
+      removedSegments: filtered.removedSegments,
+    });
+  }
 
   const prompt = [
     "Analyze the confirmed nutrition information below.",
@@ -2589,6 +2675,7 @@ async function analyzeNutritionCore(
     "- Only analyze nutrients/values that appear in the provided text.",
     "- Never invent nutrients that are not in the provided text.",
     "- Flag high sugar, high saturated fat, high salt/sodium and artificial additives (E-numbers) as attention or high_attention with a clear Greek explanation.",
+    "- Ignore brand names, manufacturer/legal/country-of-origin text, and meaningless short codes or symbols — these are not nutrients.",
     "- Judge criteria appropriate to the inferred subtype — pet food and human food have different healthy ranges; do not apply human dietary guidance to pet food or vice versa.",
     '- Being a recognised EU allergen (gluten/cereals, milk, egg, sulphites, nuts, peanuts, sesame, soy, fish, crustaceans, molluscs, celery, mustard, lupin) is NOT by itself a problem: use severity "info" for it, since the app shows the allergen list separately.',
     "- Do not calculate a score.",
@@ -2604,7 +2691,7 @@ async function analyzeNutritionCore(
     "- Return ONLY the JSON object. No commentary. No Markdown. No code fences.",
     "",
     "Confirmed nutrition information:",
-    modelInputText,
+    filteredModelInputText,
   ].join("\n");
 
   try {
@@ -2727,6 +2814,7 @@ async function runNutritionAnalysis(
     requestBody.ocrConfidence,
     env,
     requestId,
+    requestBody.productTitle,
   );
 
   if (!outcome.ok) {
@@ -2771,16 +2859,20 @@ async function runChemicalAnalysisPath(
     ocrConfidence,
   );
 
-  if (!extraction.isValid) {
+  // Same shared decision point as the ingredients/nutrition paths.
+  const gate = evaluateContentGate(extraction);
+
+  if (!gate.passed) {
     console.log("chemical_validation_rejected", {
       requestId,
       reasons: extraction.reasons,
+      gateReasons: gate.reasons,
       textLength: confirmedText.length,
       ocrConfidence,
     });
 
     return chemicalInsufficientResponse(
-      extraction.reasons,
+      gate.reasons,
       ocrConfidence,
       origin,
       requestId,
@@ -2789,6 +2881,26 @@ async function runChemicalAnalysisPath(
 
   const modelInputText =
     extraction.chemicalText ?? confirmedText;
+
+  // No short-code filtering here — bare element symbols (Pb, Ca, Fe...) are
+  // this category's actual content, not noise.
+  const filtered = filterIrrelevantSegments(
+    modelInputText,
+    "chemical_composition",
+    { productTitle: requestBody.productTitle },
+  );
+
+  const filteredModelInputText =
+    filtered.text.trim().length >= 12
+      ? filtered.text
+      : modelInputText;
+
+  if (filtered.removedSegments.length > 0) {
+    console.log("chemical_noise_filtered", {
+      requestId,
+      removedSegments: filtered.removedSegments,
+    });
+  }
 
   const prompt = [
     "Analyze the confirmed chemical composition data below.",
@@ -2831,6 +2943,7 @@ async function runChemicalAnalysisPath(
     "Content rules:",
     "- Only analyze elements/compounds that appear in the provided text.",
     "- Never invent substances that are not in the provided text.",
+    "- Ignore brand names and manufacturer/legal/country-of-origin text — these are not chemical substances.",
     "- Flag concentrations that exceed a well-established safety/regulatory limit as attention or high_attention, citing the limit in referenceLimit and explanation when you do.",
     "- When you are not certain a concentration is unsafe, use severity info or unknown rather than attention — do not guess at toxicity.",
     "- Do not calculate a score.",
@@ -2845,7 +2958,7 @@ async function runChemicalAnalysisPath(
     "- Return ONLY the JSON object. No commentary. No Markdown. No code fences.",
     "",
     "Confirmed chemical composition data:",
-    modelInputText,
+    filteredModelInputText,
   ].join("\n");
 
   try {
