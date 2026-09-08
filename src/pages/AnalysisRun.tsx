@@ -4,7 +4,11 @@ import {
   useParams,
 } from "react-router-dom";
 import { analysisVersion } from "../config";
-import { runAnalysis, type AnalysisApiResult } from "../services/analysisClient";
+import { runAnalysis } from "../services/analysisClient";
+import {
+  buildAnalysisRecord,
+  insufficientScore,
+} from "../services/analysisRecord";
 import { UserFacingError } from "../services/errors";
 import { normalizeIngredients } from "../services/ingredientNormalizer";
 import { extractIngredientText } from "../../worker/ingredientText";
@@ -13,13 +17,7 @@ import {
   getHistoryItem,
   updateHistoryItem,
 } from "../services/historyService";
-import type {
-  ContentCategory,
-  NormalizedIngredient,
-  ProductAnalysisRecord,
-  ScanHistoryItem,
-  ScoreBreakdown,
-} from "../types";
+import type { ContentCategory } from "../types";
 
 const GENERIC_ANALYSIS_ERROR =
   "Κάτι πήγε στραβά κατά την ανάλυση. Δοκιμάστε ξανά.";
@@ -53,99 +51,6 @@ function readLabelType(
   }
 
   return "unknown";
-}
-
-const insufficientScore = (
-  reason: string,
-  confidence: number,
-): ScoreBreakdown => ({
-  score: null,
-  band: "insufficient_data",
-  deductions: [],
-  bonuses: [],
-  confidence,
-  lowConfidenceReason: null,
-  insufficientDataReasons: [reason],
-  scoringVersion: analysisVersion,
-});
-
-function buildAnalysisRecord(
-  result: AnalysisApiResult,
-  id: string,
-  item: ScanHistoryItem,
-  text: string,
-  ingredients: NormalizedIngredient[],
-  confidence: number,
-): ProductAnalysisRecord {
-  const base = {
-    productId: id,
-    barcode: item.barcode,
-    confirmedIngredientText: text,
-    normalizedIngredients: ingredients,
-    ocrConfidence: confidence,
-    analyzedAt: new Date().toISOString(),
-    analysisVersion:
-      result.contentCategory !== "unknown"
-        ? (result.score.scoringVersion ?? analysisVersion)
-        : analysisVersion,
-  };
-
-  if (result.contentCategory === "ingredients") {
-    return {
-      ...base,
-      productType: result.structured.productType,
-      contentCategory: "ingredients",
-      structured: result.structured,
-      score: result.score,
-      ingredientInsights: result.ingredientInsights,
-      executiveSummary: result.executiveSummary,
-      allergenNotice: result.allergenNotice,
-    };
-  }
-
-  if (result.contentCategory === "nutrition") {
-    return {
-      ...base,
-      productType: "unknown",
-      contentCategory: "nutrition",
-      score: result.score,
-      executiveSummary: result.executiveSummary,
-      allergenNotice: result.allergenNotice,
-      nutritionAnalysis: {
-        structured: result.structured,
-        score: result.score,
-        insights: result.nutritionInsights,
-        executiveSummary: result.executiveSummary,
-      },
-    };
-  }
-
-  if (result.contentCategory === "chemical_composition") {
-    return {
-      ...base,
-      productType: "unknown",
-      contentCategory: "chemical_composition",
-      score: result.score,
-      executiveSummary: result.executiveSummary,
-      chemicalAnalysis: {
-        structured: result.structured,
-        score: result.score,
-        insights: result.chemicalInsights,
-        executiveSummary: result.executiveSummary,
-      },
-    };
-  }
-
-  return {
-    ...base,
-    productType: "unknown",
-    contentCategory: "unknown",
-    unknownCategoryMessage: result.message,
-    score: insufficientScore(
-      result.insufficientDataReasons[0] ?? result.message,
-      confidence,
-    ),
-  };
 }
 
 export default function AnalysisRun() {

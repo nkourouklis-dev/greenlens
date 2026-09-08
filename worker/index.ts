@@ -158,7 +158,9 @@ type JsonBody =
   | {
       answer: string;
     }
-  | ProductIdentity;
+  | ProductIdentity
+  | { found: false }
+  | { found: true; result: JsonBody };
 
 export default {
   async fetch(
@@ -222,6 +224,26 @@ export default {
       );
     }
 
+    // Barcode-only cache check, used before the user is asked to
+    // photograph anything: lets the scan screen skip straight to a known
+    // product's stored result instead of always sending them through
+    // OCR/AI first (that only happened once /api/analysis/run itself ran,
+    // which requires confirmed ingredient text the app doesn't have yet
+    // at this point in the flow).
+    const cacheBarcode = matchProductCachePath(url.pathname);
+
+    if (
+      request.method === "GET" &&
+      cacheBarcode !== null
+    ) {
+      return runProductCacheLookup(
+        cacheBarcode,
+        env,
+        origin,
+        requestId,
+      );
+    }
+
     if (
       request.method === "POST" &&
       isChatPath(url.pathname)
@@ -255,6 +277,72 @@ function isChatPath(pathname: string): boolean {
     segments[2] === "products" &&
     segments[3].length > 0 &&
     segments[4] === "chat"
+  );
+}
+
+// Returns the barcode segment of /api/product/cache/<barcode>, or null if
+// the path doesn't match that shape. The barcode is a URL path segment, so
+// it comes back percent-decoded like any other.
+function matchProductCachePath(
+  pathname: string,
+): string | null {
+  const segments = pathname.split("/");
+
+  const matches =
+    segments.length === 5 &&
+    segments[0] === "" &&
+    segments[1] === "api" &&
+    segments[2] === "product" &&
+    segments[3] === "cache" &&
+    segments[4].length > 0;
+
+  if (!matches) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(segments[4]);
+  } catch {
+    return null;
+  }
+}
+
+async function runProductCacheLookup(
+  barcode: string,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const cached = await lookupCachedProduct(
+    env.DB,
+    barcode,
+  );
+
+  if (!cached) {
+    return json(
+      { found: false },
+      200,
+      origin,
+      requestId,
+    );
+  }
+
+  await incrementProductScanCount(env.DB, barcode);
+
+  console.log("product_cache_hit_via_lookup", {
+    requestId,
+    barcode,
+    category: cached.category,
+    scanCount: cached.scanCount + 1,
+  });
+
+  // Written by saveProductResult from a response this same endpoint
+  // family already validated and returned once — safe to replay as-is.
+  return json(
+    { found: true, result: cached.analysisResult as JsonBody },
+    200,
+    origin,
+    requestId,
   );
 }
 

@@ -140,6 +140,66 @@ export async function runAnalysis(
     payload,
   );
 
+  return parseAnalysisApiResult(response);
+}
+
+/**
+ * Checks the shared product cache for a barcode *before* the user is asked
+ * to photograph anything (see worker/productCache.ts and the
+ * /api/product/cache/:barcode endpoint). Deliberately never throws — this
+ * is an optional fast path, not a required step, so any network hiccup or
+ * unexpected response just means "treat it as a cache miss" and let the
+ * caller fall through to the normal photograph-then-analyze flow.
+ */
+export async function checkCachedProduct(
+  barcode: string,
+): Promise<AnalysisApiResult | null> {
+  if (apiConfigurationError || !barcode.trim()) {
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+
+  let response: Response;
+
+  try {
+    response = await fetch(
+      `${apiBaseUrl}/api/product/cache/${encodeURIComponent(barcode)}`,
+      { signal: controller.signal },
+    );
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const body: unknown = await response.json().catch(() => null);
+
+  if (
+    !body ||
+    typeof body !== "object" ||
+    (body as { found?: unknown }).found !== true
+  ) {
+    return null;
+  }
+
+  const raw = (body as { result?: unknown }).result;
+
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  return parseAnalysisApiResult(raw as RawAnalysisResponse);
+}
+
+function parseAnalysisApiResult(
+  response: RawAnalysisResponse,
+): AnalysisApiResult {
   // Older/mismatched Worker deployments during a rolling release won't send
   // contentCategory yet — default to "ingredients", the only path that
   // existed before this field.

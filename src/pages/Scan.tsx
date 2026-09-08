@@ -9,6 +9,8 @@ import {
   findByBarcode,
   saveHistoryItem,
 } from "../services/historyService";
+import { checkCachedProduct } from "../services/analysisClient";
+import { buildAnalysisRecord } from "../services/analysisRecord";
 import type { ScanHistoryItem } from "../types";
 import { useCameraViewport } from "../contexts/CameraContext";
 
@@ -182,7 +184,7 @@ export default function Scan() {
     continueWithBarcode(cleanBarcode);
   }
 
-  function continueWithBarcode(value: string) {
+  async function continueWithBarcode(value: string) {
     const cleanBarcode = value.trim();
 
     if (!cleanBarcode) {
@@ -208,6 +210,47 @@ export default function Scan() {
       });
 
       navigate(`/product/${knownProduct.id}`);
+      return;
+    }
+
+    // Shared product cache: this barcode may already have a complete
+    // analysis on file (from anyone's earlier scan), regardless of whether
+    // it got here via the camera or manual entry — both call this same
+    // function. A miss (including any network/parsing issue —
+    // checkCachedProduct never throws) falls straight through to the
+    // normal "photograph the ingredients" flow below, unchanged.
+    const cachedResult =
+      await checkCachedProduct(cleanBarcode);
+
+    if (
+      cachedResult &&
+      cachedResult.contentCategory !== "unknown"
+    ) {
+      const id = crypto.randomUUID();
+
+      const historyItem: ScanHistoryItem = {
+        id,
+        barcode: cleanBarcode,
+        status: "known",
+        scannedAt: new Date().toISOString(),
+      };
+
+      const analysis = buildAnalysisRecord(
+        cachedResult,
+        id,
+        historyItem,
+        "",
+        [],
+        cachedResult.score.confidence,
+      );
+
+      saveHistoryItem({
+        ...historyItem,
+        productId: id,
+        analysis,
+      });
+
+      navigate(`/product/${id}`);
       return;
     }
 
