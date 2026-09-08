@@ -194,7 +194,93 @@ export async function checkCachedProduct(
     return null;
   }
 
-  return parseAnalysisApiResult(raw as RawAnalysisResponse);
+  const parsed = parseAnalysisApiResult(raw as RawAnalysisResponse);
+
+  // parseAnalysisApiResult's `??` defaults only cover a *missing*
+  // top-level field — they don't catch a field that's present but the
+  // wrong shape (e.g. a hand-edited or pre-migration cache row with
+  // `score: {}` or `ingredientInsights: "none"`). A live Worker response
+  // can be trusted not to do that; a persisted D1 row can't, so this is
+  // the extra gate only the cache path needs. Anything that fails it is
+  // treated exactly like a cache miss — never surfaced as an error.
+  return isWellFormedAnalysisResult(parsed) ? parsed : null;
+}
+
+const VALID_SCORE_BANDS = new Set([
+  "excellent",
+  "good",
+  "moderate",
+  "attention",
+  "high_attention",
+  "insufficient_data",
+]);
+
+function isValidScore(value: unknown): value is ScoreBreakdown {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const score = value as Partial<ScoreBreakdown>;
+
+  return (
+    VALID_SCORE_BANDS.has(score.band as string) &&
+    typeof score.confidence === "number" &&
+    Number.isFinite(score.confidence) &&
+    Array.isArray(score.deductions) &&
+    Array.isArray(score.bonuses)
+  );
+}
+
+function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * Structural check for exactly the fields buildAnalysisRecord and the
+ * Product page read without a guard (score.band drives an object lookup
+ * in Product.tsx that throws on an unrecognised key; the insight arrays
+ * are iterated directly). Not a full schema validation — just enough to
+ * guarantee those specific reads are safe.
+ */
+export function isWellFormedAnalysisResult(
+  result: AnalysisApiResult,
+): boolean {
+  if (result.contentCategory === "unknown") {
+    return false;
+  }
+
+  if (!isValidScore(result.score)) {
+    return false;
+  }
+
+  if (!isPlainObject(result.executiveSummary)) {
+    return false;
+  }
+
+  if (!isPlainObject(result.structured)) {
+    return false;
+  }
+
+  if (result.contentCategory === "ingredients") {
+    return (
+      Array.isArray(result.ingredientInsights) &&
+      (result.allergenNotice === null ||
+        isPlainObject(result.allergenNotice))
+    );
+  }
+
+  if (result.contentCategory === "nutrition") {
+    return (
+      Array.isArray(result.nutritionInsights) &&
+      (result.allergenNotice === null ||
+        isPlainObject(result.allergenNotice))
+    );
+  }
+
+  // chemical_composition
+  return Array.isArray(result.chemicalInsights);
 }
 
 function parseAnalysisApiResult(
