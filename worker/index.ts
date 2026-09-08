@@ -28,6 +28,11 @@ import {
 } from "./ingredientInsights";
 import { type D1Like } from "./ingredientKnowledge";
 import {
+  lookupCachedProduct,
+  incrementProductScanCount,
+  saveProductResult,
+} from "./productCache";
+import {
   identifyPrompt,
   parseProductIdentity,
   type ProductIdentity,
@@ -886,6 +891,39 @@ async function runAnalysis(
     );
   }
 
+  // Shared product cache: a barcode that already has a complete, previously
+  // computed analysis skips OCR/AI entirely and replays that result. A
+  // cache miss (including any D1 failure — lookupCachedProduct degrades to
+  // null rather than throwing) falls straight through to the normal flow
+  // below, unchanged.
+  const cached = await lookupCachedProduct(
+    env.DB,
+    requestBody.barcode,
+  );
+
+  if (cached) {
+    await incrementProductScanCount(
+      env.DB,
+      requestBody.barcode,
+    );
+
+    console.log("product_cache_hit", {
+      requestId,
+      barcode: requestBody.barcode,
+      category: cached.category,
+      scanCount: cached.scanCount + 1,
+    });
+
+    // Written by saveProductResult below from a response this same
+    // endpoint already validated and returned once — safe to replay as-is.
+    return json(
+      cached.analysisResult as JsonBody,
+      200,
+      origin,
+      requestId,
+    );
+  }
+
   const confirmedText =
     requestBody.confirmedIngredientText.trim();
 
@@ -1365,15 +1403,31 @@ async function runIngredientsAnalysis(
       ingredientInsights,
     );
 
+    const responseBody = {
+      ...result,
+      score,
+      ingredientInsights,
+      executiveSummary,
+      allergenNotice: allergens.notice,
+      contentCategory: "ingredients" as const,
+    };
+
+    // Only cache a genuinely complete, scored result — score.score can
+    // still be null here (insufficient_data band) even after a valid AI
+    // parse, e.g. on shaky OCR confidence, and that verdict is about this
+    // particular photo, not the product itself. Caching it would freeze a
+    // future, much clearer scan of the same barcode into the same
+    // "insufficient data" answer forever.
+    if (score.score !== null) {
+      await saveProductResult(env.DB, {
+        barcode: requestBody.barcode,
+        category: "ingredients",
+        analysisResult: responseBody,
+      });
+    }
+
     return json(
-      {
-        ...result,
-        score,
-        ingredientInsights,
-        executiveSummary,
-        allergenNotice: allergens.notice,
-        contentCategory: "ingredients",
-      },
+      responseBody,
       200,
       origin,
       requestId,
@@ -1565,15 +1619,28 @@ async function runNutritionAnalysis(
       score,
     );
 
+    const responseBody = {
+      ...result,
+      score,
+      nutritionInsights,
+      executiveSummary,
+      allergenNotice: allergens.notice,
+      contentCategory: "nutrition" as const,
+    };
+
+    // See the matching comment in runIngredientsAnalysis: score.score can
+    // be null (insufficient_data) on a valid parse with shaky evidence,
+    // and that's a fact about this scan, not the product.
+    if (score.score !== null) {
+      await saveProductResult(env.DB, {
+        barcode: requestBody.barcode,
+        category: "nutrition",
+        analysisResult: responseBody,
+      });
+    }
+
     return json(
-      {
-        ...result,
-        score,
-        nutritionInsights,
-        executiveSummary,
-        allergenNotice: allergens.notice,
-        contentCategory: "nutrition",
-      },
+      responseBody,
       200,
       origin,
       requestId,
@@ -1752,14 +1819,27 @@ async function runChemicalAnalysisPath(
       score,
     );
 
+    const responseBody = {
+      ...result,
+      score,
+      chemicalInsights,
+      executiveSummary,
+      contentCategory: "chemical_composition" as const,
+    };
+
+    // See the matching comment in runIngredientsAnalysis: score.score can
+    // be null (insufficient_data) on a valid parse with shaky evidence,
+    // and that's a fact about this scan, not the product.
+    if (score.score !== null) {
+      await saveProductResult(env.DB, {
+        barcode: requestBody.barcode,
+        category: "chemical_composition",
+        analysisResult: responseBody,
+      });
+    }
+
     return json(
-      {
-        ...result,
-        score,
-        chemicalInsights,
-        executiveSummary,
-        contentCategory: "chemical_composition",
-      },
+      responseBody,
       200,
       origin,
       requestId,
