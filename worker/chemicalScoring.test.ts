@@ -120,16 +120,21 @@ test("ignores positive and info findings", () =>
     1,
   ));
 
-test("adds bonus when nothing is high_attention", () => {
+test("adds the no-deviations bonus when there are no deductions", () => {
   const result = scoreChemicalComposition(validText, 0.9, {
     ...base,
-    chemicalFindings: [attentionFinding],
+    chemicalFindings: [
+      { ...attentionFinding, severity: "positive" as const },
+    ],
   });
 
-  assert.ok(result.bonuses.length > 0, "expected at least one bonus");
+  assert.ok(
+    result.bonuses.some((bonus) => bonus.label.includes("όρια ασφαλείας")),
+    "expected the no-deviations safety bonus",
+  );
 });
 
-test("does not add safety bonus when something is high_attention", () => {
+test("does not add the safety bonus when something is high_attention", () => {
   const result = scoreChemicalComposition(validText, 0.9, {
     ...base,
     chemicalFindings: [
@@ -140,6 +145,23 @@ test("does not add safety bonus when something is high_attention", () => {
   assert.ok(
     !result.bonuses.some((bonus) => bonus.label.includes("όρια ασφαλείας")),
     "did not expect the no-deviation safety bonus",
+  );
+});
+
+// This used to only gate on high_attention, so a merely "attention"-level
+// deviation (a real deduction) could still get the "no deviations from
+// safety limits" bonus alongside it — same class of bug as the ingredients
+// and nutrition paths.
+test("does not add the safety bonus alongside a moderate attention deduction", () => {
+  const result = scoreChemicalComposition(validText, 0.9, {
+    ...base,
+    chemicalFindings: [attentionFinding],
+  });
+
+  assert.equal(result.deductions.length, 1);
+  assert.ok(
+    !result.bonuses.some((bonus) => bonus.label.includes("όρια ασφαλείας")),
+    "did not expect the no-deviation safety bonus alongside a real deduction",
   );
 });
 

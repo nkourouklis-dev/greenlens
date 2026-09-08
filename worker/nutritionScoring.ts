@@ -1,8 +1,4 @@
-import {
-  ARTIFICIAL_ADDITIVE_PATTERN,
-  scoringVersion,
-  type WorkerScore,
-} from "./scoring";
+import { scoringVersion, type WorkerScore } from "./scoring";
 import { isAllergenDeclarationOnly } from "./allergens";
 import type { WorkerNutritionResult } from "./nutritionAnalysis";
 
@@ -125,16 +121,12 @@ export function scoreNutrition(
     bonusPoints += 3;
   }
 
-  const hasFlaggedAdditive = scorableFindings.some(
-    (finding) =>
-      (finding.severity === "attention" ||
-        finding.severity === "high_attention") &&
-      ARTIFICIAL_ADDITIVE_PATTERN.test(finding.normalizedName),
-  );
-
-  if (!hasFlaggedAdditive) {
+  // Must never coexist with an actual deduction — see worker/scoring.ts for
+  // why this is gated on "no deductions at all" rather than a narrower
+  // per-cause check.
+  if (deductions.length === 0) {
     bonuses.push({
-      label: "Δεν εντοπίστηκαν προβληματικά πρόσθετα (E-numbers)",
+      label: "Δεν εντοπίστηκαν προβληματικά διατροφικά στοιχεία",
       points: 5,
     });
     bonusPoints += 5;

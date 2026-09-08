@@ -115,13 +115,14 @@ export function scoreChemicalComposition(
     bonusPoints += 3;
   }
 
-  const hasHighAttention = analysis.chemicalFindings.some(
-    (finding) => finding.severity === "high_attention",
-  );
-
-  if (!hasHighAttention) {
+  // Must never coexist with an actual deduction — see worker/scoring.ts for
+  // why this is gated on "no deductions at all" rather than a narrower
+  // per-cause check (this used to only look at high_attention, so a
+  // moderate "attention" deviation could still get the "no deviations"
+  // bonus).
+  if (deductions.length === 0) {
     bonuses.push({
-      label: "Δεν εντοπίστηκαν σοβαρές αποκλίσεις από όρια ασφαλείας",
+      label: "Δεν εντοπίστηκαν αποκλίσεις από όρια ασφαλείας",
       points: 5,
     });
     bonusPoints += 5;

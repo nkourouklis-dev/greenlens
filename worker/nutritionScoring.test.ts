@@ -117,16 +117,21 @@ test("ignores positive and info findings", () =>
     1,
   ));
 
-test("adds bonus when no flagged E-number additive", () => {
+test("adds the no-problems bonus when there are no deductions", () => {
   const result = scoreNutrition(validText, 0.9, {
     ...base,
-    nutritionFindings: [attentionFinding],
+    nutritionFindings: [
+      { ...attentionFinding, severity: "positive" as const },
+    ],
   });
 
-  assert.ok(result.bonuses.length > 0, "expected at least one bonus");
+  assert.ok(
+    result.bonuses.some((bonus) => bonus.label.includes("προβληματικά")),
+    "expected the no-problems bonus",
+  );
 });
 
-test("does not add additive bonus when an E-number is flagged", () => {
+test("does not add the no-problems bonus when an E-number is flagged", () => {
   const result = scoreNutrition(validText, 0.9, {
     ...base,
     nutritionFindings: [
@@ -135,8 +140,24 @@ test("does not add additive bonus when an E-number is flagged", () => {
   });
 
   assert.ok(
-    !result.bonuses.some((bonus) => bonus.label.includes("πρόσθετα")),
-    "did not expect the additive-free bonus",
+    !result.bonuses.some((bonus) => bonus.label.includes("προβληματικά")),
+    "did not expect the no-problems bonus",
+  );
+});
+
+// Same reproduction as worker/scoring.test.ts: a real, non-additive
+// deduction (high sugar) must block the "no problems" bonus, not just
+// E-number-pattern matches.
+test("does not add the no-problems bonus alongside a real deduction", () => {
+  const result = scoreNutrition(validText, 0.9, {
+    ...base,
+    nutritionFindings: [attentionFinding],
+  });
+
+  assert.equal(result.deductions.length, 1);
+  assert.ok(
+    !result.bonuses.some((bonus) => bonus.label.includes("προβληματικά")),
+    "did not expect the no-problems bonus alongside a real deduction",
   );
 });
 

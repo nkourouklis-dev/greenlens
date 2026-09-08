@@ -156,24 +156,28 @@ test("ignores positive and info findings", () =>
     1,
   ));
 
-test("adds bonus when no flagged E-number additive", () => {
+test("adds the no-problems bonus when there are no deductions", () => {
   const result = scoreInterpretation(
     validText,
     0.9,
     {
       ...base,
-      ingredientFindings: [attentionFinding],
+      ingredientFindings: [
+        { ...attentionFinding, severity: "positive" as const },
+      ],
       potentialAllergens: [],
     },
   );
 
   assert.ok(
-    result.bonuses.length > 0,
-    "expected at least one bonus",
+    result.bonuses.some((bonus) =>
+      bonus.label.includes("προβληματικά"),
+    ),
+    "expected the no-problems bonus",
   );
 });
 
-test("does not add the additive bonus when an E-number is flagged", () => {
+test("does not add the no-problems bonus when an E-number is flagged", () => {
   const result = scoreInterpretation(
     validText,
     0.9,
@@ -190,9 +194,42 @@ test("does not add the additive bonus when an E-number is flagged", () => {
 
   assert.ok(
     !result.bonuses.some((bonus) =>
-      bonus.label.includes("πρόσθετα"),
+      bonus.label.includes("προβληματικά"),
     ),
-    "did not expect the additive-free bonus",
+    "did not expect the no-problems bonus",
+  );
+});
+
+// Reproduces the reported bug: a 70% ethanol antiseptic gel got docked -4
+// for the ethanol content, yet still received the "no problematic
+// ingredients" +5 bonus because that bonus used to only check for
+// E-number-pattern matches, not "any deduction at all". Ethanol isn't an
+// E-number, so it slipped through and the two contradicted each other in
+// the same score breakdown.
+test("does not add the no-problems bonus when a non-additive ingredient is flagged", () => {
+  const result = scoreInterpretation(
+    validText,
+    0.9,
+    {
+      ...base,
+      ingredientFindings: [
+        {
+          ...attentionFinding,
+          ingredientName: "Αιθυλική αλκοόλη",
+          normalizedName: "ethanol",
+          title: "Υψηλή περιεκτικότητα σε αιθυλική αλκοόλη",
+          explanation: "Μπορεί να ερεθίσει το δέρμα σε συχνή χρήση.",
+        },
+      ],
+    },
+  );
+
+  assert.equal(result.deductions.length, 1);
+  assert.ok(
+    !result.bonuses.some((bonus) =>
+      bonus.label.includes("προβληματικά"),
+    ),
+    "did not expect the no-problems bonus alongside a real deduction",
   );
 });
 
