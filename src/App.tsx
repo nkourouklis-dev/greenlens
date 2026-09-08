@@ -13,6 +13,7 @@ const Product = lazy(() => import("./pages/Product"));
 const History = lazy(() => import("./pages/History"));
 const IngredientsReview = lazy(() => import("./pages/IngredientsReview"));
 const AnalysisRun = lazy(() => import("./pages/AnalysisRun"));
+const AdminCapture = lazy(() => import("./pages/AdminCapture"));
 
 function PageFallback() {
   return (
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="/product/:id" element={<Product />} />
               <Route path="/product/:id/analysis" element={<AnalysisRun />} />
               <Route path="/history" element={<History />} />
+              <Route path="/admin/capture" element={<AdminCapture />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>

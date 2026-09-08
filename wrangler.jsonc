@@ -13,6 +13,12 @@
       "database_id": "e0501454-1e29-448e-9c05-217adf1958b7"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "PHOTOS",
+      "bucket_name": "greenlens-photos"
+    }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1

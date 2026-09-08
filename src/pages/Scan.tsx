@@ -11,6 +11,7 @@ import {
 } from "../services/historyService";
 import { checkCachedProduct } from "../services/analysisClient";
 import { buildAnalysisRecord } from "../services/analysisRecord";
+import ManualBarcodeInput from "../components/ManualBarcodeInput";
 import type { ScanHistoryItem } from "../types";
 import { useCameraViewport } from "../contexts/CameraContext";
 
@@ -533,59 +534,12 @@ export default function Scan() {
         )}
 
         {!isScanning && !barcode && (
-          <div className="mt-4 rounded-2xl border border-line-subtle bg-surface/70 p-4">
-            <label
-              htmlFor="manual-barcode"
-              className="text-sm font-semibold text-ink-muted"
-            >
-              Χειροκίνητη εισαγωγή
-            </label>
-
-            <p className="mt-1 text-xs leading-5 text-ink-faint">
-              Χρησιμοποίησέ την αν η κάμερα δεν
-              αναγνωρίζει το barcode.
-            </p>
-
-            <div className="mt-3 flex gap-2">
-              <input
-                id="manual-barcode"
-                type="text"
-                inputMode="numeric"
-                autoComplete="off"
-                maxLength={14}
-                value={manualBarcode}
-                onChange={(event) =>
-                  setManualBarcode(
-                    event.target.value.replace(
-                      /\D/g,
-                      "",
-                    ),
-                  )
-                }
-                onKeyDown={(event) => {
-                  if (
-                    event.key === "Enter" &&
-                    manualBarcode.trim()
-                  ) {
-                    handleBarcode(manualBarcode);
-                  }
-                }}
-                placeholder="π.χ. 0000000000000"
-                className="h-12 min-w-0 flex-1 rounded-xl border border-line bg-canvas px-3 text-base text-ink outline-none transition placeholder:text-ink-faintest focus:border-accent focus:ring-2 focus:ring-accent/20"
-              />
-
-              <button
-                type="button"
-                onClick={() =>
-                  handleBarcode(manualBarcode)
-                }
-                disabled={!manualBarcode.trim()}
-                aria-label="Συνέχεια με barcode"
-                className="h-12 shrink-0 rounded-xl bg-accent px-4 font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
-              >
-                Συνέχεια
-              </button>
-            </div>
+          <div className="mt-4">
+            <ManualBarcodeInput
+              value={manualBarcode}
+              onChange={setManualBarcode}
+              onSubmit={handleBarcode}
+            />
           </div>
         )}
       </section>

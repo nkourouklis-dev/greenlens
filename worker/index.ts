@@ -33,6 +33,14 @@ import {
   saveProductResult,
 } from "./productCache";
 import {
+  insertProductPhoto,
+  listProductPhotos,
+  ensureDraftProduct,
+  isPhotoType,
+  type PhotoType,
+  type ProductPhotoRow,
+} from "./productPhotos";
+import {
   identifyPrompt,
   parseProductIdentity,
   type ProductIdentity,
@@ -94,6 +102,16 @@ type AzureVisionEnvironment = Env & {
    * labels shows auto-detect is actually the weaker option.
    */
   AZURE_VISION_LANGUAGE?: string;
+};
+
+// Shared-secret gate for every /api/admin/* route (the bulk in-store photo
+// capture flow) — set via `wrangler secret put ADMIN_PASSWORD`, so it
+// never appears in wrangler.jsonc. Optional in the type because a fresh
+// deployment before the secret is configured must fail closed (deny
+// everyone) rather than the cast silently producing `undefined ===
+// undefined` and letting an unauthenticated request through.
+type AdminEnvironment = Env & {
+  ADMIN_PASSWORD?: string;
 };
 
 const visionModel =
@@ -160,7 +178,9 @@ type JsonBody =
     }
   | ProductIdentity
   | { found: false }
-  | { found: true; result: JsonBody };
+  | { found: true; result: JsonBody }
+  | { r2Key: string }
+  | { photos: ProductPhotoRow[] };
 
 export default {
   async fetch(
@@ -195,6 +215,20 @@ export default {
           service: "greenlens-ocr",
         },
         200,
+        origin,
+        requestId,
+      );
+    }
+
+    // Every /api/admin/* route (the bulk in-store photo capture flow) is
+    // gated by the same shared-secret check, dispatched as one sub-router
+    // so the auth check can never accidentally be skipped on a route added
+    // here later.
+    if (url.pathname.startsWith("/api/admin/")) {
+      return runAdminRequest(
+        request,
+        url,
+        env,
         origin,
         requestId,
       );
@@ -344,6 +378,354 @@ async function runProductCacheLookup(
     origin,
     requestId,
   );
+}
+
+// Matches /api/admin/photos/<barcode> (both the POST upload and GET list
+// routes share this path — method decides which). Deliberately excludes
+// the literal segment "file", which is the separate serve-a-photo route
+// (its key comes from a query param, not a path segment, since an R2 key
+// contains internal slashes that would break simple segment matching).
+function matchAdminPhotosPath(
+  pathname: string,
+): string | null {
+  const segments = pathname.split("/");
+
+  const matches =
+    segments.length === 5 &&
+    segments[0] === "" &&
+    segments[1] === "api" &&
+    segments[2] === "admin" &&
+    segments[3] === "photos" &&
+    segments[4].length > 0 &&
+    segments[4] !== "file";
+
+  if (!matches) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(segments[4]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sub-router for the whole /api/admin/* surface (the bulk in-store photo
+ * capture flow). Every route here shares one gate: a shared-secret header
+ * checked before any route is even matched, so a new route added below
+ * can never accidentally ship unauthenticated.
+ */
+async function runAdminRequest(
+  request: Request,
+  url: URL,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const adminEnv = env as AdminEnvironment;
+  const providedPassword = request.headers.get(
+    "X-Admin-Password",
+  );
+
+  // Fails closed on both sides: no secret configured yet, or a
+  // missing/wrong header, are treated identically as "not authorized" —
+  // never distinguished in the response, so a caller can't probe whether
+  // the secret has been set up yet.
+  if (
+    !adminEnv.ADMIN_PASSWORD ||
+    !providedPassword ||
+    providedPassword !== adminEnv.ADMIN_PASSWORD
+  ) {
+    return error(
+      "Μη εξουσιοδοτημένο αίτημα.",
+      401,
+      origin,
+      requestId,
+    );
+  }
+
+  const photosBarcode = matchAdminPhotosPath(
+    url.pathname,
+  );
+
+  if (photosBarcode !== null) {
+    if (request.method === "POST") {
+      return runAdminUploadPhoto(
+        photosBarcode,
+        request,
+        env,
+        origin,
+        requestId,
+      );
+    }
+
+    if (request.method === "GET") {
+      return runAdminListPhotos(
+        photosBarcode,
+        env,
+        origin,
+        requestId,
+      );
+    }
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname === "/api/admin/photos/file"
+  ) {
+    return runAdminServePhoto(
+      url,
+      env,
+      origin,
+      requestId,
+    );
+  }
+
+  return error(
+    "Η διαδρομή δεν βρέθηκε.",
+    404,
+    origin,
+    requestId,
+  );
+}
+
+async function runAdminUploadPhoto(
+  barcode: string,
+  request: Request,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const contentType =
+    request.headers.get("content-type") ?? "";
+
+  if (!contentType.includes("multipart/form-data")) {
+    return error(
+      "Απαιτείται multipart/form-data.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  let formData: FormData;
+
+  try {
+    formData = await request.formData();
+  } catch {
+    return error(
+      "Το multipart payload δεν είναι έγκυρο.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  const imageValue = formData.get("image");
+  const image =
+    imageValue instanceof File ? imageValue : null;
+
+  const photoTypeValue = readTextField(
+    formData,
+    "photoType",
+  );
+
+  if (!image) {
+    return error(
+      "Λείπει η φωτογραφία.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  if (!isPhotoType(photoTypeValue)) {
+    return error(
+      "Μη έγκυρος τύπος φωτογραφίας.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  const photoType: PhotoType = photoTypeValue;
+
+  // photos/{barcode}/{photo_type}/{timestamp}.jpg — timestamp keeps a
+  // retake from overwriting the previous shot, so nothing is lost if the
+  // admin/PIM (built later) ever needs to compare or recover an old one.
+  const r2Key = `photos/${barcode}/${photoType}/${Date.now()}.jpg`;
+
+  try {
+    await env.PHOTOS.put(
+      r2Key,
+      await image.arrayBuffer(),
+      {
+        httpMetadata: {
+          contentType: image.type || "image/jpeg",
+        },
+      },
+    );
+
+    await insertProductPhoto(env.DB, {
+      barcode,
+      photoType,
+      r2Key,
+    });
+  } catch (caughtError) {
+    console.error("admin_photo_upload_failed", {
+      requestId,
+      barcode,
+      photoType,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Η αποθήκευση της φωτογραφίας απέτυχε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+
+  // Best-effort (see ensureDraftProduct) — the photo above is already
+  // safely recorded either way.
+  await ensureDraftProduct(env.DB, barcode);
+
+  console.log("admin_photo_uploaded", {
+    requestId,
+    barcode,
+    photoType,
+    r2Key,
+  });
+
+  return json(
+    { r2Key },
+    200,
+    origin,
+    requestId,
+  );
+}
+
+async function runAdminListPhotos(
+  barcode: string,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  try {
+    const photos = await listProductPhotos(
+      env.DB,
+      barcode,
+    );
+
+    return json(
+      { photos },
+      200,
+      origin,
+      requestId,
+    );
+  } catch (caughtError) {
+    console.error("admin_photo_list_failed", {
+      requestId,
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Η λίστα φωτογραφιών δεν φορτώθηκε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
+// Streams an object straight from R2, gated behind the same
+// X-Admin-Password check as the rest of /api/admin/* (see runAdminRequest)
+// — the simplest option that needed no extra Cloudflare dashboard setup
+// (a public R2 bucket/custom domain would also have meant reasoning about
+// a second, separate access-control story for the same photos). The
+// tradeoff: a plain `<img src>` can't attach a custom header, so the
+// future admin/PIM viewer will need to fetch this with JS and render the
+// result as a blob URL rather than pointing an <img> tag at it directly.
+async function runAdminServePhoto(
+  url: URL,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const key = url.searchParams.get("key");
+
+  if (!key) {
+    return error(
+      "Λείπει η παράμετρος key.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  // Every key this endpoint should ever be asked for was minted by
+  // runAdminUploadPhoto under this exact prefix — rejecting anything else
+  // keeps this from being usable to read arbitrary objects elsewhere in
+  // the bucket.
+  if (!key.startsWith("photos/")) {
+    return error(
+      "Μη έγκυρη παράμετρος key.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  let object: R2ObjectBody | null;
+
+  try {
+    object = await env.PHOTOS.get(key);
+  } catch (caughtError) {
+    console.error("admin_photo_fetch_failed", {
+      requestId,
+      key,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Η ανάκτηση της φωτογραφίας απέτυχε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+
+  if (!object) {
+    return error(
+      "Η φωτογραφία δεν βρέθηκε.",
+      404,
+      origin,
+      requestId,
+    );
+  }
+
+  return new Response(object.body, {
+    status: 200,
+    headers: {
+      "content-type":
+        object.httpMetadata?.contentType ??
+        "image/jpeg",
+      "cache-control": "private, max-age=3600",
+      ...corsHeaders(origin),
+    },
+  });
 }
 
 async function runOcr(
@@ -657,7 +1039,7 @@ function corsHeaders(
     headers["Access-Control-Allow-Methods"] =
       "GET, POST, OPTIONS";
     headers["Access-Control-Allow-Headers"] =
-      "Content-Type";
+      "Content-Type, X-Admin-Password";
   }
 
   return headers;

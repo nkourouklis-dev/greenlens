@@ -21,6 +21,7 @@ const SCAN_FLOW_PATHS = [
   "/ingredients-photo",
   "/ingredients-review",
   "/product-photo",
+  "/admin/capture",
 ];
 
 function isScanFlowPath(pathname: string): boolean {

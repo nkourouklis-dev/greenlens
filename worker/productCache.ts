@@ -21,9 +21,13 @@ export type ProductCacheCategory =
 export type ProductCacheStatus =
   | "ai_generated"
   | "verified"
-  | "needs_review";
+  | "needs_review"
+  | "draft";
 
-export type ProductCacheSource = "user_scan" | "csv_import";
+export type ProductCacheSource =
+  | "user_scan"
+  | "csv_import"
+  | "pim_capture";
 
 export interface CachedProduct {
   barcode: string;
@@ -76,12 +80,17 @@ function isStatus(value: unknown): value is ProductCacheStatus {
   return (
     value === "ai_generated" ||
     value === "verified" ||
-    value === "needs_review"
+    value === "needs_review" ||
+    value === "draft"
   );
 }
 
 function isSource(value: unknown): value is ProductCacheSource {
-  return value === "user_scan" || value === "csv_import";
+  return (
+    value === "user_scan" ||
+    value === "csv_import" ||
+    value === "pim_capture"
+  );
 }
 
 /**
