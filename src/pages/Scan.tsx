@@ -33,6 +33,13 @@ export default function Scan() {
   const scanRunRef = useRef(0);
 
   const [barcode, setBarcode] = useState("");
+  // Separate from `barcode` on purpose: `barcode` means "a camera scan
+  // detected/confirmed this value" and controls the green success card
+  // below. Wiring the manual <input> to that same state made it flip to
+  // the success-card branch (which unmounts the input) after the very
+  // first keystroke, so it looked like the field stopped accepting input.
+  const [manualBarcode, setManualBarcode] =
+    useState("");
   const [decodeError, setDecodeError] = useState("");
 
   // Whether the decode loop (not the camera hardware) is actively looking
@@ -243,6 +250,7 @@ export default function Scan() {
             onClick={() => {
               setExistingItem(null);
               setBarcode("");
+              setManualBarcode("");
               startDecoding();
             }}
             className="mb-4 inline-flex min-h-10 items-center text-sm font-semibold text-accent-strong"
@@ -341,6 +349,7 @@ export default function Scan() {
               onClick={() => {
                 setExistingItem(null);
                 setBarcode("");
+                setManualBarcode("");
                 startDecoding();
               }}
               className="h-12 w-full rounded-xl px-4 text-sm font-semibold text-ink-muted transition active:bg-surface"
@@ -462,16 +471,22 @@ export default function Scan() {
                 type="text"
                 inputMode="numeric"
                 autoComplete="off"
-                value={barcode}
+                maxLength={14}
+                value={manualBarcode}
                 onChange={(event) =>
-                  setBarcode(event.target.value)
+                  setManualBarcode(
+                    event.target.value.replace(
+                      /\D/g,
+                      "",
+                    ),
+                  )
                 }
                 onKeyDown={(event) => {
                   if (
                     event.key === "Enter" &&
-                    barcode.trim()
+                    manualBarcode.trim()
                   ) {
-                    handleBarcode(barcode);
+                    handleBarcode(manualBarcode);
                   }
                 }}
                 placeholder="π.χ. 0000000000000"
@@ -481,9 +496,9 @@ export default function Scan() {
               <button
                 type="button"
                 onClick={() =>
-                  handleBarcode(barcode)
+                  handleBarcode(manualBarcode)
                 }
-                disabled={!barcode.trim()}
+                disabled={!manualBarcode.trim()}
                 aria-label="Συνέχεια με barcode"
                 className="h-12 shrink-0 rounded-xl bg-accent px-4 font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
               >
