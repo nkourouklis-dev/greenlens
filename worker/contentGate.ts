@@ -26,11 +26,23 @@ export interface ContentGateResult {
 
 /**
  * Minimum extraction confidence required to trust the result enough to
- * score it. Chosen as the midpoint of the 0-1 scale: below it, the
- * evidence for "this really is real content" is weaker than the evidence
- * against, so the honest answer is "not sure" rather than a scored verdict.
+ * score it.
+ *
+ * Deliberately *not* 0.5. `worker/ocr.ts`'s readConfidence() falls back to
+ * exactly 0.5 whenever the OCR/vision step's response omits a numeric
+ * confidence — a common, not exceptional, case — and extractIngredientText
+ * discounts that further for a with-heading match (`ocrConfidence * 0.98`,
+ * capped at 0.95), landing at 0.49. A flat 0.5 threshold rejected that
+ * exact, very common combination: a clear "Ingredients:" heading followed
+ * by a fully valid list, with no signal actually wrong about the read. 0.45
+ * sits below that floor with a small margin, while still rejecting the
+ * weaker without-heading/override acceptances at the same OCR confidence
+ * (their discount is steeper — `ocrConfidence * 0.8` or less — so they stay
+ * gated, which is the behaviour this module exists to enforce). See
+ * worker/analysisGating.test.ts's "clear heading + default OCR confidence"
+ * regression case.
  */
-export const MIN_CONTENT_CONFIDENCE = 0.5;
+export const MIN_CONTENT_CONFIDENCE = 0.45;
 
 const DEFAULT_INSUFFICIENT_REASON =
   "Δεν εντοπίστηκε αρκετά αξιόπιστο περιεχόμενο σε αυτή τη φωτογραφία. Ξαναφωτογράφισε την ετικέτα.";

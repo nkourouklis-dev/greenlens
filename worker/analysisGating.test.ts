@@ -128,6 +128,115 @@ test("OCR noise mixed with real ingredients: noise is filtered out, real ingredi
   assert.equal(score.band, "excellent");
 });
 
+// Regression: a real-shaped INCI list (28 ingredients) behind a clear
+// "Ingredients:" heading was being rejected by evaluateContentGate. Root
+// cause was MIN_CONTENT_CONFIDENCE (0.5) being tighter than
+// extractIngredientText's with-heading confidence formula
+// (ocrConfidence * 0.98, capped at 0.95) at ocrConfidence values that are
+// common in production — in particular worker/ocr.ts's readConfidence()
+// default of exactly 0.5 for a response that omits a confidence field,
+// which yields extraction.confidence 0.49, just under the old 0.5
+// threshold. Fixed by lowering MIN_CONTENT_CONFIDENCE to 0.45. This test
+// pins the exact reported ingredient list to the gate at that default OCR
+// confidence, plus the two other hypotheses investigated (the noise filter
+// stripping real ingredients, and heading detection failing when a product
+// description sits directly above the heading).
+const SHEA_BUTTER_HAND_CREAM_INGREDIENTS =
+  "Aqua, Glycerin, Cetearyl Alcohol, Cetearyl Ethylhexanoate, " +
+  "Isohexadecane, Alcohol, Sorbitol, Butyrospermum Parkii (Shea) Butter, " +
+  "Dimethicone, Sodium Cetearyl Sulfate, Phenoxyethanol, Rosa Centifolia " +
+  "Flower Extract, Citric Acid, Panthenol, Tocopheryl Acetate, Allantoin, " +
+  "Benzyl Alcohol, Sodium Hydroxide, Sodium Lactate, Serine, Lactic Acid, " +
+  "Urea, Glycine, Linalool, Hexyl Cinnamal, Citronellol, " +
+  "Alpha-Isomethyl Ionone, Parfum";
+
+test("regression: clear heading + valid INCI list passes the gate at the default (0.5) OCR confidence", () => {
+  const labelText =
+    "Nourishing Hand Cream with Shea Butter\n" +
+    "For dry and sensitive skin.\n\n" +
+    "Ingredients: " +
+    SHEA_BUTTER_HAND_CREAM_INGREDIENTS;
+
+  // 0.5 is worker/ocr.ts's readConfidence() fallback when the OCR/vision
+  // step's response doesn't carry a numeric confidence — not an edge case,
+  // the common one.
+  const defaultOcrConfidence = 0.5;
+
+  const extraction = extractIngredientText(labelText, defaultOcrConfidence);
+
+  assert.equal(extraction.isValid, true);
+  assert.equal(extraction.labelType, "ingredients");
+  // The description line above the heading must not defeat heading
+  // detection or leak into the isolated block.
+  assert.ok(!extraction.ingredientText?.includes("Nourishing Hand Cream"));
+  assert.ok(extraction.ingredientText?.includes("Aqua"));
+  assert.ok(extraction.ingredientText?.includes("Parfum"));
+
+  const gate = evaluateContentGate(extraction);
+  assert.equal(
+    gate.passed,
+    true,
+    `expected the gate to pass at the default OCR confidence, got reasons: ${gate.reasons.join(" ")}`,
+  );
+
+  // None of the 28 real ingredient names should be mistaken for brand text,
+  // legal/origin boilerplate, or a meaningless short code.
+  const filtered = filterIrrelevantSegments(
+    extraction.ingredientText ?? "",
+    "ingredients",
+    { productTitle: "Nourishing Hand Cream with Shea Butter" },
+  );
+
+  assert.deepEqual(filtered.removedSegments, []);
+  for (const ingredient of [
+    "Aqua",
+    "Glycerin",
+    "Cetearyl Alcohol",
+    "Isohexadecane",
+    "Alcohol",
+    "Sorbitol",
+    "Dimethicone",
+    "Phenoxyethanol",
+    "Citric Acid",
+    "Panthenol",
+    "Tocopheryl Acetate",
+    "Allantoin",
+    "Benzyl Alcohol",
+    "Sodium Hydroxide",
+    "Sodium Lactate",
+    "Serine",
+    "Lactic Acid",
+    "Urea",
+    "Glycine",
+    "Linalool",
+    "Hexyl Cinnamal",
+    "Citronellol",
+    "Alpha-Isomethyl Ionone",
+    "Parfum",
+  ]) {
+    assert.ok(
+      filtered.text.includes(ingredient),
+      `expected "${ingredient}" to survive filtering`,
+    );
+  }
+});
+
+test("regression: the same INCI list also passes at a range of realistic OCR confidences", () => {
+  for (const ocrConfidence of [0.5, 0.6, 0.75, 0.9]) {
+    const extraction = extractIngredientText(
+      "Ingredients: " + SHEA_BUTTER_HAND_CREAM_INGREDIENTS,
+      ocrConfidence,
+    );
+    const gate = evaluateContentGate(extraction);
+
+    assert.equal(
+      gate.passed,
+      true,
+      `expected pass at ocrConfidence=${ocrConfidence}, extraction.confidence=${extraction.confidence}`,
+    );
+  }
+});
+
 test("genuine low-resolution/unreadable text: gate fails on low confidence, no score", () => {
   // No heading, so extraction relies on the weaker without-heading path,
   // and a poor OCR confidence (simulating a blurry/low-res photo) pulls the

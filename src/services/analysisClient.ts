@@ -46,6 +46,14 @@ type AnalysisRequest = Omit<
    * Worker decide (heuristic, then AI fallback).
    */
   categoryOverride?: ContentCategory;
+
+  /**
+   * Product title/brand already known from an earlier step (barcode
+   * lookup or vision identify), if any. The Worker uses it only to filter
+   * that same text back out of the extracted ingredients/nutrition/
+   * chemical block when OCR captures it there too.
+   */
+  productTitle?: string;
 };
 
 const defaultScore: ScoreBreakdown = {

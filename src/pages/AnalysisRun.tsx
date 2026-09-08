@@ -180,6 +180,7 @@ export default function AnalysisRun() {
       ocrLabelType: labelType,
       ocrTextLength: text.trim().length,
       categoryOverride,
+      productTitle: item.productName,
     })
       .then((result) => {
         // Guards against any unexpected shape in `result` (a malformed or
