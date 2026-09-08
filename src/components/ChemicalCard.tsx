@@ -1,4 +1,5 @@
-import { CheckCircle2, AlertTriangle, Minus } from "lucide-react";
+import { CheckCircle2, AlertTriangle, ChevronDown, Minus } from "lucide-react";
+import { useState } from "react";
 import type {
   ChemicalInsight,
   EvidenceLevel,
@@ -38,10 +39,16 @@ export default function ChemicalCard(props: {
   const { insight } = props;
   const rating = ratingConfig[insight.rating];
   const RatingIcon = rating.Icon;
+  const [open, setOpen] = useState(false);
 
   return (
     <article className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <div className="flex items-start justify-between gap-2">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="flex w-full items-start justify-between gap-2 text-left"
+      >
         <div className="min-w-0">
           <h3 className="break-words text-sm font-semibold leading-tight text-slate-100">
             {insight.substance}
@@ -55,36 +62,47 @@ export default function ChemicalCard(props: {
           </p>
         </div>
 
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <span
-            className={`flex items-center gap-1 rounded-full px-2 py-1 text-[11px] ${rating.badgeClass}`}
-          >
-            <RatingIcon size={12} />
-            {rating.label}
-          </span>
-
-          {insight.scoreImpact < 0 && (
-            <span className="text-xs font-semibold text-orange-300">
-              {insight.scoreImpact}
+        <div className="flex shrink-0 items-start gap-2">
+          <div className="flex flex-col items-end gap-1">
+            <span
+              className={`flex items-center gap-1 rounded-full px-2 py-1 text-[11px] ${rating.badgeClass}`}
+            >
+              <RatingIcon size={12} />
+              {rating.label}
             </span>
-          )}
+
+            {insight.scoreImpact < 0 && (
+              <span className="text-xs font-semibold text-orange-300">
+                {insight.scoreImpact}
+              </span>
+            )}
+          </div>
+
+          <ChevronDown
+            size={16}
+            className={`mt-1 shrink-0 text-slate-500 transition-transform ${open ? "rotate-180" : ""}`}
+          />
         </div>
-      </div>
+      </button>
 
-      <p className="mt-3 text-sm leading-6 text-slate-300">
-        {insight.description}
-      </p>
+      {open && (
+        <>
+          <p className="mt-3 text-sm leading-6 text-slate-300">
+            {insight.description}
+          </p>
 
-      {insight.whyRated && insight.whyRated !== insight.description && (
-        <p className="mt-1 text-sm leading-6 text-slate-400">
-          {insight.whyRated}
-        </p>
+          {insight.whyRated && insight.whyRated !== insight.description && (
+            <p className="mt-1 text-sm leading-6 text-slate-400">
+              {insight.whyRated}
+            </p>
+          )}
+
+          <p className="mt-3 text-[11px] text-slate-500">
+            {evidenceLabels[insight.evidenceLevel]}
+            {!insight.evidenceAvailable && " · χωρίς επιβεβαιωμένη πηγή"}
+          </p>
+        </>
       )}
-
-      <p className="mt-3 text-[11px] text-slate-500">
-        {evidenceLabels[insight.evidenceLevel]}
-        {!insight.evidenceAvailable && " · χωρίς επιβεβαιωμένη πηγή"}
-      </p>
     </article>
   );
 }
