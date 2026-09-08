@@ -354,17 +354,44 @@ function countNumericUnits(text: string): number {
   return matches.length;
 }
 
-function findHeadingMatch(text: string): number {
+/**
+ * Every position where any heading term occurs in `text`, ascending.
+ *
+ * A single `indexOf` per term (the old `findHeadingMatch`) returns only the
+ * *first* occurrence, and a heading word can legitimately appear more than
+ * once: a footer disclaimer ("Full ingredients list available at
+ * example.com") mentions the word without being a real section heading,
+ * and if it happens to appear before the genuine "Ingredients:" panel in
+ * OCR reading order, anchoring on it alone silently walls off the real
+ * list. Returning every occurrence lets the caller try each one in turn
+ * and keep the first that actually looks like an ingredient list.
+ */
+function findHeadingMatches(text: string): number[] {
   const normalized = normalize(text);
+  const indices = new Set<number>();
 
   for (const heading of INGREDIENT_HEADINGS) {
-    const idx = normalized.indexOf(normalize(heading));
-    if (idx >= 0) {
-      return idx;
+    const needle = normalize(heading);
+
+    if (!needle) {
+      continue;
+    }
+
+    let fromIndex = 0;
+
+    for (;;) {
+      const idx = normalized.indexOf(needle, fromIndex);
+
+      if (idx < 0) {
+        break;
+      }
+
+      indices.add(idx);
+      fromIndex = idx + 1;
     }
   }
 
-  return -1;
+  return Array.from(indices).sort((a, b) => a - b);
 }
 
 function isBoundaryLine(line: string): boolean {
@@ -510,15 +537,41 @@ function isLikelyStorageOrDirections(text: string): boolean {
   return matchingPatterns >= 2;
 }
 
-function extractIngredientTextWithHeading(
-  rawText: string,
-): string | null {
-  const headingIdx = findHeadingMatch(rawText);
-
-  if (headingIdx < 0) {
-    return null;
+/**
+ * A real ingredient block either uses recognisable ingredient vocabulary or
+ * reads as a structured, multi-item list (commas/semicolons/multiple
+ * lines). A short boilerplate fragment produced by anchoring on the wrong
+ * heading occurrence — e.g. "Made in Germany" — has neither, so this is the
+ * gate that makes extractIngredientTextWithHeading reject such a fragment
+ * and fall through to the next heading occurrence instead of returning it.
+ */
+function looksLikeRealIngredientBlock(candidate: string): boolean {
+  if (candidate.length < 10) {
+    return false;
   }
 
+  if (looksLikeNutritionTable(candidate)) {
+    return false;
+  }
+
+  if (isLikelyMarketingClaim(candidate)) {
+    return false;
+  }
+
+  if (isLikelyStorageOrDirections(candidate)) {
+    return false;
+  }
+
+  return (
+    countIngredientMarkers(candidate) >= 1 ||
+    hasStructuredFormat(candidate)
+  );
+}
+
+function extractIngredientBlockAtHeading(
+  rawText: string,
+  headingIdx: number,
+): string | null {
   const afterHeading = rawText.substring(headingIdx);
   const colonIdx = afterHeading.indexOf(":");
   const newlineAfterHeading = afterHeading.indexOf("\n");
@@ -583,6 +636,29 @@ function extractIngredientTextWithHeading(
   }
 
   return cleanedBlock;
+}
+
+/**
+ * Tries every heading occurrence in text order (see findHeadingMatches) and
+ * keeps the first one whose extracted block actually looks like an
+ * ingredient list. The common case — one heading, immediately followed by
+ * the real list — resolves on the first candidate exactly as before; a
+ * heading word that also shows up in incidental prose before the real
+ * panel just gets skipped once its candidate fails
+ * looksLikeRealIngredientBlock.
+ */
+function extractIngredientTextWithHeading(
+  rawText: string,
+): string | null {
+  for (const headingIdx of findHeadingMatches(rawText)) {
+    const block = extractIngredientBlockAtHeading(rawText, headingIdx);
+
+    if (block && looksLikeRealIngredientBlock(block)) {
+      return block;
+    }
+  }
+
+  return null;
 }
 
 function extractIngredientTextWithoutHeading(

@@ -259,3 +259,56 @@ test("genuine low-resolution/unreadable text: gate fails on low confidence, no s
   // As with the no-content case, analyzeIngredientsCore returns here with
   // only `gate.reasons` to show — scoreInterpretation is never reached.
 });
+
+// Regression (EUBOS Med hand cream): fixing the confidence threshold above
+// surfaced a second, unrelated bug — a footer disclaimer mentioning
+// "ingredients" in prose, appearing before the real "Ingredients:" panel in
+// OCR reading order, made extractIngredientText anchor on the wrong
+// occurrence and return only a single boilerplate line ("Made in Germany"),
+// which filterIrrelevantSegments then (correctly) emptied out entirely —
+// silently dropping the real 28-item list from the whole pipeline. Fixed in
+// extractIngredientText itself (see ingredientText.test.ts); this pins the
+// full extract -> gate -> filter sequence end to end.
+test("regression: a footer 'ingredients' mention before the real heading no longer empties the pipeline", () => {
+  const realIngredients =
+    "Aqua, Glycerin, Cetearyl Alcohol, Cetearyl Ethylhexanoate, " +
+    "Isohexadecane, Alcohol, Sorbitol, Butyrospermum Parkii (Shea) Butter, " +
+    "Dimethicone, Sodium Cetearyl Sulfate, Phenoxyethanol, Rosa Centifolia " +
+    "Flower Extract, Citric Acid, Panthenol, Tocopheryl Acetate, Allantoin, " +
+    "Benzyl Alcohol, Sodium Hydroxide, Sodium Lactate, Serine, Lactic Acid, " +
+    "Urea, Glycine, Linalool, Hexyl Cinnamal, Citronellol, " +
+    "Alpha-Isomethyl Ionone, Parfum";
+
+  const rawOcrText = [
+    "EUBOS",
+    "150 ml e",
+    "9M",
+    "Registered trademark",
+    "Full ingredients list available at www.eubos.de",
+    "Made in Germany",
+    "Barcode: 4005232107012",
+    "Ingredients: " + realIngredients,
+    "EUROS MED. In hogy",
+  ].join("\n");
+
+  const extraction = extractIngredientText(rawOcrText, 0.9);
+
+  assert.equal(extraction.isValid, true);
+  assert.ok(extraction.ingredientText?.includes("Aqua"));
+  assert.ok(!extraction.ingredientText?.includes("Made in Germany"));
+
+  const gate = evaluateContentGate(extraction);
+  assert.equal(gate.passed, true);
+
+  const filtered = filterIrrelevantSegments(
+    extraction.ingredientText ?? "",
+    "ingredients",
+    { productTitle: "EUBOS Med" },
+  );
+
+  assert.ok(filtered.text.includes("Aqua"));
+  assert.ok(filtered.text.includes("Parfum"));
+  assert.ok(filtered.text.includes("Alpha-Isomethyl Ionone"));
+  // What actually reaches the model must not be empty/boilerplate-only.
+  assert.ok(filtered.text.trim().length >= 12);
+});

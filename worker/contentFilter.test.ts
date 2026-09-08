@@ -159,3 +159,74 @@ test("handles empty input without throwing", () => {
   assert.equal(result.text, "");
   assert.deepEqual(result.removedSegments, []);
 });
+
+// Regression (EUBOS Med hand cream): a bug report initially blamed this
+// filter for "removing the real ingredients and keeping the boilerplate".
+// Root cause was actually upstream in extractIngredientText (see
+// ingredientText.test.ts's matching regression test) — a heading-anchor bug
+// meant the filter was only ever handed a single boilerplate line ("Made
+// in Germany"), never the real ingredient list, and correctly dropped that
+// line, producing empty output. This test pins the filter's own,
+// already-correct behavior once it is actually given the real 28-item
+// ingredient block mixed with several distinct kinds of boilerplate in one
+// pass, so a future change to the filter can't reintroduce a real
+// "silently drops real content" bug at this layer either.
+test("regression: keeps a full real INCI list intact while dropping several kinds of boilerplate mixed into the same block", () => {
+  const realIngredients = [
+    "Aqua",
+    "Glycerin",
+    "Cetearyl Alcohol",
+    "Cetearyl Ethylhexanoate",
+    "Isohexadecane",
+    "Alcohol",
+    "Sorbitol",
+    "Butyrospermum Parkii (Shea) Butter",
+    "Dimethicone",
+    "Sodium Cetearyl Sulfate",
+    "Phenoxyethanol",
+    "Rosa Centifolia Flower Extract",
+    "Citric Acid",
+    "Panthenol",
+    "Tocopheryl Acetate",
+    "Allantoin",
+    "Benzyl Alcohol",
+    "Sodium Hydroxide",
+    "Sodium Lactate",
+    "Serine",
+    "Lactic Acid",
+    "Urea",
+    "Glycine",
+    "Linalool",
+    "Hexyl Cinnamal",
+    "Citronellol",
+    "Alpha-Isomethyl Ionone",
+    "Parfum",
+  ];
+
+  // The block extractIngredientText now correctly isolates: the real list
+  // plus boilerplate the SECTION_BOUNDARY cut didn't catch (no boundary
+  // term matches "distributed by acme", "made in eu" mid-block, or a bare
+  // recycling code), which is exactly what this filter exists to remove.
+  const block = [
+    ...realIngredients,
+    "Made in EU",
+    "Distributed by EUBOS GmbH",
+    "PET",
+  ].join(", ");
+
+  const result = filterIrrelevantSegments(block, "ingredients", {
+    productTitle: "EUBOS Med Hand Cream",
+  });
+
+  for (const ingredient of realIngredients) {
+    assert.ok(
+      result.text.includes(ingredient),
+      `expected "${ingredient}" to survive filtering`,
+    );
+  }
+
+  assert.ok(!result.text.includes("Made in EU"));
+  assert.ok(!result.text.includes("Distributed by"));
+  assert.ok(!result.text.includes("PET"));
+  assert.equal(result.removedSegments.length, 3);
+});

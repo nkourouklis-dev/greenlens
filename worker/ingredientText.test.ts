@@ -267,3 +267,65 @@ test("strips URLs and storage instructions after the ingredient block", () => {
   assert(!result.ingredientText?.includes("www.example.com"));
   assert(!result.ingredientText?.includes("Storage"));
 });
+
+// Regression (EUBOS Med hand cream): a footer disclaimer mentioning the
+// word "ingredients" in ordinary prose ("Full ingredients list available
+// at ...") appeared, in OCR reading order, *before* the real
+// "Ingredients:" panel. findHeadingMatch used to return only the first
+// textual occurrence of any heading term, so extraction anchored on the
+// disclaimer instead of the real heading; the very next SECTION_BOUNDARY
+// term ("Barcode:") then cut the block down to a single boilerplate line
+// ("Made in Germany") *before ever reaching the real ingredient list*,
+// which was silently dropped in its entirety. Fixed by trying every
+// heading occurrence in text order and skipping any whose extracted block
+// doesn't look like a real ingredient list (looksLikeRealIngredientBlock).
+test("regression: a footer disclaimer mentioning 'ingredients' before the real heading does not shadow the real ingredient list", () => {
+  const realIngredients =
+    "Aqua, Glycerin, Cetearyl Alcohol, Cetearyl Ethylhexanoate, " +
+    "Isohexadecane, Alcohol, Sorbitol, Butyrospermum Parkii (Shea) Butter, " +
+    "Dimethicone, Sodium Cetearyl Sulfate, Phenoxyethanol, Rosa Centifolia " +
+    "Flower Extract, Citric Acid, Panthenol, Tocopheryl Acetate, Allantoin, " +
+    "Benzyl Alcohol, Sodium Hydroxide, Sodium Lactate, Serine, Lactic Acid, " +
+    "Urea, Glycine, Linalool, Hexyl Cinnamal, Citronellol, " +
+    "Alpha-Isomethyl Ionone, Parfum";
+
+  const text = [
+    "EUBOS",
+    "150 ml e",
+    "9M",
+    "Registered trademark",
+    "Full ingredients list available at www.eubos.de",
+    "Made in Germany",
+    "Barcode: 4005232107012",
+    "Ingredients: " + realIngredients,
+    "EUROS MED. In hogy",
+  ].join("\n");
+
+  const result = extractIngredientText(text, 0.9);
+
+  assert.equal(result.isValid, true);
+  assert.equal(result.labelType, "ingredients");
+  // The real list must be present in full, not the boilerplate fragment
+  // the wrong anchor used to produce.
+  assert.ok(result.ingredientText?.includes("Aqua"));
+  assert.ok(result.ingredientText?.includes("Parfum"));
+  assert.ok(result.ingredientText?.includes("Alpha-Isomethyl Ionone"));
+  assert.ok(!result.ingredientText?.includes("Made in Germany"));
+  assert.ok(!result.ingredientText?.includes("Barcode"));
+});
+
+// Same defect, minimal shape: two occurrences of a heading word, the first
+// in incidental prose with nothing real after it, the second the genuine
+// heading.
+test("regression: skips a heading occurrence whose block is too short/boilerplate-only and uses the next one", () => {
+  const text =
+    "See ingredients at example.com\n" +
+    "Barcode: 1234567890123\n" +
+    "Ingredients: Water, Glycerin, Citric Acid, Sodium Chloride";
+
+  const result = extractIngredientText(text, 0.9);
+
+  assert.equal(result.isValid, true);
+  assert.ok(result.ingredientText?.includes("Water"));
+  assert.ok(result.ingredientText?.includes("Sodium Chloride"));
+});
