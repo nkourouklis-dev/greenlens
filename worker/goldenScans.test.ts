@@ -141,7 +141,7 @@ test("herbarium hand antiseptic gel: ethanol is flagged with a deduction, no no-
   // (a) the ethanol content is flagged with a real deduction.
   assert.equal(score.deductions.length, 1);
   assert.equal(score.deductions[0].code, "attention:ethanol");
-  assert.equal(score.deductions[0].points, 4);
+  assert.equal(score.deductions[0].points, 8);
 
   // (b) no "no problematic ingredients" bonus alongside that deduction —
   // this is the exact contradiction the bug report described.
@@ -161,6 +161,6 @@ test("herbarium hand antiseptic gel: ethanol is flagged with a deduction, no no-
   // back up to a misleading 100/100. Before the fix this computed to
   // 100 - 4 + 3 (positives) + 5 (wrongly-awarded no-problems bonus) = 104,
   // clamped to a perfect 100 that hid the contradiction entirely.
-  assert.equal(score.score, 99);
+  assert.equal(score.score, 95);
   assert.notEqual(score.score, 100);
 });

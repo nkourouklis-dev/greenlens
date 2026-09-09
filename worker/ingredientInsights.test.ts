@@ -331,3 +331,64 @@ test("executive summary verdict matches the score band", async () => {
   assert.equal(typeof summary.overallVerdict, "string");
   assert.ok(summary.overallVerdict.length > 0);
 });
+
+// Rule deductions are keyed on the curated ingredient ("high_concern:sugar")
+// while the model names the same thing freely ("Γλυκαντικά και ζάχαρη").
+// Before these were linked, every card reported a zero impact while the score
+// breakdown listed real penalties.
+test("a rule deduction reaches the card for the ingredient it penalised", async () => {
+  const analysis: WorkerAnalysisResult = {
+    ...base,
+    productType: "food",
+    ingredientFindings: [
+      {
+        ingredientName: "Ζάχαρη",
+        normalizedName: "ζάχαρη",
+        severity: "info",
+        title: "Γλυκαντικό",
+        explanation: "Προσθέτει γλυκύτητα.",
+        evidenceType: "none",
+        sourceName: null,
+        sourceUrl: null,
+        confidence: 0.5,
+      },
+    ],
+  };
+
+  const ruleMatches = [
+    {
+      rule: {
+        normalizedName: "sugar",
+        severity: "high_concern" as const,
+        penaltyPoints: 25,
+        bulkWeighted: true,
+        ruleGroup: "added_sugar",
+        shortDescription: "Πρόσθετη ζάχαρη",
+        concerns: ["Υψηλή πρόσληψη συνδέεται με παχυσαρκία"],
+      },
+      matchedAlias: "ζάχαρη",
+      position: 1,
+      weightedPoints: 40,
+    },
+  ];
+
+  const score = scoreInterpretation(
+    "Νερό, ζάχαρη, αρωματικές ύλες",
+    0.9,
+    analysis,
+    { ruleMatches },
+  );
+
+  const insights = await buildIngredientInsights(
+    analysis,
+    score,
+    fakeDb,
+    ruleMatches,
+  );
+
+  assert.equal(score.score, 60);
+  assert.equal(insights[0].scoreImpact, -40);
+
+  // The model called it merely informational; the rule outranks that.
+  assert.equal(insights[0].rating, "caution");
+});

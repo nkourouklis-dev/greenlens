@@ -71,7 +71,7 @@ test("deduplicates identical findings", () =>
     1,
   ));
 
-test("caps deductions at six", () => {
+test("caps deductions at eight", () => {
   const findings = Array.from({ length: 10 }, (_, index) => ({
     ...attentionFinding,
     normalizedName: "substance" + index,
@@ -82,11 +82,14 @@ test("caps deductions at six", () => {
       ...base,
       chemicalFindings: findings,
     }).deductions.length,
-    6,
+    8,
   );
 });
 
-test("halves points when evidence is missing", () => {
+// The model emits evidenceType "none" for nearly every finding, so halving
+// on that basis applied almost always and quietly capped attention findings
+// at 4 points.
+test("does not discount points when evidence is missing", () => {
   const withEvidence = scoreChemicalComposition(validText, 0.9, {
     ...base,
     chemicalFindings: [attentionFinding],
@@ -100,7 +103,7 @@ test("halves points when evidence is missing", () => {
   });
 
   assert.equal(withEvidence.deductions[0].points, 8);
-  assert.equal(withoutEvidence.deductions[0].points, 4);
+  assert.equal(withoutEvidence.deductions[0].points, 8);
 });
 
 test("ignores positive and info findings", () =>

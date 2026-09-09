@@ -68,22 +68,27 @@ test("deduplicates identical findings", () =>
     1,
   ));
 
-test("caps deductions at six", () => {
+// A panel repeats the same nutrient across columns (per 100 g and per
+// portion). Scoring reads the per-100 column once, so ten sugar rows are one
+// sugar deduction rather than ten.
+test("collapses repeated rows for one nutrient into a single deduction", () => {
   const findings = Array.from({ length: 10 }, (_, index) => ({
     ...attentionFinding,
     normalizedName: "nutrient" + index,
   }));
 
-  assert.equal(
-    scoreNutrition(validText, 0.9, {
-      ...base,
-      nutritionFindings: findings,
-    }).deductions.length,
-    6,
-  );
+  const deductions = scoreNutrition(validText, 0.9, {
+    ...base,
+    nutritionFindings: findings,
+  }).deductions;
+
+  assert.equal(deductions.length, 1);
+  assert.equal(deductions[0].code, "threshold:sugars");
 });
 
-test("halves points when evidence is missing", () => {
+// The declared number is the same number whether or not the model attached a
+// source to the row, so the score must be too.
+test("scores from the declared amount regardless of evidence type", () => {
   const withEvidence = scoreNutrition(validText, 0.9, {
     ...base,
     nutritionFindings: [attentionFinding],
@@ -96,8 +101,26 @@ test("halves points when evidence is missing", () => {
     ],
   });
 
-  assert.equal(withEvidence.deductions[0].points, 8);
-  assert.equal(withoutEvidence.deductions[0].points, 4);
+  // 30 g sugars per 100 g is above the 22.5 g band for solids.
+  assert.equal(withEvidence.deductions[0].points, 30);
+  assert.equal(withoutEvidence.deductions[0].points, 30);
+});
+
+test("a full-sugar drink scores far below a solid with the same sugar band", () => {
+  const drink = scoreNutrition(
+    "Ενέργεια 42kcal, Σάκχαρα 10.6g ανά 100 ml",
+    0.9,
+    {
+      ...base,
+      nutritionFindings: [
+        { ...attentionFinding, amount: "10.6g" },
+      ],
+    },
+  );
+
+  assert.equal(drink.deductions[0].points, 55);
+  assert.equal(drink.score, 45);
+  assert.equal(drink.band, "attention");
 });
 
 test("ignores positive and info findings", () =>
@@ -121,7 +144,13 @@ test("adds the no-problems bonus when there are no deductions", () => {
   const result = scoreNutrition(validText, 0.9, {
     ...base,
     nutritionFindings: [
-      { ...attentionFinding, severity: "positive" as const },
+      {
+        ...attentionFinding,
+        // Below every threshold band, so nothing is charged. The severity is
+        // irrelevant now: the amount decides.
+        amount: "2g",
+        severity: "positive" as const,
+      },
     ],
   });
 
@@ -193,7 +222,7 @@ test("still deducts for high sugar next to an allergen row", () => {
   });
 
   assert.equal(result.deductions.length, 1);
-  assert.equal(result.deductions[0].code, "attention:sugar");
+  assert.equal(result.deductions[0].code, "threshold:sugars");
 });
 
 test("returns the scoring version", () =>

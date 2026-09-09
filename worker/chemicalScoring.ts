@@ -1,15 +1,22 @@
-import { scoringVersion, type WorkerScore } from "./scoring";
+import {
+  deductionsFromRules,
+  FALLBACK_POINTS,
+  hasHighConcernDeduction,
+  MAX_DEDUCTION_COUNT,
+  scoringVersion,
+  type WorkerScore,
+} from "./scoring";
+import type { RuleMatch } from "./ingredientRules";
 import type { WorkerChemicalResult } from "./chemicalAnalysis";
 
 const MIN_OCR_CONFIDENCE = 0.4;
 const MIN_TEXT_LENGTH = 10;
-const MAX_DEDUCTIONS = 6;
 
 /**
- * Same severity → points → band algorithm as scoreInterpretation
- * (worker/scoring.ts), kept as an independent copy tuned for chemical
- * composition findings so the ingredients path's tested scoring stays
- * untouched.
+ * A chemical composition label is a list of substances, exactly like an
+ * ingredient list, so it scores through the same curated rule table rather
+ * than through whatever severity the model attached to each finding — see
+ * ingredientRules.ts for why that swap was necessary.
  */
 export function scoreChemicalComposition(
   text: string,
@@ -18,6 +25,7 @@ export function scoreChemicalComposition(
   options?: {
     extractionConfidence?: number;
     lowConfidenceReason?: string | null;
+    ruleMatches?: RuleMatch[];
   },
 ): WorkerScore {
   const extractionConfidence = options?.extractionConfidence ?? 1;
@@ -62,42 +70,46 @@ export function scoreChemicalComposition(
     };
   }
 
+  const ruleMatches = options?.ruleMatches ?? [];
+
   const seen = new Set<string>();
 
-  const deductions = analysis.chemicalFindings
-    .flatMap((finding) => {
-      if (
-        finding.severity !== "attention" &&
-        finding.severity !== "high_attention"
-      ) {
-        return [];
-      }
+  const deductions =
+    ruleMatches.length > 0
+      ? deductionsFromRules(ruleMatches)
+      : analysis.chemicalFindings
+          .flatMap((finding) => {
+            if (
+              finding.severity !== "attention" &&
+              finding.severity !== "high_attention"
+            ) {
+              return [];
+            }
 
-      const code = finding.severity + ":" + finding.normalizedName;
+            const code =
+              finding.severity + ":" + finding.normalizedName;
 
-      if (seen.has(code)) {
-        return [];
-      }
+            if (seen.has(code)) {
+              return [];
+            }
 
-      seen.add(code);
+            seen.add(code);
 
-      const hasEvidence = finding.evidenceType !== "none";
-      const basePoints = finding.severity === "high_attention" ? 15 : 8;
-      const points = hasEvidence ? basePoints : Math.round(basePoints / 2);
-
-      return [
-        {
-          code,
-          points,
-          title: finding.title,
-          explanation: finding.explanation,
-          ingredientIds: [],
-          evidenceRequired: finding.severity === "high_attention",
-          evidenceAvailable: hasEvidence,
-        },
-      ];
-    })
-    .slice(0, MAX_DEDUCTIONS);
+            return [
+              {
+                code,
+                points: FALLBACK_POINTS[finding.severity],
+                title: finding.title,
+                explanation: finding.explanation,
+                ingredientIds: [],
+                evidenceRequired:
+                  finding.severity === "high_attention",
+                evidenceAvailable:
+                  finding.evidenceType !== "none",
+              },
+            ];
+          })
+          .slice(0, MAX_DEDUCTION_COUNT);
 
   const totalDeduction = deductions.reduce(
     (total, deduction) => total + deduction.points,
@@ -107,7 +119,10 @@ export function scoreChemicalComposition(
   const bonuses: WorkerScore["bonuses"] = [];
   let bonusPoints = 0;
 
-  if (analysis.positives.length >= 2) {
+  if (
+    analysis.positives.length >= 2 &&
+    !hasHighConcernDeduction(deductions)
+  ) {
     bonuses.push({
       label: "Πολλαπλά θετικά χαρακτηριστικά σύστασης",
       points: 3,

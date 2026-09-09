@@ -1,15 +1,31 @@
-import { scoringVersion, type WorkerScore } from "./scoring";
+import {
+  FALLBACK_POINTS,
+  hasHighConcernDeduction,
+  MAX_DEDUCTION_COUNT,
+  scoringVersion,
+  type WorkerScore,
+} from "./scoring";
 import { isAllergenDeclarationOnly } from "./allergens";
+import {
+  bonusesFor,
+  isBeverageTable,
+  penaltiesFor,
+  readNutrients,
+} from "./nutritionThresholds";
 import type { WorkerNutritionResult } from "./nutritionAnalysis";
 
 const MIN_OCR_CONFIDENCE = 0.4;
 const MIN_TEXT_LENGTH = 15;
-const MAX_DEDUCTIONS = 6;
 
 /**
- * Same severity → points → band algorithm as scoreInterpretation
- * (worker/scoring.ts), kept as an independent copy tuned for nutrition
- * findings so the ingredients path's tested scoring stays untouched.
+ * Scores the declared quantities against published thresholds rather than
+ * the severities the model attached to each row — the nutrition equivalent
+ * of the rule table the ingredients path moved to. See
+ * nutritionThresholds.ts for the bands and why beverages get their own.
+ *
+ * Rows the panel declares without a readable amount still fall back to the
+ * model's severity, so a table the parser only partly understands is scored
+ * on what it did understand instead of coming back blank.
  */
 export function scoreNutrition(
   text: string,
@@ -70,7 +86,30 @@ export function scoreNutrition(
     (finding) => !isAllergenDeclarationOnly(finding, finding.nutrient),
   );
 
-  const deductions = scorableFindings
+  const readings = readNutrients(scorableFindings);
+  const isBeverage = isBeverageTable(text);
+
+  const thresholdDeductions = penaltiesFor(
+    readings,
+    isBeverage,
+  ).map((penalty) => ({
+    code: "threshold:" + penalty.key,
+    points: penalty.points,
+    title: penalty.title,
+    explanation: penalty.explanation,
+    ingredientIds: [],
+    evidenceRequired: false,
+    // The threshold is the evidence: a published band, not a per-scan guess.
+    evidenceAvailable: true,
+  }));
+
+  // All-or-nothing rather than per-row: once any quantity was read, the
+  // thresholds own the score. Mixing the two would charge a nutrient twice
+  // — once for its number and again for the model's opinion of that same
+  // row — which is how the ingredients path used to double-count.
+  const fallbackDeductions = (
+    readings.length > 0 ? [] : scorableFindings
+  )
     .flatMap((finding) => {
       if (
         finding.severity !== "attention" &&
@@ -87,33 +126,42 @@ export function scoreNutrition(
 
       seen.add(code);
 
-      const hasEvidence = finding.evidenceType !== "none";
-      const basePoints = finding.severity === "high_attention" ? 15 : 8;
-      const points = hasEvidence ? basePoints : Math.round(basePoints / 2);
-
       return [
         {
           code,
-          points,
+          points: FALLBACK_POINTS[finding.severity],
           title: finding.title,
           explanation: finding.explanation,
           ingredientIds: [],
           evidenceRequired: finding.severity === "high_attention",
-          evidenceAvailable: hasEvidence,
+          evidenceAvailable: finding.evidenceType !== "none",
         },
       ];
-    })
-    .slice(0, MAX_DEDUCTIONS);
+    });
+
+  const deductions = [
+    ...thresholdDeductions,
+    ...fallbackDeductions,
+  ].slice(0, MAX_DEDUCTION_COUNT);
 
   const totalDeduction = deductions.reduce(
     (total, deduction) => total + deduction.points,
     0,
   );
 
-  const bonuses: WorkerScore["bonuses"] = [];
-  let bonusPoints = 0;
+  // Earned from declared fibre and protein, not from the model's prose.
+  const bonuses: WorkerScore["bonuses"] = bonusesFor(readings);
 
-  if (analysis.positives.length >= 2) {
+  let bonusPoints = bonuses.reduce(
+    (total, bonus) => total + bonus.points,
+    0,
+  );
+
+  if (
+    analysis.positives.length >= 2 &&
+    !hasHighConcernDeduction(deductions) &&
+    readings.length === 0
+  ) {
     bonuses.push({
       label: "Πολλαπλά θετικά διατροφικά χαρακτηριστικά",
       points: 3,

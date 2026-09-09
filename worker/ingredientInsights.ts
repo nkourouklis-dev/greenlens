@@ -7,6 +7,7 @@ import {
   type EvidenceLevel,
   type IngredientCategory,
 } from "./ingredientKnowledge";
+import type { RuleMatch } from "./ingredientRules";
 
 export type IngredientRating = "good" | "caution" | "neutral";
 
@@ -100,9 +101,21 @@ function inferEvidenceLevel(finding: Finding): EvidenceLevel {
 /**
  * Builds one IngredientInsight per distinct ingredient found by the AI.
  * `score.deductions` is the single source of truth for scoreImpact: this
- * function matches each finding to its deduction using the exact same
- * `severity:normalizedName` code that scoring.ts already produces, and
- * never derives a number any other way.
+ * function matches each finding to its deduction and never derives a number
+ * any other way.
+ *
+ * Two linking paths, because deductions now have two possible origins:
+ *
+ *   - Rule deductions are keyed on a curated ingredient ("high_concern:sugar")
+ *     while the model names the same thing however it likes ("Γλυκαντικά
+ *     (Κυκλαμικό νάτριο...)"), so those are matched by looking for the alias
+ *     that actually matched the label inside the finding's own text.
+ *   - Fallback deductions still carry the model's own
+ *     `severity:normalizedName`, so those match exactly.
+ *
+ * Without the first path every ingredient card would report a scoreImpact of
+ * 0 while the score breakdown showed real deductions — the same class of
+ * self-contradicting output that the no-problems bonus used to produce.
  *
  * Curated knowledge is fetched from D1 in one batched pair of queries
  * (lookupIngredientKnowledgeBatch) covering every distinct ingredient in
@@ -112,10 +125,26 @@ export async function buildIngredientInsights(
   analysis: WorkerAnalysisResult,
   score: WorkerScore,
   db: D1Like,
+  ruleMatches: RuleMatch[] = [],
 ): Promise<IngredientInsight[]> {
   const deductionsByCode = new Map(
     score.deductions.map((deduction) => [deduction.code, deduction]),
   );
+
+  const ruleDeductions = ruleMatches.flatMap((match) => {
+    const deduction = deductionsByCode.get(
+      `${match.rule.severity}:${match.rule.normalizedName}`,
+    );
+
+    return deduction
+      ? [{ alias: match.matchedAlias, deduction }]
+      : [];
+  });
+
+  // A deduction belongs to one ingredient card. Without this, a label that
+  // mentions an ingredient twice would show the same penalty on both cards
+  // and appear to have been charged twice.
+  const claimed = new Set<string>();
 
   const seen = new Set<string>();
 
@@ -135,10 +164,32 @@ export async function buildIngredientInsights(
 
   return dedupedFindings.map((finding) => {
     const code = `${finding.severity}:${finding.normalizedName}`;
-    const deduction = deductionsByCode.get(code) ?? null;
+
+    const haystack =
+      `${finding.ingredientName} ${finding.normalizedName}`.toLowerCase();
+
+    const viaRule = ruleDeductions.find(
+      (entry) =>
+        !claimed.has(entry.deduction.code) &&
+        haystack.includes(entry.alias),
+    );
+
+    const deduction =
+      deductionsByCode.get(code) ??
+      viaRule?.deduction ??
+      null;
+
+    if (deduction) {
+      claimed.add(deduction.code);
+    }
+
     const knowledge = knowledgeByName.get(finding.normalizedName) ?? null;
 
-    const rating = ratingBySeverity[finding.severity] ?? "neutral";
+    // A rule can disagree with the model about how serious an ingredient is,
+    // and the rule wins — a card must not read "neutral" next to a penalty.
+    const rating = deduction
+      ? "caution"
+      : (ratingBySeverity[finding.severity] ?? "neutral");
 
     return {
       name: finding.ingredientName,

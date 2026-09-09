@@ -83,9 +83,9 @@ test("deduplicates identical findings", () =>
     1,
   ));
 
-test("caps deductions at six", () => {
+test("caps deductions at eight", () => {
   const findings = Array.from(
-    { length: 10 },
+    { length: 12 },
     (_, index) => ({
       ...attentionFinding,
       normalizedName: "ingredient" + index,
@@ -97,11 +97,15 @@ test("caps deductions at six", () => {
       ...base,
       ingredientFindings: findings,
     }).deductions.length,
-    6,
+    8,
   );
 });
 
-test("halves points when evidence is missing", () => {
+// The model emits evidenceType "none" for nearly every finding it produces,
+// so the old halving applied almost always and quietly capped attention
+// findings at 4 points — a product needed four separate flagged ingredients
+// to fall out of the "excellent" band.
+test("does not discount points when evidence is missing", () => {
   const withEvidence = scoreInterpretation(
     validText,
     0.9,
@@ -132,7 +136,7 @@ test("halves points when evidence is missing", () => {
 
   assert.equal(
     withoutEvidence.deductions[0].points,
-    4,
+    8,
   );
 });
 

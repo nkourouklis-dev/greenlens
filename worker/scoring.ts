@@ -1,7 +1,8 @@
 import type { WorkerAnalysisResult } from "./analysis";
 import { isAllergenDeclarationOnly } from "./allergens";
+import type { RuleMatch } from "./ingredientRules";
 
-export const scoringVersion = "2026.09.2";
+export const scoringVersion = "2026.09.3";
 
 export interface WorkerScore {
   score: number | null;
@@ -44,7 +45,126 @@ export interface WorkerScore {
 
 const MIN_OCR_CONFIDENCE = 0.4;
 const MIN_INGREDIENT_TEXT_LENGTH = 15;
-const MAX_DEDUCTIONS = 6;
+const MAX_DEDUCTIONS = 8;
+
+/**
+ * Points charged when an ingredient has no curated rule and the score has to
+ * fall back on the model's own severity. Deliberately below what the rule
+ * table charges for a comparable ingredient: an unreviewed guess should be
+ * able to nudge a score, not decide it.
+ */
+export const FALLBACK_POINTS = {
+  attention: 8,
+  high_attention: 15,
+} as const;
+
+export const MAX_DEDUCTION_COUNT = MAX_DEDUCTIONS;
+
+/**
+ * True when a deduction list contains something serious enough that the
+ * model's free-text `positives` — which tend to echo front-of-pack marketing
+ * — should not be allowed to claw points back.
+ */
+export function hasHighConcernDeduction(
+  deductions: WorkerScore["deductions"],
+): boolean {
+  return deductions.some(
+    (deduction) =>
+      deduction.code.startsWith("high_concern:") ||
+      deduction.code.startsWith("high_attention:"),
+  );
+}
+
+/**
+ * Shared by every content category that scores a *list of substances* —
+ * ingredients and chemical composition. Nutrition scores numbers against
+ * thresholds instead (see nutritionThresholds.ts), so it does not use this.
+ */
+export function deductionsFromRules(
+  matches: RuleMatch[],
+): WorkerScore["deductions"] {
+  return matches
+    .filter((match) => match.weightedPoints > 0)
+    .map((match) => ({
+      code:
+        match.rule.severity +
+        ":" +
+        match.rule.normalizedName,
+      points: match.weightedPoints,
+      title: match.rule.shortDescription,
+      explanation:
+        match.rule.concerns[0] ??
+        match.rule.shortDescription,
+      ingredientIds: [],
+      evidenceRequired:
+        match.rule.severity === "high_concern",
+      // A curated rule is itself the evidence — it was reviewed once, by a
+      // human, rather than asserted per-scan by the model.
+      evidenceAvailable: true,
+    }))
+    .slice(0, MAX_DEDUCTIONS);
+}
+
+/**
+ * Pre-rules behaviour, kept only for when the rule table is unreachable.
+ * The `evidenceType === "none"` halving that used to live here is gone: the
+ * model emits "none" for almost every finding, so halving was the rule
+ * rather than the exception and quietly capped most penalties at 4 points.
+ */
+function deductionsFromFindings(
+  analysis: WorkerAnalysisResult,
+): WorkerScore["deductions"] {
+  const seen = new Set<string>();
+
+  // "This is wheat/milk/egg" is a declaration, not a defect. The analysis
+  // path already downgrades these to info before scoring; filtering again
+  // here means no caller can reintroduce the penalty by scoring findings
+  // that were never classified.
+  const scorableFindings =
+    analysis.ingredientFindings.filter(
+      (finding) =>
+        !isAllergenDeclarationOnly(
+          finding,
+          finding.ingredientName,
+        ),
+    );
+
+  return scorableFindings
+    .flatMap((finding) => {
+      if (
+        finding.severity !== "attention" &&
+        finding.severity !== "high_attention"
+      ) {
+        return [];
+      }
+
+      const code =
+        finding.severity +
+        ":" +
+        finding.normalizedName;
+
+      if (seen.has(code)) {
+        return [];
+      }
+
+      seen.add(code);
+
+      return [
+        {
+          code,
+          points: FALLBACK_POINTS[finding.severity],
+          title: finding.title,
+          explanation: finding.explanation,
+          ingredientIds: [],
+          evidenceRequired:
+            finding.severity === "high_attention",
+          evidenceAvailable:
+            finding.evidenceType !== "none",
+        },
+      ];
+    })
+    .slice(0, MAX_DEDUCTIONS);
+}
 
 export function scoreInterpretation(
   text: string,
@@ -58,6 +178,16 @@ export function scoreInterpretation(
      */
     extractionConfidence?: number;
     lowConfidenceReason?: string | null;
+    /**
+     * Curated rules matched against the label text (see ingredientRules.ts).
+     * When present these are the *only* source of deductions — the model's
+     * severities are ignored, because letting them through was what made the
+     * score depend on how many items a given run happened to flag.
+     *
+     * Omitted (or empty, e.g. a D1 failure) falls back to model severities,
+     * so a scan still yields a score rather than a blank one.
+     */
+    ruleMatches?: RuleMatch[];
   },
 ): WorkerScore {
   const extractionConfidence =
@@ -115,68 +245,12 @@ export function scoreInterpretation(
     };
   }
 
-  const seen = new Set<string>();
+  const ruleMatches = options?.ruleMatches ?? [];
 
-  // "This is wheat/milk/egg" is a declaration, not a defect. The analysis
-  // path already downgrades these to info before scoring; filtering again
-  // here means no caller can reintroduce the penalty by scoring findings
-  // that were never classified.
-  const scorableFindings =
-    analysis.ingredientFindings.filter(
-      (finding) =>
-        !isAllergenDeclarationOnly(
-          finding,
-          finding.ingredientName,
-        ),
-    );
-
-  const deductions = scorableFindings
-    .flatMap((finding) => {
-      if (
-        finding.severity !== "attention" &&
-        finding.severity !== "high_attention"
-      ) {
-        return [];
-      }
-
-      const code =
-        finding.severity +
-        ":" +
-        finding.normalizedName;
-
-      if (seen.has(code)) {
-        return [];
-      }
-
-      seen.add(code);
-
-      const hasEvidence =
-        finding.evidenceType !== "none";
-
-      const basePoints =
-        finding.severity === "high_attention"
-          ? 15
-          : 8;
-
-      const points = hasEvidence
-        ? basePoints
-        : Math.round(basePoints / 2);
-
-      return [
-        {
-          code,
-          points,
-          title: finding.title,
-          explanation: finding.explanation,
-          ingredientIds: [],
-          evidenceRequired:
-            finding.severity ===
-            "high_attention",
-          evidenceAvailable: hasEvidence,
-        },
-      ];
-    })
-    .slice(0, MAX_DEDUCTIONS);
+  const deductions =
+    ruleMatches.length > 0
+      ? deductionsFromRules(ruleMatches)
+      : deductionsFromFindings(analysis);
 
   const totalDeduction = deductions.reduce(
     (total, deduction) =>
@@ -188,7 +262,13 @@ export function scoreInterpretation(
 
   let bonusPoints = 0;
 
-  if (analysis.positives.length >= 2) {
+  // Withheld once something serious was found: a product carrying a
+  // high_concern ingredient should not claw back points for what its
+  // packaging chooses to boast about.
+  if (
+    analysis.positives.length >= 2 &&
+    !hasHighConcernDeduction(deductions)
+  ) {
     bonuses.push({
       label: "Πολλαπλά θετικά χαρακτηριστικά",
       points: 3,

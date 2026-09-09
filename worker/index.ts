@@ -28,6 +28,10 @@ import {
 } from "./ingredientInsights";
 import { type D1Like } from "./ingredientKnowledge";
 import {
+  loadScoringRules,
+  matchScoringRules,
+} from "./ingredientRules";
+import {
   lookupCachedProduct,
   incrementProductScanCount,
   saveProductResult,
@@ -2448,6 +2452,26 @@ async function analyzeIngredientsCore(
     // evidence" state left to flag — a caller only ever sees a full score
     // (this path) or the gate's rejection reasons (the early return above),
     // never both.
+    // Deductions come from the label text matched against curated rules, not
+    // from the model's severities — see ingredientRules.ts for why.
+    const ruleSet = await loadScoringRules(env.DB);
+
+    const ruleMatches = matchScoringRules(
+      analysisText,
+      ruleSet,
+    );
+
+    console.log("scoring_rules_matched", {
+      requestId,
+      endpoint: "/api/analysis/run",
+      aliasesLoaded: ruleSet.aliases.length,
+      matched: ruleMatches.map((match) => ({
+        ingredient: match.rule.normalizedName,
+        position: match.position,
+        points: match.weightedPoints,
+      })),
+    });
+
     const score = scoreInterpretation(
       analysisText,
       ocrConfidence,
@@ -2455,6 +2479,7 @@ async function analyzeIngredientsCore(
       {
         extractionConfidence: gate.confidence,
         lowConfidenceReason: null,
+        ruleMatches,
       },
     );
 
@@ -2465,6 +2490,7 @@ async function analyzeIngredientsCore(
       result,
       score,
       env.DB,
+      ruleMatches,
     );
 
     const executiveSummary = buildExecutiveSummary(
@@ -3005,11 +3031,21 @@ async function runChemicalAnalysisPath(
       );
     }
 
+    // A chemical composition label lists substances, so it resolves against
+    // the same curated rule table the ingredients path uses.
+    const chemicalRuleSet = await loadScoringRules(env.DB);
+
     const score = scoreChemicalComposition(
       modelInputText,
       ocrConfidence,
       result,
-      { extractionConfidence: extraction.confidence },
+      {
+        extractionConfidence: extraction.confidence,
+        ruleMatches: matchScoringRules(
+          modelInputText,
+          chemicalRuleSet,
+        ),
+      },
     );
 
     const chemicalInsights = buildChemicalInsights(
