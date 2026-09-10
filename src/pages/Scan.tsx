@@ -258,29 +258,42 @@ export default function Scan() {
     // function. A miss (including any network/parsing issue —
     // checkCachedProduct never throws) falls straight through to the
     // normal "photograph the ingredients" flow below, unchanged.
-    const cachedResult =
+    const cached =
       await checkCachedProduct(cleanBarcode);
 
     if (
-      cachedResult &&
-      cachedResult.contentCategory !== "unknown"
+      cached &&
+      cached.result.contentCategory !== "unknown"
     ) {
       const id = crypto.randomUUID();
 
+      // Name, photo and ingredient text all come from the catalogue, not
+      // from this scan — the point of a cache hit is that nobody has to
+      // photograph or retype what someone already contributed.
       const historyItem: ScanHistoryItem = {
         id,
         barcode: cleanBarcode,
         status: "known",
         scannedAt: new Date().toISOString(),
+        ...(cached.productName
+          ? { productName: cached.productName }
+          : {}),
+        ...(cached.photoUrl ? { productPhoto: cached.photoUrl } : {}),
+        ...(cached.sourceText
+          ? {
+              ocrRawText: cached.sourceText,
+              userCorrectedText: cached.sourceText,
+            }
+          : {}),
       };
 
       const analysis = buildAnalysisRecord(
-        cachedResult,
+        cached.result,
         id,
         historyItem,
-        "",
+        cached.sourceText,
         [],
-        cachedResult.score.confidence,
+        cached.result.score.confidence,
       );
 
       saveHistoryItem({

@@ -18,19 +18,31 @@ interface FakeRow {
   scan_count: number;
 }
 
+interface FakeVersion {
+  barcode: string;
+  source: string;
+  applied: number;
+}
+
 /**
  * Minimal in-memory stand-in for the `products` table, covering exactly the
- * three query shapes productCache.ts issues: SELECT-by-barcode (first()),
- * UPDATE scan_count (run()), and the INSERT ... ON CONFLICT upsert (run()).
- * Good enough to test the module's logic without a real D1Database, which
- * can't be constructed under plain Node (tsx --test).
+ * query shapes productCache.ts issues: SELECT-by-barcode (first()), UPDATE
+ * scan_count (run()), the INSERT ... ON CONFLICT upsert (run()), and the
+ * product_versions INSERT the save path appends. Good enough to test the
+ * module's logic without a real D1Database, which can't be constructed
+ * under plain Node (tsx --test).
  */
-function createFakeDb(rows: Map<string, FakeRow> = new Map()): D1Like {
+function createFakeDb(
+  rows: Map<string, FakeRow> = new Map(),
+  versions: FakeVersion[] = [],
+): D1Like {
   return {
     prepare(sql: string): D1PreparedStatementLike {
       const isSelect = sql.trimStart().startsWith("SELECT");
       const isUpdate = sql.trimStart().startsWith("UPDATE");
-      const isInsert = sql.trimStart().startsWith("INSERT");
+      const isVersionInsert = sql.includes("product_versions");
+      const isInsert =
+        sql.trimStart().startsWith("INSERT") && !isVersionInsert;
 
       const statement: D1PreparedStatementLike = {
         bind(...values: unknown[]): D1PreparedStatementLike {
@@ -46,6 +58,18 @@ function createFakeDb(rows: Map<string, FakeRow> = new Map()): D1Like {
               return (row ?? null) as T | null;
             },
             async run() {
+              if (isVersionInsert) {
+                const [barcode, source] = values as [string, string];
+
+                versions.push({
+                  barcode,
+                  source,
+                  applied: values[7] as number,
+                });
+
+                return { success: true };
+              }
+
               if (isUpdate) {
                 const barcode = values[values.length - 1] as string;
                 const row = rows.get(barcode);
@@ -69,7 +93,8 @@ function createFakeDb(rows: Map<string, FakeRow> = new Map()): D1Like {
 
                 rows.set(barcode, {
                   barcode,
-                  product_name: productName,
+                  // Mirrors the COALESCE in the real upsert.
+                  product_name: productName ?? existing?.product_name ?? null,
                   category,
                   analysis_result: analysisResult,
                   status: existing?.status ?? "ai_generated",
@@ -302,4 +327,76 @@ test("a row with an unrecognised category degrades to a miss instead of throwing
   const cached = await lookupCachedProduct(db, "5202399414023");
 
   assert.equal(cached, null);
+});
+
+test("a scan of a verified product is kept as an unapplied version", async () => {
+  const rows = new Map([
+    [
+      "5202399414023",
+      {
+        barcode: "5202399414023",
+        product_name: "Επιβεβαιωμένο",
+        category: "ingredients",
+        analysis_result: JSON.stringify(sampleResult),
+        status: "verified",
+        source: "user_scan",
+        scan_count: 4,
+      },
+    ],
+  ]);
+
+  const versions: FakeVersion[] = [];
+
+  await saveProductResult(createFakeDb(rows, versions), {
+    barcode: "5202399414023",
+    category: "ingredients",
+    analysisResult: { score: { score: 41, band: "attention" } },
+  });
+
+  // The live row is untouched, but the scan is not lost: it is exactly what
+  // the admin needs to look at and decide whether to promote.
+  assert.equal(rows.get("5202399414023")?.product_name, "Επιβεβαιωμένο");
+  assert.equal(versions.length, 1);
+  assert.equal(versions[0].applied, 0);
+  assert.equal(versions[0].source, "user_scan");
+});
+
+test("a save that lands records an applied version", async () => {
+  const versions: FakeVersion[] = [];
+
+  await saveProductResult(createFakeDb(new Map(), versions), {
+    barcode: "5202399414023",
+    category: "ingredients",
+    analysisResult: sampleResult,
+    versionSource: "admin_analyze",
+  });
+
+  assert.equal(versions.length, 1);
+  assert.equal(versions[0].applied, 1);
+  assert.equal(versions[0].source, "admin_analyze");
+});
+
+test("a rescan without a name keeps the one already on file", async () => {
+  const rows = new Map([
+    [
+      "5202399414023",
+      {
+        barcode: "5202399414023",
+        product_name: "Μπάρα βρώμης",
+        category: "ingredients",
+        analysis_result: JSON.stringify(sampleResult),
+        status: "ai_generated",
+        source: "user_scan",
+        scan_count: 2,
+      },
+    ],
+  ]);
+
+  await saveProductResult(createFakeDb(rows), {
+    barcode: "5202399414023",
+    category: "ingredients",
+    analysisResult: sampleResult,
+  });
+
+  assert.equal(rows.get("5202399414023")?.product_name, "Μπάρα βρώμης");
 });

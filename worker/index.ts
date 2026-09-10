@@ -37,9 +37,11 @@ import {
   saveProductResult,
 } from "./productCache";
 import {
+  ensureDraftProduct,
+  hasProductPhoto,
   insertProductPhoto,
   listProductPhotos,
-  ensureDraftProduct,
+  pruneUserPhotos,
   isPhotoType,
   type PhotoType,
   type ProductPhotoRow,
@@ -53,6 +55,24 @@ import {
   type AdminProductListItem,
   type AdminProductDetail,
 } from "./adminProducts";
+import {
+  rescoreIngredientsResult,
+} from "./rescore";
+import {
+  buildDraftPrompt,
+  buildReportPrompt,
+  collectCatalogueFacts,
+  parseAssistantDraft,
+  type AssistantReply,
+} from "./adminAssistant";
+import {
+  getProductVersion,
+  listProductVersions,
+  recordProductVersion,
+  type ProductVersion,
+  type ProductVersionSource,
+  type ProductVersionSummary,
+} from "./productVersions";
 import {
   identifyPrompt,
   parseProductIdentity,
@@ -197,7 +217,12 @@ type JsonBody =
     }
   | ProductIdentity
   | { found: false }
-  | { found: true; result: JsonBody }
+  | {
+      found: true;
+      result: JsonBody;
+      productName: string | null;
+      photoUrl: string | null;
+    }
   | { r2Key: string }
   | { photos: ProductPhotoRow[] }
   | {
@@ -207,6 +232,9 @@ type JsonBody =
       totalCount: number;
     }
   | { product: AdminProductDetail | null }
+  | { versions: ProductVersionSummary[] }
+  | { version: ProductVersion }
+  | { assistant: AssistantReply }
   | { success: true };
 
 export default {
@@ -299,6 +327,26 @@ export default {
     ) {
       return runProductCacheLookup(
         cacheBarcode,
+        url,
+        env,
+        origin,
+        requestId,
+      );
+    }
+
+    // Public, unauthenticated read of a product's photo. Deliberately
+    // separate from /api/admin/photos/file: that one is keyed on an R2
+    // object key and gated by the admin secret, while this one takes a
+    // barcode and serves whatever shot the catalogue has for it, so a
+    // plain <img src> in the app works with no header and no JS.
+    const photoBarcode = matchProductPhotoPath(url.pathname);
+
+    if (
+      request.method === "GET" &&
+      photoBarcode !== null
+    ) {
+      return runProductPhoto(
+        photoBarcode,
         env,
         origin,
         requestId,
@@ -368,8 +416,111 @@ function matchProductCachePath(
   }
 }
 
+// Returns the barcode segment of /api/product/photo/<barcode>.
+function matchProductPhotoPath(
+  pathname: string,
+): string | null {
+  const segments = pathname.split("/");
+
+  const matches =
+    segments.length === 5 &&
+    segments[0] === "" &&
+    segments[1] === "api" &&
+    segments[2] === "product" &&
+    segments[3] === "photo" &&
+    segments[4].length > 0;
+
+  if (!matches) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(segments[4]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Serves one photo for a barcode, preferring a front-of-pack shot and
+ * falling back to the ingredient label — the packaging shot is what makes
+ * a history row recognisable at a glance, and the label is better than a
+ * blank square when that's all there is.
+ *
+ * Cached hard at the edge: a product photo for a barcode changes about as
+ * often as the packaging does, and the app asks for it on every scan of a
+ * known product.
+ */
+async function runProductPhoto(
+  barcode: string,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  let photos: ProductPhotoRow[];
+
+  try {
+    photos = await listProductPhotos(env.DB, barcode);
+  } catch (caughtError) {
+    console.error("product_photo_lookup_failed", {
+      requestId,
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Η φωτογραφία δεν βρέθηκε.",
+      404,
+      origin,
+      requestId,
+    );
+  }
+
+  const chosen =
+    photos.find((photo) => photo.photoType === "front") ??
+    photos.find((photo) => photo.photoType === "ingredients") ??
+    photos[0];
+
+  if (!chosen) {
+    return error(
+      "Η φωτογραφία δεν βρέθηκε.",
+      404,
+      origin,
+      requestId,
+    );
+  }
+
+  const object = await env.PHOTOS.get(chosen.r2Key);
+
+  if (!object) {
+    return error(
+      "Η φωτογραφία δεν βρέθηκε.",
+      404,
+      origin,
+      requestId,
+    );
+  }
+
+  const headers = new Headers({
+    "content-type":
+      object.httpMetadata?.contentType || "image/jpeg",
+    "cache-control": "public, max-age=86400",
+    "x-request-id": requestId,
+  });
+
+  if (origin) {
+    headers.set("access-control-allow-origin", origin);
+  }
+
+  return new Response(object.body, { status: 200, headers });
+}
+
 async function runProductCacheLookup(
   barcode: string,
+  url: URL,
   env: Env,
   origin: string | null,
   requestId: string,
@@ -397,10 +548,23 @@ async function runProductCacheLookup(
     scanCount: cached.scanCount + 1,
   });
 
+  // productName and photoUrl travel next to the analysis, not inside it:
+  // they live in their own columns/bucket, and without them a cache hit
+  // gave the app a scored product with no name and no picture to show in
+  // the scan history.
+  const photoUrl = (await hasProductPhoto(env.DB, barcode))
+    ? `${url.origin}/api/product/photo/${encodeURIComponent(barcode)}`
+    : null;
+
   // Written by saveProductResult from a response this same endpoint
   // family already validated and returned once — safe to replay as-is.
   return json(
-    { found: true, result: cached.analysisResult as JsonBody },
+    {
+      found: true,
+      result: cached.analysisResult as JsonBody,
+      productName: cached.productName,
+      photoUrl,
+    },
     200,
     origin,
     requestId,
@@ -487,6 +651,428 @@ function matchAdminProductAnalyzePath(
   } catch {
     return null;
   }
+}
+
+// Matches /api/admin/products/<barcode>/versions — the version log for one
+// product (GET), and the restore of one of its entries (POST with an id in
+// the body).
+function matchAdminProductVersionsPath(
+  pathname: string,
+): string | null {
+  const segments = pathname.split("/");
+
+  const matches =
+    segments.length === 6 &&
+    segments[0] === "" &&
+    segments[1] === "api" &&
+    segments[2] === "admin" &&
+    segments[3] === "products" &&
+    segments[4].length > 0 &&
+    segments[5] === "versions";
+
+  if (!matches) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(segments[4]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The version log for one barcode. `?id=` returns that single version with
+ * its full stored envelope; without it, the list of headers only (see
+ * worker/productVersions.ts for why the payload is left out of the list).
+ */
+async function runAdminListVersions(
+  barcode: string,
+  url: URL,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const requestedId = url.searchParams.get("id");
+
+  try {
+    if (requestedId !== null) {
+      const parsedId = Number(requestedId);
+
+      if (!Number.isInteger(parsedId)) {
+        return error(
+          "Μη έγκυρο id έκδοσης.",
+          400,
+          origin,
+          requestId,
+        );
+      }
+
+      const version = await getProductVersion(env.DB, parsedId);
+
+      // Checked rather than trusted: the id comes from the query string, so
+      // without this an admin URL for one barcode could read another's.
+      if (!version || version.barcode !== barcode) {
+        return error(
+          "Η έκδοση δεν βρέθηκε.",
+          404,
+          origin,
+          requestId,
+        );
+      }
+
+      return json({ version }, 200, origin, requestId);
+    }
+
+    const versions = await listProductVersions(env.DB, barcode);
+
+    return json({ versions }, 200, origin, requestId);
+  } catch (caughtError) {
+    console.error("admin_versions_list_failed", {
+      requestId,
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Το ιστορικό εκδόσεων δεν φορτώθηκε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
+/**
+ * Promotes a stored version back into the live row. The restore itself is
+ * appended as a new version rather than rewinding the log: what the product
+ * showed between then and now stays part of its history.
+ *
+ * The restored row is marked verified — a human deliberately chose it,
+ * which is exactly what that status means, and it protects the choice from
+ * being overwritten by the next routine scan.
+ */
+async function runAdminRestoreVersion(
+  barcode: string,
+  request: Request,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const body = await readJson(request);
+
+  const versionId =
+    isRecord(body) && typeof body.versionId === "number"
+      ? body.versionId
+      : null;
+
+  if (versionId === null || !Number.isInteger(versionId)) {
+    return error(
+      "Λείπει το id της έκδοσης.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  try {
+    const version = await getProductVersion(env.DB, versionId);
+
+    if (!version || version.barcode !== barcode) {
+      return error(
+        "Η έκδοση δεν βρέθηκε.",
+        404,
+        origin,
+        requestId,
+      );
+    }
+
+    if (
+      typeof version.analysisResult !== "object" ||
+      version.analysisResult === null
+    ) {
+      return error(
+        "Η έκδοση δεν περιέχει έγκυρη ανάλυση.",
+        422,
+        origin,
+        requestId,
+      );
+    }
+
+    await saveVerifiedProduct(env.DB, {
+      barcode,
+      category: version.category ?? undefined,
+      analysisResult: version.analysisResult as Record<string, unknown>,
+    });
+
+    await recordProductVersion(env.DB, {
+      barcode,
+      source: "restore",
+      productName: version.productName,
+      category: version.category,
+      analysisResult: version.analysisResult,
+      applied: true,
+    });
+
+    const product = await getAdminProduct(env.DB, barcode);
+
+    if (!product) {
+      return error(
+        "Το προϊόν δεν βρέθηκε.",
+        404,
+        origin,
+        requestId,
+      );
+    }
+
+    console.log("admin_version_restored", {
+      requestId,
+      barcode,
+      versionId,
+    });
+
+    return json({ product }, 200, origin, requestId);
+  } catch (caughtError) {
+    console.error("admin_version_restore_failed", {
+      requestId,
+      barcode,
+      versionId,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Η επαναφορά απέτυχε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
+/**
+ * POST /api/admin/assist — the PIM assistant (see worker/adminAssistant.ts).
+ *
+ * `mode: "draft"` needs a barcode and writes editorial copy for it.
+ * `mode: "report"` needs a question and answers it from SQL aggregates.
+ * Runs on the same Workers AI text model as the analysis pipeline, so it
+ * adds no new dependency or key.
+ */
+async function runAdminAssist(
+  request: Request,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const body = await readJson(request);
+
+  if (!isRecord(body)) {
+    return error(
+      "Το αίτημα δεν είναι έγκυρο.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  const mode = body.mode === "draft" ? "draft" : "report";
+
+  try {
+    if (mode === "draft") {
+      return await runAssistDraft(body, env, origin, requestId);
+    }
+
+    return await runAssistReport(body, env, origin, requestId);
+  } catch (caughtError) {
+    console.error("admin_assist_failed", {
+      requestId,
+      mode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Ο βοηθός δεν απάντησε. Δοκιμάστε ξανά.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
+async function runAssistDraft(
+  body: Record<string, unknown>,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const barcode =
+    typeof body.barcode === "string" ? body.barcode.trim() : "";
+
+  if (!barcode) {
+    return error(
+      "Λείπει το barcode.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  const product = await getAdminProduct(env.DB, barcode);
+
+  if (!product || !isRecord(product.analysisResult)) {
+    return error(
+      "Το προϊόν δεν έχει ανάλυση για να γράψει ο βοηθός.",
+      404,
+      origin,
+      requestId,
+    );
+  }
+
+  const analysisResult = product.analysisResult;
+
+  const findings = Array.isArray(analysisResult.ingredientFindings)
+    ? analysisResult.ingredientFindings
+        .filter(isRecord)
+        .map((finding) => ({
+          ingredientName:
+            typeof finding.ingredientName === "string"
+              ? finding.ingredientName
+              : "",
+          severity:
+            typeof finding.severity === "string"
+              ? finding.severity
+              : "unknown",
+          title: typeof finding.title === "string" ? finding.title : "",
+        }))
+    : [];
+
+  const score = isRecord(analysisResult.score)
+    ? analysisResult.score
+    : {};
+
+  const prompt = buildDraftPrompt({
+    productName: product.productName,
+    sourceText:
+      typeof analysisResult.sourceText === "string"
+        ? analysisResult.sourceText
+        : "",
+    findings,
+    score: typeof score.score === "number" ? score.score : null,
+    band: typeof score.band === "string" ? score.band : null,
+  });
+
+  const modelOutput = await env.AI.run(textModel, {
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a Greek-language product copywriter. You always return a single valid JSON object and nothing else.",
+      },
+      { role: "user", content: prompt },
+    ],
+    max_tokens: 700,
+    temperature: 0.3,
+  });
+
+  const modelText = extractModelText(modelOutput);
+
+  const draft = modelText
+    ? parseAssistantDraft(stripCodeFences(modelText))
+    : null;
+
+  if (!draft) {
+    return error(
+      "Ο βοηθός δεν επέστρεψε αξιοποιήσιμο κείμενο. Δοκιμάστε ξανά.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+
+  console.log("admin_assist_draft", {
+    requestId,
+    barcode,
+    highlights: draft.highlights.length,
+  });
+
+  return json(
+    { assistant: { mode: "draft", text: null, draft, facts: null } },
+    200,
+    origin,
+    requestId,
+  );
+}
+
+async function runAssistReport(
+  body: Record<string, unknown>,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const question =
+    typeof body.question === "string" ? body.question.trim() : "";
+
+  if (!question) {
+    return error(
+      "Λείπει η ερώτηση.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  const facts = await collectCatalogueFacts(env.DB);
+
+  const modelOutput = await env.AI.run(textModel, {
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a catalogue analyst. You answer in Greek using only the numbers you are given.",
+      },
+      { role: "user", content: buildReportPrompt(facts, question.slice(0, 500)) },
+    ],
+    max_tokens: 600,
+    temperature: 0.2,
+  });
+
+  const text = extractModelText(modelOutput);
+
+  if (!text) {
+    return error(
+      "Ο βοηθός δεν απάντησε. Δοκιμάστε ξανά.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+
+  console.log("admin_assist_report", {
+    requestId,
+    totalProducts: facts.totalProducts,
+  });
+
+  return json(
+    {
+      assistant: {
+        mode: "report",
+        text: stripCodeFences(text),
+        draft: null,
+        facts,
+      },
+    },
+    200,
+    origin,
+    requestId,
+  );
 }
 
 /**
@@ -584,6 +1170,44 @@ async function runAdminRequest(
   ) {
     return runAdminAnalyzeProduct(
       analyzeBarcode,
+      env,
+      origin,
+      requestId,
+    );
+  }
+
+  const versionsBarcode = matchAdminProductVersionsPath(
+    url.pathname,
+  );
+
+  if (versionsBarcode !== null) {
+    if (request.method === "GET") {
+      return runAdminListVersions(
+        versionsBarcode,
+        url,
+        env,
+        origin,
+        requestId,
+      );
+    }
+
+    if (request.method === "POST") {
+      return runAdminRestoreVersion(
+        versionsBarcode,
+        request,
+        env,
+        origin,
+        requestId,
+      );
+    }
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/api/admin/assist"
+  ) {
+    return runAdminAssist(
+      request,
       env,
       origin,
       requestId,
@@ -970,7 +1594,7 @@ async function runAdminUpdateProduct(
 
   if (!validated) {
     return error(
-      "Το αποτέλεσμα ανάλυσης δεν έχει έγκυρη μορφή. Ελέγξτε ότι κάθε πεδίο (περίληψη, ευρήματα, βαθμολογία) είναι συμπληρωμένο σωστά.",
+      "Το αποτέλεσμα ανάλυσης δεν έχει έγκυρη μορφή. Ελέγξτε ότι κάθε πεδίο (περίληψη, ευρήματα, κείμενο συστατικών) είναι συμπληρωμένο σωστά.",
       422,
       origin,
       requestId,
@@ -983,10 +1607,33 @@ async function runAdminUpdateProduct(
       : undefined;
 
   try {
+    // The score is never taken from the form. It is recomputed here from
+    // the confirmed ingredient text with the same rules the live scan uses,
+    // so an edited findings list can't leave a stale score (and stale
+    // deductions) behind it — see rescore.ts.
+    const rescored = await rescoreIngredientsResult(
+      env.DB,
+      validated.core,
+      validated.sourceText,
+    );
+
+    console.log("admin_product_rescored", {
+      requestId,
+      barcode,
+      score: rescored.score.score,
+      band: rescored.score.band,
+      deductions: rescored.score.deductions.length,
+      ruleMatches: rescored.ruleMatches.length,
+    });
+
     await saveVerifiedProduct(env.DB, {
       barcode,
       category,
-      analysisResult: validated,
+      analysisResult: {
+        ...validated.envelope,
+        score: rescored.score,
+        ingredientInsights: rescored.ingredientInsights,
+      },
     });
 
     const product = await getAdminProduct(env.DB, barcode);
@@ -999,6 +1646,15 @@ async function runAdminUpdateProduct(
         requestId,
       );
     }
+
+    await recordProductVersion(env.DB, {
+      barcode,
+      source: "admin_edit",
+      productName: product.productName,
+      category: product.category,
+      analysisResult: product.analysisResult,
+      applied: true,
+    });
 
     console.log("admin_product_verified", {
       requestId,
@@ -1230,6 +1886,7 @@ async function runAdminAnalyzeProduct(
           env,
           requestId,
           productTitle,
+          "admin_analyze",
         )
       : await analyzeNutritionCore(
           barcode,
@@ -1238,6 +1895,7 @@ async function runAdminAnalyzeProduct(
           env,
           requestId,
           productTitle,
+          "admin_analyze",
         );
 
   if (!outcome.ok) {
@@ -1270,6 +1928,100 @@ async function runAdminAnalyzeProduct(
   });
 
   return json({ product }, 200, origin, requestId);
+}
+
+/**
+ * Keeps a user's label photo in the shared catalogue, so a later scan of
+ * the same barcode by anyone can show a picture, and so the PIM has
+ * something real to review the analysis against.
+ *
+ * Only the newest user photo per label type survives (pruneUserPhotos):
+ * a popular barcode should not turn into a pile of near-identical shots.
+ * Photos captured by the admin flow are left alone — those are curated.
+ *
+ * Entirely best-effort. Every failure is logged and swallowed: the OCR
+ * result in the caller's hand is what the user asked for, and losing a
+ * photo must never cost them that.
+ */
+async function storeScanPhoto(
+  env: Env,
+  params: {
+    barcode: string;
+    image: File;
+    labelType: LabelType;
+    requestId: string;
+  },
+): Promise<void> {
+  const barcode = params.barcode.trim();
+
+  if (!barcode) {
+    return;
+  }
+
+  const photoType: PhotoType =
+    params.labelType === "nutrition"
+      ? "nutrition"
+      : "ingredients";
+
+  const r2Key = `photos/${barcode}/${photoType}/${Date.now()}.jpg`;
+
+  try {
+    await env.PHOTOS.put(r2Key, await params.image.arrayBuffer(), {
+      httpMetadata: {
+        contentType: params.image.type || "image/jpeg",
+      },
+    });
+  } catch (caughtError) {
+    console.error("scan_photo_upload_failed", {
+      requestId: params.requestId,
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return;
+  }
+
+  try {
+    const staleKeys = await pruneUserPhotos(
+      env.DB,
+      barcode,
+      photoType,
+    );
+
+    await insertProductPhoto(env.DB, {
+      barcode,
+      photoType,
+      r2Key,
+      uploadedBy: "user_scan",
+    });
+
+    await ensureDraftProduct(env.DB, barcode);
+
+    // After the new row is safely in place, so a failure here leaves an
+    // extra object in the bucket rather than a row pointing at nothing.
+    for (const key of staleKeys) {
+      await env.PHOTOS.delete(key);
+    }
+
+    console.log("scan_photo_stored", {
+      requestId: params.requestId,
+      barcode,
+      photoType,
+      replaced: staleKeys.length,
+    });
+  } catch (caughtError) {
+    console.error("scan_photo_record_failed", {
+      requestId: params.requestId,
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+  }
 }
 
 async function runOcr(
@@ -1459,6 +2211,17 @@ async function runOcr(
         extraction.isValid,
       extractionQuality,
       status: "success",
+    });
+
+    // The label the user just photographed is the catalogue's best chance
+    // at a picture for this barcode, so it is kept — never at the cost of
+    // the response, which is why this is awaited but can only log on
+    // failure. See storeScanPhoto for what is (and isn't) retained.
+    await storeScanPhoto(env, {
+      barcode: barcode ?? "",
+      image,
+      labelType: result.labelType,
+      requestId,
     });
 
     return json(
@@ -2110,6 +2873,10 @@ async function analyzeIngredientsCore(
   env: Env,
   requestId: string,
   productTitle?: string,
+  // Which route asked for this analysis, recorded on the version row. Both
+  // callers run the identical pipeline, so this is the only thing that
+  // distinguishes an admin re-analysis from a user's scan afterwards.
+  versionSource: ProductVersionSource = "user_scan",
 ): Promise<IngredientsAnalysisOutcome> {
   // Single shared evaluation of the label text, identical to the OCR gate.
   const evaluation =
@@ -2506,6 +3273,10 @@ async function analyzeIngredientsCore(
       executiveSummary,
       allergenNotice: allergens.notice,
       contentCategory: "ingredients" as const,
+      // The exact text the score was computed from. Persisted so the PIM
+      // can recompute the score after an edit without re-running OCR, and
+      // so a stored score stays reproducible from its own input.
+      sourceText: analysisText,
     };
 
     // Only cache a genuinely complete, scored result — score.score can
@@ -2517,8 +3288,10 @@ async function analyzeIngredientsCore(
     if (score.score !== null) {
       await saveProductResult(env.DB, {
         barcode,
+        productName: productTitle ?? null,
         category: "ingredients",
         analysisResult: responseBody,
+        versionSource,
       });
     }
 
@@ -2613,6 +3386,7 @@ async function analyzeNutritionCore(
   env: Env,
   requestId: string,
   productTitle?: string,
+  versionSource: ProductVersionSource = "user_scan",
 ): Promise<NutritionAnalysisOutcome> {
   const extraction = extractNutritionData(
     confirmedText,
@@ -2804,8 +3578,10 @@ async function analyzeNutritionCore(
     if (score.score !== null) {
       await saveProductResult(env.DB, {
         barcode,
+        productName: productTitle ?? null,
         category: "nutrition",
         analysisResult: responseBody,
+        versionSource,
       });
     }
 

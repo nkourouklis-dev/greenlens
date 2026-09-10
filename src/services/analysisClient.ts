@@ -159,9 +159,19 @@ export async function runAnalysis(
  * unexpected response just means "treat it as a cache miss" and let the
  * caller fall through to the normal photograph-then-analyze flow.
  */
+export interface CachedProductLookup {
+  result: AnalysisApiResult;
+  /** From the products row, not the analysis envelope. */
+  productName: string | null;
+  /** Public URL of a photo someone already took for this barcode. */
+  photoUrl: string | null;
+  /** The label text the stored score was computed from, if recorded. */
+  sourceText: string;
+}
+
 export async function checkCachedProduct(
   barcode: string,
-): Promise<AnalysisApiResult | null> {
+): Promise<CachedProductLookup | null> {
   if (apiConfigurationError || !barcode.trim()) {
     return null;
   }
@@ -204,6 +214,9 @@ export async function checkCachedProduct(
 
   const parsed = parseAnalysisApiResult(raw as RawAnalysisResponse);
 
+  const envelope = raw as Record<string, unknown>;
+  const meta = body as Record<string, unknown>;
+
   // parseAnalysisApiResult's `??` defaults only cover a *missing*
   // top-level field — they don't catch a field that's present but the
   // wrong shape (e.g. a hand-edited or pre-migration cache row with
@@ -211,7 +224,18 @@ export async function checkCachedProduct(
   // can be trusted not to do that; a persisted D1 row can't, so this is
   // the extra gate only the cache path needs. Anything that fails it is
   // treated exactly like a cache miss — never surfaced as an error.
-  return isWellFormedAnalysisResult(parsed) ? parsed : null;
+  if (!isWellFormedAnalysisResult(parsed)) {
+    return null;
+  }
+
+  return {
+    result: parsed,
+    productName:
+      typeof meta.productName === "string" ? meta.productName : null,
+    photoUrl: typeof meta.photoUrl === "string" ? meta.photoUrl : null,
+    sourceText:
+      typeof envelope.sourceText === "string" ? envelope.sourceText : "",
+  };
 }
 
 const VALID_SCORE_BANDS = new Set([

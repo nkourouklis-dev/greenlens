@@ -28,12 +28,16 @@ export type PhotoType =
   | "nutrition"
   | "other";
 
+/** Who put a photo in the catalogue. */
+export type PhotoSource = "admin_capture" | "user_scan";
+
 export interface ProductPhotoRow {
   id: number;
   barcode: string;
   photoType: PhotoType;
   r2Key: string;
   uploadedAt: string;
+  uploadedBy: PhotoSource;
 }
 
 interface RawPhotoRow {
@@ -42,6 +46,7 @@ interface RawPhotoRow {
   photo_type: string;
   r2_key: string;
   uploaded_at: string;
+  uploaded_by: string | null;
 }
 
 export function isPhotoType(value: unknown): value is PhotoType {
@@ -67,14 +72,57 @@ export async function insertProductPhoto(
     barcode: string;
     photoType: PhotoType;
     r2Key: string;
+    /** Defaults to the in-store capture flow, which is the older caller. */
+    uploadedBy?: PhotoSource;
   },
 ): Promise<void> {
   await db
     .prepare(
-      "INSERT INTO product_photos (barcode, photo_type, r2_key) VALUES (?, ?, ?)",
+      "INSERT INTO product_photos (barcode, photo_type, r2_key, uploaded_by) VALUES (?, ?, ?, ?)",
     )
-    .bind(params.barcode, params.photoType, params.r2Key)
+    .bind(
+      params.barcode,
+      params.photoType,
+      params.r2Key,
+      params.uploadedBy ?? "admin_capture",
+    )
     .run();
+}
+
+/**
+ * Removes the rows for previous user-scan photos of one type, returning
+ * their R2 keys so the caller can delete the objects too.
+ *
+ * Bounds what the public flow can accumulate: a barcode scanned by fifty
+ * people should hold the newest label shot, not fifty of them. Admin
+ * captures are never touched — those are the curated ones.
+ */
+export async function pruneUserPhotos(
+  db: D1Like,
+  barcode: string,
+  photoType: PhotoType,
+): Promise<string[]> {
+  const { results } = await db
+    .prepare(
+      "SELECT id, r2_key FROM product_photos WHERE barcode = ? AND photo_type = ? AND uploaded_by = 'user_scan'",
+    )
+    .bind(barcode, photoType)
+    .all<{ id: number; r2_key: string }>();
+
+  const rows = results ?? [];
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  await db
+    .prepare(
+      "DELETE FROM product_photos WHERE barcode = ? AND photo_type = ? AND uploaded_by = 'user_scan'",
+    )
+    .bind(barcode, photoType)
+    .run();
+
+  return rows.map((row) => row.r2_key);
 }
 
 /**
@@ -86,7 +134,7 @@ export async function listProductPhotos(
 ): Promise<ProductPhotoRow[]> {
   const { results } = await db
     .prepare(
-      "SELECT id, barcode, photo_type, r2_key, uploaded_at FROM product_photos WHERE barcode = ? ORDER BY uploaded_at DESC, id DESC",
+      "SELECT id, barcode, photo_type, r2_key, uploaded_at, uploaded_by FROM product_photos WHERE barcode = ? ORDER BY uploaded_at DESC, id DESC",
     )
     .bind(barcode)
     .all<RawPhotoRow>();
@@ -104,7 +152,33 @@ export async function listProductPhotos(
       photoType: row.photo_type,
       r2Key: row.r2_key,
       uploadedAt: row.uploaded_at,
+      uploadedBy:
+        row.uploaded_by === "user_scan" ? "user_scan" : "admin_capture",
     }));
+}
+
+/**
+ * Whether the catalogue holds any photo for this barcode. Kept separate
+ * from listProductPhotos because the public cache lookup only needs the
+ * yes/no to decide whether to hand the app a photo URL, and that runs on
+ * every scan of a known product.
+ */
+export async function hasProductPhoto(
+  db: D1Like,
+  barcode: string,
+): Promise<boolean> {
+  try {
+    const row = await db
+      .prepare(
+        "SELECT 1 AS present FROM product_photos WHERE barcode = ? LIMIT 1",
+      )
+      .bind(barcode)
+      .first<{ present: number }>();
+
+    return Boolean(row);
+  } catch {
+    return false;
+  }
 }
 
 /**

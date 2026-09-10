@@ -287,3 +287,156 @@ export async function fetchAdminPhotoBlob(
     return null;
   }
 }
+
+export interface AdminProductVersion {
+  id: number;
+  barcode: string;
+  source: "user_scan" | "admin_analyze" | "admin_edit" | "restore";
+  productName: string | null;
+  category: string | null;
+  score: number | null;
+  band: string | null;
+  applied: boolean;
+  createdAt: string;
+  analysisResult?: unknown;
+}
+
+export interface AssistantDraft {
+  summary: string;
+  overallVerdict: string;
+  highlights: string[];
+  watchOutFor: string[];
+}
+
+export interface AssistantFacts {
+  totalProducts: number;
+  byStatus: Array<{ status: string; count: number }>;
+  byCategory: Array<{ category: string; count: number }>;
+  byBand: Array<{ band: string; count: number }>;
+  averageScore: number | null;
+  pendingReview: number;
+  unappliedVersions: number;
+  recentlyUpdated: Array<{
+    barcode: string;
+    productName: string | null;
+    status: string;
+    score: number | null;
+    band: string | null;
+    updatedAt: string;
+  }>;
+}
+
+export interface AssistantReply {
+  mode: "draft" | "report";
+  text: string | null;
+  draft: AssistantDraft | null;
+  facts: AssistantFacts | null;
+}
+
+/**
+ * One place for every admin call's plumbing: configuration guard, the
+ * shared-secret header, network failure wording, and error extraction.
+ * The older functions in this file predate it and keep their own copies.
+ */
+async function adminRequest<T>(
+  path: string,
+  init: RequestInit,
+  fallbackError: string,
+): Promise<T> {
+  if (apiConfigurationError) {
+    throw new UserFacingError(apiConfigurationError);
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(`${apiBaseUrl}${path}`, {
+      ...init,
+      headers: {
+        ...authHeaders(),
+        ...(init.body ? { "content-type": "application/json" } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
+  } catch {
+    throw new UserFacingError(
+      "Δεν ήταν δυνατή η σύνδεση με την υπηρεσία.",
+    );
+  }
+
+  if (!response.ok) {
+    throw new UserFacingError(
+      await parseErrorMessage(response, fallbackError),
+    );
+  }
+
+  const body: unknown = await response.json().catch(() => null);
+
+  if (!body || typeof body !== "object") {
+    throw new UserFacingError(fallbackError);
+  }
+
+  return body as T;
+}
+
+export async function listProductVersions(
+  barcode: string,
+): Promise<AdminProductVersion[]> {
+  const body = await adminRequest<{ versions: AdminProductVersion[] }>(
+    `/api/admin/products/${encodeURIComponent(barcode)}/versions`,
+    { method: "GET" },
+    "Το ιστορικό εκδόσεων δεν φορτώθηκε.",
+  );
+
+  return Array.isArray(body.versions) ? body.versions : [];
+}
+
+export async function getProductVersion(
+  barcode: string,
+  id: number,
+): Promise<AdminProductVersion> {
+  const body = await adminRequest<{ version: AdminProductVersion }>(
+    `/api/admin/products/${encodeURIComponent(barcode)}/versions?id=${id}`,
+    { method: "GET" },
+    "Η έκδοση δεν φορτώθηκε.",
+  );
+
+  return body.version;
+}
+
+export async function restoreProductVersion(
+  barcode: string,
+  versionId: number,
+): Promise<AdminProductDetail> {
+  const body = await adminRequest<{ product: AdminProductDetail }>(
+    `/api/admin/products/${encodeURIComponent(barcode)}/versions`,
+    { method: "POST", body: JSON.stringify({ versionId }) },
+    "Η επαναφορά απέτυχε.",
+  );
+
+  return body.product;
+}
+
+export async function assistDraft(
+  barcode: string,
+): Promise<AssistantReply> {
+  const body = await adminRequest<{ assistant: AssistantReply }>(
+    "/api/admin/assist",
+    { method: "POST", body: JSON.stringify({ mode: "draft", barcode }) },
+    "Ο βοηθός δεν απάντησε.",
+  );
+
+  return body.assistant;
+}
+
+export async function assistReport(
+  question: string,
+): Promise<AssistantReply> {
+  const body = await adminRequest<{ assistant: AssistantReply }>(
+    "/api/admin/assist",
+    { method: "POST", body: JSON.stringify({ mode: "report", question }) },
+    "Ο βοηθός δεν απάντησε.",
+  );
+
+  return body.assistant;
+}

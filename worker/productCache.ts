@@ -13,6 +13,11 @@
  * the response already computed for this request.
  */
 
+import {
+  recordProductVersion,
+  type ProductVersionSource,
+} from "./productVersions";
+
 export type ProductCacheCategory =
   | "ingredients"
   | "nutrition"
@@ -191,6 +196,11 @@ export async function incrementProductScanCount(
  * the admin PUT endpoint) can never be silently clobbered by a routine
  * rescan or a re-analyze call — the whole UPDATE is skipped for it.
  *
+ * Either way the result is appended to product_versions: a scan that was
+ * refused by the verified guard is exactly the thing the admin needs to be
+ * able to look at and promote, so it is recorded as an unapplied version
+ * rather than dropped (see worker/productVersions.ts).
+ *
  * Never throws — a failure to cache must not fail the request that already
  * has a perfectly good, freshly computed result to return.
  */
@@ -201,15 +211,27 @@ export async function saveProductResult(
     productName?: string | null;
     category: ProductCacheCategory;
     analysisResult: unknown;
+    /** Which route produced this result, for the version log. */
+    versionSource?: ProductVersionSource;
   },
 ): Promise<void> {
+  // Read before writing: once the upsert has run there is no way to tell
+  // whether the verified guard skipped it.
+  const existing = await readProductStatus(db, params.barcode);
+
+  const applied = existing !== "verified";
+
   try {
     await db
       .prepare(
         `INSERT INTO products (barcode, product_name, category, analysis_result, status, source, scan_count)
          VALUES (?, ?, ?, ?, 'ai_generated', 'user_scan', 1)
          ON CONFLICT(barcode) DO UPDATE SET
-           product_name = excluded.product_name,
+           -- COALESCE, not a plain overwrite: most analysis callers have no
+           -- name to send, and letting those NULLs land would erase the name
+           -- an admin (or an earlier identify call) had already recorded —
+           -- the one the scan history shows for a known product.
+           product_name = COALESCE(excluded.product_name, products.product_name),
            category = excluded.category,
            analysis_result = excluded.analysis_result,
            status = 'ai_generated',
@@ -230,5 +252,36 @@ export async function saveProductResult(
           ? caughtError.message
           : String(caughtError).slice(0, 300),
     });
+  }
+
+  await recordProductVersion(db, {
+    barcode: params.barcode,
+    source: params.versionSource ?? "user_scan",
+    productName: params.productName ?? null,
+    category: params.category,
+    analysisResult: params.analysisResult,
+    applied,
+  });
+}
+
+/**
+ * Current status of a row, or null when the barcode is unknown. Swallows
+ * failures like everything else on this write path — an unreadable status
+ * is treated as "not verified", which risks recording a version as applied
+ * when it wasn't, and never risks losing the version itself.
+ */
+async function readProductStatus(
+  db: D1Like,
+  barcode: string,
+): Promise<string | null> {
+  try {
+    const row = await db
+      .prepare("SELECT status FROM products WHERE barcode = ?")
+      .bind(barcode)
+      .first<{ status: string }>();
+
+    return row?.status ?? null;
+  } catch {
+    return null;
   }
 }

@@ -4,6 +4,8 @@ import { Plus, Trash2, X } from "lucide-react";
 import AdminGate from "../components/AdminGate";
 import AdminPhotoThumbnail from "../components/AdminPhotoThumbnail";
 import EditableStringList from "../components/EditableStringList";
+import ProductVersionsPanel from "../components/ProductVersionsPanel";
+import { AssistantDraftPanel } from "../components/AdminAssistantPanel";
 import {
   analyzeAdminProduct,
   deleteAdminProduct,
@@ -19,15 +21,6 @@ const SEVERITY_OPTIONS = [
   "attention",
   "high_attention",
   "unknown",
-];
-
-const BAND_OPTIONS = [
-  "excellent",
-  "good",
-  "moderate",
-  "attention",
-  "high_attention",
-  "insufficient_data",
 ];
 
 interface EditableFinding {
@@ -46,6 +39,7 @@ interface EditableFinding {
 
 interface FormState {
   summary: string;
+  sourceText: string;
   scoreValue: string;
   band: string;
   positives: string[];
@@ -71,6 +65,23 @@ function asStringArray(value: unknown): string[] {
     : [];
 }
 
+/**
+ * Prefill for rows analyzed before the label text was persisted: the
+ * findings list, in label order, comma-separated (the separator the
+ * server's rule matcher weights positions by). Weaker than the real label
+ * text — the model only reports ingredients worth a card — which is exactly
+ * why it lands in an editable field the admin can correct rather than being
+ * used silently. Mirrors ingredientTextFromFindings in worker/rescore.ts.
+ */
+function ingredientTextFromFindings(
+  findings: EditableFinding[],
+): string {
+  return findings
+    .map((finding) => finding.ingredientName.trim())
+    .filter((name) => name.length > 0)
+    .join(", ");
+}
+
 function buildFormState(analysisResult: unknown): FormState {
   const raw = isRecord(analysisResult) ? analysisResult : {};
   const score = isRecord(raw.score) ? raw.score : {};
@@ -81,6 +92,51 @@ function buildFormState(analysisResult: unknown): FormState {
   const findings = Array.isArray(raw.ingredientFindings)
     ? raw.ingredientFindings
     : [];
+
+  const ingredientFindings = findings.map((finding): EditableFinding => {
+    const item = isRecord(finding) ? finding : {};
+
+    return {
+      ingredientName:
+        typeof item.ingredientName === "string"
+          ? item.ingredientName
+          : "",
+      normalizedName:
+        typeof item.normalizedName === "string"
+          ? item.normalizedName
+          : "",
+      severity:
+        typeof item.severity === "string"
+          ? item.severity
+          : "unknown",
+      title: typeof item.title === "string" ? item.title : "",
+      explanation:
+        typeof item.explanation === "string"
+          ? item.explanation
+          : "",
+      evidenceType:
+        typeof item.evidenceType === "string"
+          ? item.evidenceType
+          : "none",
+      sourceName:
+        typeof item.sourceName === "string"
+          ? item.sourceName
+          : null,
+      sourceUrl:
+        typeof item.sourceUrl === "string"
+          ? item.sourceUrl
+          : null,
+      confidence:
+        typeof item.confidence === "number"
+          ? item.confidence
+          : 0.5,
+    };
+  });
+
+  const sourceText =
+    typeof raw.sourceText === "string" && raw.sourceText.trim() !== ""
+      ? raw.sourceText
+      : ingredientTextFromFindings(ingredientFindings);
 
   return {
     summary: typeof raw.summary === "string" ? raw.summary : "",
@@ -93,45 +149,8 @@ function buildFormState(analysisResult: unknown): FormState {
     positives: asStringArray(raw.positives),
     attentionItems: asStringArray(raw.attentionItems),
     potentialAllergens: asStringArray(raw.potentialAllergens),
-    ingredientFindings: findings.map((finding): EditableFinding => {
-      const item = isRecord(finding) ? finding : {};
-
-      return {
-        ingredientName:
-          typeof item.ingredientName === "string"
-            ? item.ingredientName
-            : "",
-        normalizedName:
-          typeof item.normalizedName === "string"
-            ? item.normalizedName
-            : "",
-        severity:
-          typeof item.severity === "string"
-            ? item.severity
-            : "unknown",
-        title: typeof item.title === "string" ? item.title : "",
-        explanation:
-          typeof item.explanation === "string"
-            ? item.explanation
-            : "",
-        evidenceType:
-          typeof item.evidenceType === "string"
-            ? item.evidenceType
-            : "none",
-        sourceName:
-          typeof item.sourceName === "string"
-            ? item.sourceName
-            : null,
-        sourceUrl:
-          typeof item.sourceUrl === "string"
-            ? item.sourceUrl
-            : null,
-        confidence:
-          typeof item.confidence === "number"
-            ? item.confidence
-            : 0.5,
-      };
-    }),
+    ingredientFindings,
+    sourceText,
     overallVerdict:
       typeof executiveSummary.overallVerdict === "string"
         ? executiveSummary.overallVerdict
@@ -145,18 +164,19 @@ function buildFormState(analysisResult: unknown): FormState {
  * Rebuilds the complete analysis_result object to PUT: everything from
  * the originally loaded object, with only the fields this form actually
  * edits overridden. Fields the form never exposes (productType,
- * confidence, insufficientDataReasons, ingredientInsights, allergenNotice,
- * contentCategory, score.confidence/deductions/bonuses/scoringVersion,
+ * confidence, insufficientDataReasons, allergenNotice, contentCategory,
  * per-finding evidenceType/sourceName/sourceUrl/confidence) pass through
- * unchanged — see the note on the form component about ingredientInsights
- * potentially going stale relative to hand-edited ingredientFindings.
+ * unchanged.
+ *
+ * `score` and `ingredientInsights` are sent as loaded and then discarded:
+ * the server recomputes both from `sourceText` on every save, which is why
+ * the score fields in this form are read-only.
  */
 function applyFormState(
   original: unknown,
   form: FormState,
 ): Record<string, unknown> {
   const base = isRecord(original) ? original : {};
-  const score = isRecord(base.score) ? base.score : {};
   const executiveSummary = isRecord(base.executiveSummary)
     ? base.executiveSummary
     : {};
@@ -164,18 +184,11 @@ function applyFormState(
   return {
     ...base,
     summary: form.summary,
+    sourceText: form.sourceText,
     positives: form.positives,
     attentionItems: form.attentionItems,
     potentialAllergens: form.potentialAllergens,
     ingredientFindings: form.ingredientFindings,
-    score: {
-      ...score,
-      score:
-        form.scoreValue.trim() === ""
-          ? null
-          : Number(form.scoreValue),
-      band: form.band,
-    },
     executiveSummary: {
       ...executiveSummary,
       overallVerdict: form.overallVerdict,
@@ -466,25 +479,39 @@ function AdminProductDetailContent() {
               />
             </div>
 
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+                Κείμενο συστατικών
+              </p>
+
+              <textarea
+                value={form.sourceText}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    sourceText: event.target.value,
+                  })
+                }
+                rows={5}
+                className="mt-2 w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+              />
+
+              <p className="mt-2 text-xs leading-5 text-ink-muted">
+                Η βαθμολογία υπολογίζεται από αυτό το κείμενο κατά την
+                αποθήκευση. Κράτα τα συστατικά χωρισμένα με κόμμα και στη
+                σειρά της ετικέτας — η σειρά μετράει στον υπολογισμό.
+              </p>
+            </div>
+
             <div className="flex gap-3">
               <div className="flex-1">
                 <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
                   Βαθμολογία
                 </p>
 
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={form.scoreValue}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      scoreValue: event.target.value,
-                    })
-                  }
-                  className="mt-2 h-12 w-full rounded-xl border border-line bg-surface px-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                />
+                <p className="mt-2 flex h-12 w-full items-center rounded-xl border border-line-subtle bg-surface/70 px-3 text-sm text-ink-muted">
+                  {form.scoreValue === "" ? "—" : form.scoreValue}
+                </p>
               </div>
 
               <div className="flex-1">
@@ -492,21 +519,17 @@ function AdminProductDetailContent() {
                   Κατηγορία βαθμολογίας
                 </p>
 
-                <select
-                  value={form.band}
-                  onChange={(event) =>
-                    setForm({ ...form, band: event.target.value })
-                  }
-                  className="mt-2 h-12 w-full rounded-xl border border-line bg-surface px-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                >
-                  {BAND_OPTIONS.map((band) => (
-                    <option key={band} value={band}>
-                      {band}
-                    </option>
-                  ))}
-                </select>
+                <p className="mt-2 flex h-12 w-full items-center rounded-xl border border-line-subtle bg-surface/70 px-3 text-sm text-ink-muted">
+                  {form.band}
+                </p>
               </div>
             </div>
+
+            <p className="rounded-xl border border-line-subtle bg-surface/70 p-3 text-xs leading-5 text-ink-muted">
+              Η βαθμολογία δεν επεξεργάζεται χειροκίνητα. Υπολογίζεται στον
+              διακομιστή με τους ίδιους κανόνες που χρησιμοποιεί μια κανονική
+              σάρωση και ενημερώνεται μόλις αποθηκεύσεις.
+            </p>
 
             <EditableStringList
               label="Θετικά"
@@ -728,6 +751,38 @@ function AdminProductDetailContent() {
               onChange={(watchOutFor) =>
                 setForm({ ...form, watchOutFor })
               }
+            />
+
+            <AssistantDraftPanel
+              barcode={product.barcode}
+              onApply={(draft) =>
+                setForm({
+                  ...form,
+                  summary: draft.summary || form.summary,
+                  overallVerdict:
+                    draft.overallVerdict || form.overallVerdict,
+                  highlights:
+                    draft.highlights.length > 0
+                      ? draft.highlights
+                      : form.highlights,
+                  watchOutFor:
+                    draft.watchOutFor.length > 0
+                      ? draft.watchOutFor
+                      : form.watchOutFor,
+                })
+              }
+            />
+          </div>
+        )}
+
+        {product.status !== "draft" && (
+          <div className="mt-5">
+            <ProductVersionsPanel
+              barcode={product.barcode}
+              onRestored={(restored) => {
+                setProduct(restored);
+                setForm(buildFormState(restored.analysisResult));
+              }}
             />
           </div>
         )}

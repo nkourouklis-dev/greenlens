@@ -5,8 +5,20 @@
  * rather than silently seeing an empty list.
  */
 
-import { parseAnalysis } from "./analysis";
+import { parseAnalysis, type WorkerAnalysisResult } from "./analysis";
 import type { ProductCacheStatus } from "./productCache";
+
+/**
+ * An admin submission that passed validation, split into the parts the
+ * caller needs: `core` and `sourceText` feed the re-score, `envelope` is
+ * everything that gets stored as-is once the freshly computed `score` and
+ * `ingredientInsights` are merged into it.
+ */
+export interface VerifiedAnalysisSubmission {
+  core: WorkerAnalysisResult;
+  sourceText: string;
+  envelope: Record<string, unknown>;
+}
 
 // Minimal shape actually used from a D1Database — see productPhotos.ts for
 // the same pattern (this module needs the same four methods).
@@ -278,38 +290,10 @@ export async function getAdminProduct(
   };
 }
 
-const VALID_SCORE_BANDS = new Set([
-  "excellent",
-  "good",
-  "moderate",
-  "attention",
-  "high_attention",
-  "insufficient_data",
-]);
-
 function isPlainObject(
   value: unknown,
 ): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-function isValidScoreShape(value: unknown): boolean {
-  if (!isPlainObject(value)) {
-    return false;
-  }
-
-  return (
-    (value.score === null || typeof value.score === "number") &&
-    VALID_SCORE_BANDS.has(value.band as string) &&
-    typeof value.confidence === "number" &&
-    Number.isFinite(value.confidence) &&
-    Array.isArray(value.deductions) &&
-    Array.isArray(value.bonuses) &&
-    Array.isArray(value.insufficientDataReasons) &&
-    typeof value.scoringVersion === "string" &&
-    (value.lowConfidenceReason === null ||
-      typeof value.lowConfidenceReason === "string")
-  );
 }
 
 /**
@@ -322,9 +306,13 @@ function isValidScoreShape(value: unknown): boolean {
  * parseAnalysis — the exact same validator every live AI response
  * already has to pass — by round-tripping the candidate through JSON so
  * a plain admin-submitted object hits the same code path a real AI reply
- * does. Only the fields analysis pipeline adds on top (score,
- * ingredientInsights, executiveSummary, allergenNotice, contentCategory)
- * are checked here directly.
+ * does. Only the fields analysis pipeline adds on top
+ * (ingredientInsights, executiveSummary, allergenNotice, contentCategory,
+ * sourceText) are checked here directly.
+ *
+ * `score` is deliberately *not* validated or carried over: the caller
+ * recomputes it from `sourceText` (see rescore.ts), so whatever the form
+ * submitted for it is ignored rather than trusted.
  *
  * ingredients-category only for now — the PIM edit form (Part C) only has
  * fields for this shape; nutrition/chemical_composition rows can still be
@@ -332,7 +320,7 @@ function isValidScoreShape(value: unknown): boolean {
  */
 export function validateVerifiedAnalysisResult(
   candidate: unknown,
-): Record<string, unknown> | null {
+): VerifiedAnalysisSubmission | null {
   if (!isPlainObject(candidate)) {
     return null;
   }
@@ -343,15 +331,11 @@ export function validateVerifiedAnalysisResult(
     return null;
   }
 
-  if (!isValidScoreShape(candidate.score)) {
+  if (typeof candidate.sourceText !== "string") {
     return null;
   }
 
   if (!isPlainObject(candidate.executiveSummary)) {
-    return null;
-  }
-
-  if (!Array.isArray(candidate.ingredientInsights)) {
     return null;
   }
 
@@ -364,12 +348,15 @@ export function validateVerifiedAnalysisResult(
   }
 
   return {
-    ...core,
-    score: candidate.score,
-    executiveSummary: candidate.executiveSummary,
-    ingredientInsights: candidate.ingredientInsights,
-    allergenNotice: candidate.allergenNotice ?? null,
-    contentCategory: "ingredients",
+    core,
+    sourceText: candidate.sourceText,
+    envelope: {
+      ...core,
+      sourceText: candidate.sourceText,
+      executiveSummary: candidate.executiveSummary,
+      allergenNotice: candidate.allergenNotice ?? null,
+      contentCategory: "ingredients",
+    },
   };
 }
 

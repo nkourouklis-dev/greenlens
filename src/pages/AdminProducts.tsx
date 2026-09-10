@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Camera, ChevronLeft, ChevronRight } from "lucide-react";
 import AdminGate from "../components/AdminGate";
 import AdminPhotoThumbnail from "../components/AdminPhotoThumbnail";
+import { AssistantReportPanel } from "../components/AdminAssistantPanel";
 import {
   listAdminProducts,
   type AdminProductListItem,
@@ -146,6 +147,10 @@ function AdminProductsContent() {
           placeholder="Αναζήτηση barcode..."
           className="mt-3 h-12 w-full rounded-xl border border-line bg-surface px-4 text-base text-ink outline-none transition placeholder:text-ink-faintest focus:border-accent focus:ring-2 focus:ring-accent/20"
         />
+
+        <div className="mt-3">
+          <AssistantReportPanel />
+        </div>
 
         {loadError && (
           <p
