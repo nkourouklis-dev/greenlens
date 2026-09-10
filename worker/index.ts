@@ -57,6 +57,7 @@ import {
 } from "./adminProducts";
 import {
   rescoreIngredientsResult,
+  syncEnvelopeScoreMentions,
 } from "./rescore";
 import {
   buildDraftPrompt,
@@ -1630,7 +1631,13 @@ async function runAdminUpdateProduct(
       barcode,
       category,
       analysisResult: {
-        ...validated.envelope,
+        // The recompute can move the number, so any prose that quotes it —
+        // the assistant's "μία πρόταση που δικαιολογεί τη βαθμολογία" above
+        // all — is brought along with it (see syncEnvelopeScoreMentions).
+        ...syncEnvelopeScoreMentions(
+          validated.envelope,
+          rescored.score,
+        ),
         score: rescored.score,
         ingredientInsights: rescored.ingredientInsights,
       },

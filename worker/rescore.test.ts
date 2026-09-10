@@ -8,7 +8,10 @@ import type {
 import {
   ingredientTextFromFindings,
   rescoreIngredientsResult,
+  syncEnvelopeScoreMentions,
+  syncScoreMentions,
 } from "./rescore";
+import type { WorkerScore } from "./scoring";
 import { validateVerifiedAnalysisResult } from "./adminProducts";
 
 interface FakeRuleRow {
@@ -208,4 +211,79 @@ test("a submission's own score is not carried into storage", () => {
   assert.ok(validated);
   assert.equal(validated.sourceText, "Ζάχαρη, βρώμη");
   assert.equal(validated.envelope.score, undefined);
+});
+
+function fakeScore(
+  score: number | null,
+  band: WorkerScore["band"],
+): WorkerScore {
+  return { score, band, deductions: [] } as WorkerScore;
+}
+
+test("a quoted score is rewritten to the recomputed one", () =>
+  assert.equal(
+    syncScoreMentions(
+      "Βαθμολογείται με 92/100 για την εξαιρετική του σύνθεση.",
+      95,
+      "Εξαιρετική επιλογή",
+    ),
+    "Βαθμολογείται με 95/100 για την εξαιρετική του σύνθεση.",
+  ));
+
+test("a score written without /100 is rewritten too", () =>
+  assert.equal(
+    syncScoreMentions("Βαθμολογία: 92 στα συστατικά.", 78, "Καλή επιλογή"),
+    "Βαθμολογία: 78 στα συστατικά.",
+  ));
+
+test("prose without a score claim is left untouched", () => {
+  const text = "Περιέχει 100 γρ. βρώμης ανά συσκευασία.";
+
+  assert.equal(
+    syncScoreMentions(text, 40, "Μέτρια επιλογή"),
+    text,
+  );
+});
+
+test("a score claim is dropped when the recompute has no score", () =>
+  assert.equal(
+    syncScoreMentions(
+      "Καλή σύνθεση. Βαθμολογείται με 92/100.",
+      null,
+      "Ανεπαρκή στοιχεία",
+    ),
+    "Καλή σύνθεση.",
+  ));
+
+test("a text that was only a score claim falls back to the band verdict", () =>
+  assert.equal(
+    syncScoreMentions(
+      "Βαθμολογείται με 92/100.",
+      null,
+      "Ανεπαρκή στοιχεία",
+    ),
+    "Ανεπαρκή στοιχεία",
+  ));
+
+test("the whole envelope's free text follows the new score", () => {
+  const synced = syncEnvelopeScoreMentions(
+    {
+      summary: "Μπάρα δημητριακών.",
+      executiveSummary: {
+        overallVerdict: "Βαθμολογείται με 92/100.",
+        highlights: ["Πηγή ινών", "Σκορ 92/100"],
+        watchOutFor: [],
+      },
+    },
+    fakeScore(95, "excellent"),
+  );
+
+  const summary = synced.executiveSummary as Record<string, unknown>;
+
+  assert.equal(synced.summary, "Μπάρα δημητριακών.");
+  assert.equal(summary.overallVerdict, "Βαθμολογείται με 95/100.");
+  assert.deepEqual(summary.highlights, [
+    "Πηγή ινών",
+    "Σκορ 95/100",
+  ]);
 });

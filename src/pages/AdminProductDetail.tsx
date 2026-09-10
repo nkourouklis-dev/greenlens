@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Plus, Trash2, X } from "lucide-react";
 import AdminGate from "../components/AdminGate";
-import AdminPhotoThumbnail from "../components/AdminPhotoThumbnail";
+import AdminProductPhotos from "../components/AdminProductPhotos";
 import EditableStringList from "../components/EditableStringList";
 import ProductVersionsPanel from "../components/ProductVersionsPanel";
 import { AssistantDraftPanel } from "../components/AdminAssistantPanel";
@@ -243,6 +243,22 @@ function AdminProductDetailContent() {
 
   useEffect(load, [barcode]);
 
+  /**
+   * Pulls the row again after a photo upload but keeps only its photo list.
+   * A full `load()` here would rebuild the form from the server and throw
+   * away whatever the admin has typed but not yet saved — adding a photo
+   * must not cost them their edits.
+   */
+  async function refreshPhotos() {
+    const loaded = await getAdminProduct(barcode).catch(() => null);
+
+    if (loaded) {
+      setProduct((current) =>
+        current ? { ...current, photos: loaded.photos } : loaded,
+      );
+    }
+  }
+
   async function handleAnalyze() {
     if (isAnalyzing) {
       return;
@@ -408,24 +424,12 @@ function AdminProductDetailContent() {
           </button>
         </div>
 
-        {product.photos.length > 0 && (
-          <div className="mt-4 flex gap-3 overflow-x-auto pb-1">
-            {product.photos.map((photo) => (
-              <div key={photo.id} className="shrink-0 text-center">
-                <AdminPhotoThumbnail
-                  r2Key={photo.r2Key}
-                  alt={photo.photoType}
-                  className="h-24 w-24 rounded-xl object-cover"
-                  onClick={() => openPhoto(photo.r2Key)}
-                />
-
-                <p className="mt-1 text-[11px] text-ink-faint">
-                  {photo.photoType}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
+        <AdminProductPhotos
+          barcode={barcode}
+          photos={product.photos}
+          onUploaded={refreshPhotos}
+          onOpen={openPhoto}
+        />
 
         {product.status === "draft" && (
           <div className="mt-5 rounded-2xl border border-accent/40 bg-accent/10 p-4">

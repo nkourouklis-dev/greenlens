@@ -18,6 +18,7 @@ import type { WorkerAnalysisResult } from "./analysis";
 import type { D1Like } from "./ingredientKnowledge";
 import {
   buildIngredientInsights,
+  verdictByBand,
   type IngredientInsight,
 } from "./ingredientInsights";
 import {
@@ -96,4 +97,117 @@ export function ingredientTextFromFindings(
     .map((finding) => finding.ingredientName.trim())
     .filter((name) => name.length > 0)
     .join(", ");
+}
+
+/**
+ * A score written into prose — "Βαθμολογείται με 92/100 για την εξαιρετική
+ * του σύνθεση." — is the one part of an edited row that the recompute used
+ * to leave behind. The PIM assistant is asked for "μία πρόταση που
+ * δικαιολογεί τη βαθμολογία", so the number it saw at draft time gets baked
+ * into text that `rescoreIngredientsResult` never touches, and an admin who
+ * corrected the ingredient list ended up with a card reading 95 above a
+ * sentence still arguing for 92.
+ *
+ * Rewriting the number rather than regenerating the sentence is deliberate:
+ * the wording may have been edited by hand after the assistant wrote it, and
+ * a save is not the place to throw that away (nor to spend an AI call).
+ */
+const SCORE_OVER_100 = /\b(\d{1,3})\s*\/\s*100\b/g;
+
+/**
+ * "βαθμολογία: 92", "βαθμολογείται με 92" — the same claim without the
+ * /100. The lookahead keeps it off numbers SCORE_OVER_100 has already
+ * handled, and it only fires right after a form of "βαθμολογ-" so that an
+ * unrelated number ("2 γρ. ανά 100 γρ.") is left alone.
+ */
+const BARE_SCORE = /(βαθμολογ\p{L}*[\s:]+(?:με\s+)?)(\d{1,3})\b(?!\s*\/)/giu;
+
+function hasScoreMention(text: string): boolean {
+  SCORE_OVER_100.lastIndex = 0;
+  BARE_SCORE.lastIndex = 0;
+  return SCORE_OVER_100.test(text) || BARE_SCORE.test(text);
+}
+
+/**
+ * Drops whole sentences instead of rewriting them when the recompute came
+ * back without a score at all: there is no number to substitute, and
+ * "Βαθμολογείται με —/100" is worse than saying nothing. `fallback` covers
+ * the case where the score claim *was* the entire text.
+ */
+function withoutScoreSentences(
+  text: string,
+  fallback: string,
+): string {
+  const kept = text
+    .split(/(?<=[.!;·])\s+/)
+    .filter((sentence) => !hasScoreMention(sentence))
+    .join(" ")
+    .trim();
+
+  return kept.length > 0 ? kept : fallback;
+}
+
+/**
+ * Brings one free-text field in line with a freshly computed score.
+ * Returns the text unchanged when it never mentioned a score.
+ */
+export function syncScoreMentions(
+  text: string,
+  score: number | null,
+  fallback: string,
+): string {
+  if (!hasScoreMention(text)) {
+    return text;
+  }
+
+  if (score === null) {
+    return withoutScoreSentences(text, fallback);
+  }
+
+  return text
+    .replace(SCORE_OVER_100, `${score}/100`)
+    .replace(BARE_SCORE, `$1${score}`);
+}
+
+/**
+ * Applies `syncScoreMentions` to every free-text field of a stored analysis
+ * that an admin or the PIM assistant can put a score into, so a save leaves
+ * no sentence arguing for the previous number.
+ */
+export function syncEnvelopeScoreMentions(
+  envelope: Record<string, unknown>,
+  score: WorkerScore,
+): Record<string, unknown> {
+  const fallback = verdictByBand[score.band];
+
+  const syncText = (value: unknown): unknown =>
+    typeof value === "string"
+      ? syncScoreMentions(value, score.score, fallback)
+      : value;
+
+  const syncList = (value: unknown): unknown =>
+    Array.isArray(value) ? value.map(syncText) : value;
+
+  const executiveSummary = envelope.executiveSummary;
+
+  if (
+    typeof executiveSummary !== "object" ||
+    executiveSummary === null ||
+    Array.isArray(executiveSummary)
+  ) {
+    return { ...envelope, summary: syncText(envelope.summary) };
+  }
+
+  const summary = executiveSummary as Record<string, unknown>;
+
+  return {
+    ...envelope,
+    summary: syncText(envelope.summary),
+    executiveSummary: {
+      ...summary,
+      overallVerdict: syncText(summary.overallVerdict),
+      highlights: syncList(summary.highlights),
+      watchOutFor: syncList(summary.watchOutFor),
+    },
+  };
 }

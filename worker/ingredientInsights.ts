@@ -42,7 +42,7 @@ export interface ExecutiveSummary {
 
 type Finding = WorkerAnalysisResult["ingredientFindings"][number];
 
-const verdictByBand: Record<WorkerScore["band"], string> = {
+export const verdictByBand: Record<WorkerScore["band"], string> = {
   excellent: "Εξαιρετική επιλογή",
   good: "Καλή επιλογή",
   moderate: "Μέτρια επιλογή",
