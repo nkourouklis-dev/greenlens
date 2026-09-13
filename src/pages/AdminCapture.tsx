@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Camera, RotateCcw, Trash2, X } from "lucide-react";
+import { Camera, RotateCcw, ScanBarcode, Trash2, X } from "lucide-react";
 import ManualBarcodeInput from "../components/ManualBarcodeInput";
 import { useCameraViewport } from "../contexts/CameraContext";
+import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
 import {
   clearStoredAdminPassword,
   getStoredAdminPassword,
@@ -71,7 +72,35 @@ export default function AdminCapture() {
     containerRef,
     error: cameraError,
     captureFrame,
+    isActive: isCameraActive,
+    start: startCamera,
+    videoRef,
   } = useCameraViewport();
+
+  const barcodeScanner = useBarcodeScanner(videoRef);
+  const [isScanningBarcode, setIsScanningBarcode] = useState(false);
+
+  async function openBarcodeScanner() {
+    setIsScanningBarcode(true);
+
+    if (!isCameraActive) {
+      await startCamera();
+    }
+
+    await barcodeScanner.start((scanned) => {
+      setIsScanningBarcode(false);
+      setManualBarcode(scanned);
+      setBarcode(scanned);
+      navigator.vibrate?.(60);
+    });
+  }
+
+  function closeBarcodeScanner() {
+    barcodeScanner.stop();
+    setIsScanningBarcode(false);
+  }
+
+  const isOverlayOpen = activeSlot !== null || isScanningBarcode;
 
   useEffect(() => {
     if (!toast) {
@@ -225,11 +254,45 @@ export default function AdminCapture() {
       <div
         ref={containerRef}
         className={
-          activeSlot
+          isOverlayOpen
             ? "fixed inset-0 z-40 bg-black [&>video]:h-full [&>video]:w-full [&>video]:object-cover"
             : "hidden"
         }
       >
+        {isScanningBarcode && (
+          <>
+            <button
+              type="button"
+              onClick={closeBarcodeScanner}
+              aria-label="Ακύρωση σάρωσης"
+              className="absolute left-4 top-[max(1rem,env(safe-area-inset-top))] z-10 flex h-12 w-12 items-center justify-center rounded-full bg-black/60 text-white"
+            >
+              <X size={22} />
+            </button>
+
+            <div className="pointer-events-none absolute inset-x-0 top-[max(1rem,env(safe-area-inset-top))] flex justify-center">
+              <span className="rounded-full bg-black/60 px-4 py-2 text-sm font-semibold text-white">
+                Σάρωση barcode
+              </span>
+            </div>
+
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-8">
+              <div className="h-40 w-full max-w-sm rounded-2xl border-4 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
+            </div>
+
+            <div className="pointer-events-none absolute inset-x-0 bottom-[max(2rem,env(safe-area-inset-bottom))] flex justify-center px-4">
+              <span
+                role={barcodeScanner.error || cameraError ? "alert" : undefined}
+                className="rounded-full bg-black/60 px-4 py-2 text-center text-sm text-white"
+              >
+                {barcodeScanner.error ||
+                  cameraError ||
+                  "Κράτα το barcode μέσα στο πλαίσιο"}
+              </span>
+            </div>
+          </>
+        )}
+
         {activeSlot && (
           <>
             <button
@@ -330,12 +393,21 @@ export default function AdminCapture() {
             ξεκινήσεις τη λήψη.
           </p>
 
-          <div className="mt-6">
+          <button
+            type="button"
+            onClick={openBarcodeScanner}
+            className="mt-6 flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98]"
+          >
+            <ScanBarcode size={22} />
+            Σάρωση με κάμερα
+          </button>
+
+          <div className="mt-4">
             <ManualBarcodeInput
               value={manualBarcode}
               onChange={setManualBarcode}
               onSubmit={(value) => setBarcode(value.trim())}
-              label="Barcode προϊόντος"
+              label="ή πληκτρολόγησε το barcode"
               hint=""
             />
           </div>
