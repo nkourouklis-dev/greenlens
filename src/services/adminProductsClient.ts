@@ -216,8 +216,13 @@ export async function deleteAdminProduct(
   }
 }
 
+/**
+ * `category` forces which analysis runs ("analyze again as ingredients /
+ * as nutrition"); omitted, the Worker picks from the stored photos.
+ */
 export async function analyzeAdminProduct(
   barcode: string,
+  category?: "ingredients" | "nutrition",
 ): Promise<AdminProductDetail> {
   if (apiConfigurationError) {
     throw new UserFacingError(apiConfigurationError);
@@ -234,7 +239,14 @@ export async function analyzeAdminProduct(
   try {
     response = await fetch(
       `${apiBaseUrl}/api/admin/products/${encodeURIComponent(barcode)}/analyze`,
-      { method: "POST", headers: authHeaders(), signal: controller.signal },
+      {
+        method: "POST",
+        headers: category
+          ? { ...authHeaders(), "content-type": "application/json" }
+          : authHeaders(),
+        body: category ? JSON.stringify({ category }) : undefined,
+        signal: controller.signal,
+      },
     );
   } catch (caughtError) {
     throw new UserFacingError(

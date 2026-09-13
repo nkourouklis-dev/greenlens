@@ -194,7 +194,13 @@ export async function incrementProductScanCount(
  * 'ai_generated': a fresh, real analysis supersedes either. The
  * `WHERE status != 'verified'` guard means a human-verified entry (set by
  * the admin PUT endpoint) can never be silently clobbered by a routine
- * rescan or a re-analyze call — the whole UPDATE is skipped for it.
+ * rescan — the whole UPDATE is skipped for it.
+ *
+ * The one exception is `versionSource: "admin_analyze"`: the PIM's
+ * "analyze again" button is an admin deciding to replace what is on file,
+ * so it lands even on a verified row. The row drops back to 'ai_generated'
+ * because the new result has not been reviewed; the previous analysis stays
+ * in product_versions and can be restored.
  *
  * Either way the result is appended to product_versions: a scan that was
  * refused by the verified guard is exactly the thing the admin needs to be
@@ -219,7 +225,9 @@ export async function saveProductResult(
   // whether the verified guard skipped it.
   const existing = await readProductStatus(db, params.barcode);
 
-  const applied = existing !== "verified";
+  const overwriteVerified = params.versionSource === "admin_analyze";
+
+  const applied = existing !== "verified" || overwriteVerified;
 
   try {
     await db
@@ -236,13 +244,14 @@ export async function saveProductResult(
            analysis_result = excluded.analysis_result,
            status = 'ai_generated',
            updated_at = datetime('now')
-         WHERE products.status != 'verified'`,
+         WHERE products.status != 'verified' OR ? = 1`,
       )
       .bind(
         params.barcode,
         params.productName ?? null,
         params.category,
         JSON.stringify(params.analysisResult),
+        overwriteVerified ? 1 : 0,
       )
       .run();
   } catch (caughtError) {

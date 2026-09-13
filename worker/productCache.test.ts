@@ -87,7 +87,15 @@ function createFakeDb(
 
                 const existing = rows.get(barcode);
 
-                if (existing && existing.status === "verified") {
+                // Mirrors `WHERE status != 'verified' OR ? = 1`: the 5th bound
+                // value is the admin-analyze overwrite flag.
+                const overwriteVerified = values[4] === 1;
+
+                if (
+                  existing &&
+                  existing.status === "verified" &&
+                  !overwriteVerified
+                ) {
                   return { success: true };
                 }
 
@@ -97,7 +105,9 @@ function createFakeDb(
                   product_name: productName ?? existing?.product_name ?? null,
                   category,
                   analysis_result: analysisResult,
-                  status: existing?.status ?? "ai_generated",
+                  status: overwriteVerified
+                    ? "ai_generated"
+                    : (existing?.status ?? "ai_generated"),
                   source: existing?.source ?? "user_scan",
                   scan_count: existing?.scan_count ?? 1,
                 });
@@ -399,4 +409,42 @@ test("a rescan without a name keeps the one already on file", async () => {
   });
 
   assert.equal(rows.get("5202399414023")?.product_name, "Μπάρα βρώμης");
+});
+
+// "Analyze again" in the PIM is an explicit admin decision, so unlike a
+// routine rescan it replaces even a verified analysis. The row goes back to
+// ai_generated (nobody has reviewed the new result) and the save is recorded
+// as an applied version; the previous analysis is still in the history.
+test("an admin re-analyze replaces a verified row and records an applied version", async () => {
+  const rows = new Map([
+    [
+      "7613287308870",
+      {
+        barcode: "7613287308870",
+        product_name: "Nestlé Clusters",
+        category: "nutrition",
+        analysis_result: JSON.stringify({ score: { score: 65, band: "moderate" } }),
+        status: "verified",
+        source: "user_scan",
+        scan_count: 2,
+      },
+    ],
+  ]);
+
+  const versions: FakeVersion[] = [];
+
+  await saveProductResult(createFakeDb(rows, versions), {
+    barcode: "7613287308870",
+    category: "ingredients",
+    analysisResult: sampleResult,
+    versionSource: "admin_analyze",
+  });
+
+  const row = rows.get("7613287308870");
+  assert.equal(row?.category, "ingredients");
+  assert.equal(row?.status, "ai_generated");
+  assert.equal(row?.product_name, "Nestlé Clusters");
+  assert.equal(versions.length, 1);
+  assert.equal(versions[0].applied, 1);
+  assert.equal(versions[0].source, "admin_analyze");
 });

@@ -1176,6 +1176,7 @@ async function runAdminRequest(
   ) {
     return runAdminAnalyzeProduct(
       analyzeBarcode,
+      request,
       env,
       origin,
       requestId,
@@ -1827,12 +1828,33 @@ async function runAdminDeleteProduct(
  * other) has no slot for it, so a chemical-composition product can't
  * reach this endpoint with an analyzable photo at all.
  */
+/**
+ * POST /api/admin/products/<barcode>/analyze — runs OCR + analysis on the
+ * stored photos. First used only for drafts; now also the PIM's "analyze
+ * again", for any status.
+ *
+ * Optional JSON body `{ category: "ingredients" | "nutrition" }` decides
+ * which analysis to run, for when the automatic choice was wrong. Without
+ * it the old rule applies: the ingredients photo if there is one, else the
+ * nutrition photo. A nutrition run prefers the nutrition photo but falls
+ * back to the ingredients photo, because many packs print the ingredient
+ * list and the nutrition table in the one panel that got photographed.
+ */
 async function runAdminAnalyzeProduct(
   barcode: string,
+  request: Request,
   env: Env,
   origin: string | null,
   requestId: string,
 ): Promise<Response> {
+  const body = await readJson(request);
+
+  const requestedCategory =
+    isRecord(body) &&
+    (body.category === "ingredients" || body.category === "nutrition")
+      ? body.category
+      : null;
+
   let photos: ProductPhotoRow[];
 
   try {
@@ -1863,14 +1885,28 @@ async function runAdminAnalyzeProduct(
     (photo) => photo.photoType === "nutrition",
   );
 
-  const chosen = ingredientsPhoto
-    ? { category: "ingredients" as const, photo: ingredientsPhoto }
-    : nutritionPhoto
-      ? { category: "nutrition" as const, photo: nutritionPhoto }
-      : null;
+  const nutritionSource = nutritionPhoto ?? ingredientsPhoto;
+
+  const chosen =
+    requestedCategory === "ingredients"
+      ? ingredientsPhoto
+        ? { category: "ingredients" as const, photo: ingredientsPhoto }
+        : null
+      : requestedCategory === "nutrition"
+        ? nutritionSource
+          ? { category: "nutrition" as const, photo: nutritionSource }
+          : null
+        : ingredientsPhoto
+          ? { category: "ingredients" as const, photo: ingredientsPhoto }
+          : nutritionPhoto
+            ? { category: "nutrition" as const, photo: nutritionPhoto }
+            : null;
 
   if (!chosen) {
     return error(
+      requestedCategory === "ingredients"
+        ? "Δεν υπάρχει φωτογραφία συστατικών για αυτό το barcode."
+        :
       "Δεν υπάρχει φωτογραφία συστατικών ή διατροφικού πίνακα για αυτό το barcode.",
       400,
       origin,
@@ -2015,6 +2051,8 @@ async function runAdminAnalyzeProduct(
     requestId,
     barcode,
     category: chosen.category,
+    requestedCategory,
+    photoType: chosen.photo.photoType,
   });
 
   return json({ product }, 200, origin, requestId);

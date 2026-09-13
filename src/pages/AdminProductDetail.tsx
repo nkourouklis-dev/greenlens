@@ -266,8 +266,20 @@ function AdminProductDetailContent() {
     }
   }
 
-  async function handleAnalyze() {
-    if (isAnalyzing) {
+  async function handleAnalyze(category?: "ingredients" | "nutrition") {
+    if (isAnalyzing || !product) {
+      return;
+    }
+
+    // Re-analyzing replaces what is on file — worth a confirmation when a
+    // human already verified it, since the row goes back to unreviewed.
+    if (
+      category &&
+      product.status === "verified" &&
+      !window.confirm(
+        "Το προϊόν είναι Verified. Η νέα ανάλυση θα αντικαταστήσει την τρέχουσα και θα χρειαστεί ξανά έλεγχο. Συνέχεια;",
+      )
+    ) {
       return;
     }
 
@@ -275,7 +287,7 @@ function AdminProductDetailContent() {
     setAnalyzeError("");
 
     try {
-      const updated = await analyzeAdminProduct(barcode);
+      const updated = await analyzeAdminProduct(barcode, category);
       setProduct(updated);
       setForm(buildFormState(updated.analysisResult));
     } catch (caughtError) {
@@ -543,7 +555,7 @@ function AdminProductDetailContent() {
 
             <button
               type="button"
-              onClick={handleAnalyze}
+              onClick={() => handleAnalyze()}
               disabled={isAnalyzing}
               className="mt-3 h-14 w-full rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
             >
@@ -556,8 +568,52 @@ function AdminProductDetailContent() {
           <p className="mt-5 rounded-xl border border-line-subtle bg-surface/70 p-3 text-sm leading-6 text-ink-muted">
             Η επεξεργασία υποστηρίζεται προς το παρόν μόνο για
             αναλύσεις συστατικών (κατηγορία: {String(analysisCategory)}
-            ).
+            ). Αν η φωτογραφία έχει λίστα συστατικών, ανάλυσέ την
+            ξανά ως συστατικά παρακάτω.
           </p>
+        )}
+
+        {product.status !== "draft" && (
+          <div className="mt-5 rounded-2xl border border-line-subtle bg-surface/70 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+              Ανάλυση ξανά
+            </p>
+
+            <p className="mt-2 text-sm leading-6 text-ink-muted">
+              Διαβάζει ξανά τη φωτογραφία και αντικαθιστά την τρέχουσα
+              ανάλυση. Η τωρινή μένει στο ιστορικό εκδόσεων και μπορεί
+              να επανέλθει.
+            </p>
+
+            {analyzeError && (
+              <p
+                role="alert"
+                className="mt-2 text-sm font-semibold text-red-400"
+              >
+                {analyzeError}
+              </p>
+            )}
+
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => handleAnalyze("ingredients")}
+                disabled={isAnalyzing}
+                className="h-12 flex-1 rounded-xl border border-line px-4 text-sm font-semibold text-ink transition active:scale-[0.98] disabled:cursor-not-allowed disabled:text-ink-faint"
+              >
+                {isAnalyzing ? "Ανάλυση..." : "Ως συστατικά"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleAnalyze("nutrition")}
+                disabled={isAnalyzing}
+                className="h-12 flex-1 rounded-xl border border-line px-4 text-sm font-semibold text-ink transition active:scale-[0.98] disabled:cursor-not-allowed disabled:text-ink-faint"
+              >
+                {isAnalyzing ? "Ανάλυση..." : "Ως διατροφικός πίνακας"}
+              </button>
+            </div>
+          </div>
         )}
 
         {canEdit && (
