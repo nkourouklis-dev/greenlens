@@ -326,12 +326,23 @@ function containsWord(haystack: string, needle: string): boolean {
   }
 }
 
+/**
+ * The marker lists carry accented and unaccented spellings side by side
+ * ("αλάτι"/"αλατι", "σάκχαρα"/"σακχαρα"). Both normalize to the same
+ * string, so each distinct word must be counted once — otherwise a single
+ * "Αλάτι" in an ingredient list scored as two nutrition words, which alone
+ * met looksLikeNutritionTable's two-marker bar.
+ */
+function distinctNormalized(markers: string[]): string[] {
+  return Array.from(new Set(markers.map(normalize))).filter(Boolean);
+}
+
 function countMarkers(text: string, markers: string[]): number {
   const normalized = normalize(text);
   let count = 0;
 
-  for (const marker of markers) {
-    if (containsWord(normalized, normalize(marker))) {
+  for (const marker of distinctNormalized(markers)) {
+    if (containsWord(normalized, marker)) {
       count += 1;
     }
   }
@@ -427,8 +438,8 @@ function countNoiseMarkers(text: string): number {
   const normalized = normalize(text);
   let count = 0;
 
-  for (const marker of NOISE_MARKERS) {
-    const normalizedMarker = normalize(marker);
+  // Distinct normalized markers only — see distinctNormalized.
+  for (const normalizedMarker of distinctNormalized(NOISE_MARKERS)) {
 
     // Punctuation-heavy markers such as "www." or "@" cannot use word
     // boundaries, so they keep plain containment.
@@ -596,6 +607,31 @@ function looksLikeRealIngredientBlock(candidate: string): boolean {
   );
 }
 
+/**
+ * A line holding nothing but a nutrition-table heading word. OCR that reads
+ * a table column by column splits "ΔΙΑΤΡΟΦΙΚΕΣ ΠΛΗΡΟΦΟΡΙΕΣ" into
+ * "ΔΙΑΤΡΟΦΙΚΕΣ" / "Ανά" / "Ανά" / "125ml" / "ΠΛΗΡΟΦΟΡΙΕΣ", so the two-word
+ * SECTION_BOUNDARIES entry never matches and the ingredient block would run
+ * on through the whole table. Whole-line only: "Διατροφικές ίνες
+ * (ινουλίνη)" inside a list is an ingredient, not a table heading.
+ */
+const SPLIT_TABLE_HEADING_LINE =
+  /^(?:διατροφικ(?:ες|η|α)|nutrition(?:al)?|nahrwerte|valori nutrizionali)\s*[:.]?$/;
+
+function indexOfSplitTableHeading(text: string): number {
+  let offset = 0;
+
+  for (const line of text.split("\n")) {
+    if (offset > 0 && SPLIT_TABLE_HEADING_LINE.test(normalize(line))) {
+      return offset;
+    }
+
+    offset += line.length + 1;
+  }
+
+  return -1;
+}
+
 function extractIngredientBlockAtHeading(
   rawText: string,
   headingIdx: number,
@@ -648,6 +684,12 @@ function extractIngredientBlockAtHeading(
     if (boundaries.length > 0) {
       endIdx = boundaries[0].idx;
     }
+  }
+
+  const splitHeadingIdx = indexOfSplitTableHeading(contentAfterStart);
+
+  if (splitHeadingIdx >= 0 && splitHeadingIdx < endIdx) {
+    endIdx = splitHeadingIdx;
   }
 
   const ingredientBlock = contentAfterStart.substring(0, endIdx).trim();

@@ -4708,8 +4708,11 @@ function extractIngredientSection(
     sliced = true;
   }
 
+  // Also matches the plural "ΔΙΑΤΡΟΦΙΚΕΣ ΠΛΗΡΟΦΟΡΙΕΣ" and a line holding only
+  // "ΔΙΑΤΡΟΦΙΚΕΣ": OCR that reads a table column by column splits the
+  // heading across lines (see SPLIT_TABLE_HEADING_LINE in ingredientText.ts).
   const nutritionHeadingPattern =
-    /(διατροφικ[ήη]\s+(δήλωση|αξία|πληροφορ)|nutrition\s+(declaration|information|facts)|αν[άα]\s*100\s*(g|gr|γρ|ml)|per\s*100\s*(g|ml))/i;
+    /(διατροφικ(?:ή|η|ές|ες|ά|α)\s+(δήλωση|αξία|πληροφορ)|^\s*διατροφικ(?:ές|ες|ή|η|ά|α)\s*$|nutrition\s+(declaration|information|facts)|αν[άα]\s*100\s*(g|gr|γρ|ml)|per\s*100\s*(g|ml))/im;
 
   const nutritionMatch =
     nutritionHeadingPattern.exec(section);
