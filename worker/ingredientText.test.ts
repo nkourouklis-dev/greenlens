@@ -329,3 +329,27 @@ test("regression: skips a heading occurrence whose block is too short/boilerplat
   assert.ok(result.ingredientText?.includes("Water"));
   assert.ok(result.ingredientText?.includes("Sodium Chloride"));
 });
+
+// Regression: cosmetic label photographed with the "Ingredients:" heading
+// cropped off. The manufacturer footer under the list (GmbH, website,
+// "Made in Germany") used to push the whole block over the noise threshold
+// and discard the real ingredients above it.
+test("keeps a headingless INCI list that is followed by a manufacturer footer", () => {
+  const text =
+    "Aqua, Glycerin, Cetearyl Alcohol, Paraffinum Liquidum,\n" +
+    "Linalool, Hexyl Cinnamal, Citronellol,\n" +
+    "Alpha-Isomethyl Ionone, Parfum (Fragrance)\n" +
+    "O/W Emulsion\n" +
+    "Dr. Hobein (Nachf.) GmbH,\n" +
+    "med. Hautpflege\n" +
+    "D-53340 Meckenheim\n" +
+    "www.eubos.de\n" +
+    "Made in Germany\n" +
+    "150 ml ℮";
+  const result = extractIngredientText(text, 0.9);
+  assert(result.isValid);
+  assert.equal(result.labelType, "ingredients");
+  assert(result.ingredientText?.includes("Parfum"));
+  assert(!result.ingredientText?.includes("Hobein"));
+  assert(!result.ingredientText?.includes("Germany"));
+});

@@ -695,9 +695,24 @@ function extractIngredientTextWithoutHeading(
     return null;
   }
 
-  const tail = lines
-    .slice(startIndex)
-    .filter((line) => !isBoundaryLine(line));
+  const tail: string[] = [];
+
+  for (const line of lines.slice(startIndex)) {
+    // Once ingredient lines have been collected, the first manufacturer /
+    // website / origin line marks the label's footer: everything from there
+    // on is legal boilerplate, not more ingredients. Cutting here instead of
+    // judging the whole tail matters because a cosmetic's footer ("GmbH",
+    // "www.brand.de", "Made in Germany") alone reaches the noise threshold
+    // below, which used to throw away a perfectly good list sitting above
+    // it whenever the photo cropped off the "Ingredients:" heading.
+    if (tail.length > 0 && countNoiseMarkers(line) >= 1) {
+      break;
+    }
+
+    if (!isBoundaryLine(line)) {
+      tail.push(line);
+    }
+  }
 
   const candidate = stripNoiseSegments(tail.join("\n").trim());
 

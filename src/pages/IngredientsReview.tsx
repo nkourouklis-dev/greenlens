@@ -180,10 +180,20 @@ export default function IngredientsReview() {
   const nutritionOnly =
     ocrDraft.result.labelType === "nutrition";
 
-  // Quality checks are informational only — they never block the flow.
-  // The user can always continue with whatever text is present (raw OCR
-  // fallback included) and correct it manually if needed.
-  const canContinue = text.trim().length > 0;
+  const isIngredientsIntent =
+    !categoryOverride || categoryOverride === "ingredients";
+
+  // For an ingredient list, continuing with text the validator rejects was
+  // a dead end: the user was sent on to take the front photo, and only then
+  // did the Worker — running this exact same extractIngredientText — refuse
+  // the analysis. Blocking here instead keeps the user on the one screen
+  // where they can actually fix it (edit the text, or retake the photo);
+  // the button enables the moment the edited text passes. Nutrition and
+  // chemical-composition text has its own Worker-side validator, so it
+  // only needs to be non-empty.
+  const canContinue =
+    text.trim().length > 0 &&
+    (!isIngredientsIntent || textQuality.canContinue);
 
   // The model's own labelType disagrees with the deterministic check: it
   // thought this was an ingredient label, but extractIngredientText rejected
@@ -209,9 +219,6 @@ export default function IngredientsReview() {
   // composition, showing "no ingredient list found" would just be
   // confusing noise — the Worker's own category-specific validator is the
   // real gate for those paths.
-  const isIngredientsIntent =
-    !categoryOverride || categoryOverride === "ingredients";
-
   function retake() {
     clearOcrDraft(id);
     navigate(
@@ -410,6 +417,12 @@ export default function IngredientsReview() {
           >
             Συνέχεια
           </button>
+          {!canContinue && text.trim().length > 0 && (
+            <p className="text-center text-xs text-ink-faint">
+              Διόρθωσε το κείμενο ώστε να περιέχει μόνο τα
+              συστατικά, ή βγάλε ξανά φωτογραφία.
+            </p>
+          )}
           <button
             type="button"
             onClick={retake}
