@@ -46,6 +46,8 @@ export interface WorkerScore {
   scoringVersion: string;
 }
 
+type Deductions = WorkerScore["deductions"];
+
 const MIN_OCR_CONFIDENCE = 0.4;
 const MIN_INGREDIENT_TEXT_LENGTH = 15;
 const MAX_DEDUCTIONS = 8;
@@ -69,7 +71,7 @@ export const MAX_DEDUCTION_COUNT = MAX_DEDUCTIONS;
  * — should not be allowed to claw points back.
  */
 export function hasHighConcernDeduction(
-  deductions: WorkerScore["deductions"],
+  deductions: Deductions,
 ): boolean {
   return deductions.some(
     (deduction) =>
@@ -78,6 +80,218 @@ export function hasHighConcernDeduction(
   );
 }
 
+// ---------------------------------------------------------------------------
+// Shared scoring steps
+//
+// Ingredients (scoreInterpretation below), nutrition (nutritionScoring.ts)
+// and chemical composition (chemicalScoring.ts) used to each carry their own
+// copy of the steps below. They differ only in *what* they deduct for and in
+// their wording; the arithmetic around it — when a result is "insufficient",
+// how the model-severity fallback charges, when the two bonuses apply, the
+// 0–100 clamp and the bands — is one rule, kept here so a fix to it (like
+// 96c9d1d's "no-problems bonus next to a deduction") lands once.
+// ---------------------------------------------------------------------------
+
+/**
+ * The reasons a text cannot be scored at all: too little text, an OCR read
+ * too unreliable to trust, or nothing evaluable found in it.
+ */
+export function blockingReasonsFor(params: {
+  text: string;
+  minTextLength: number;
+  shortTextReason: string;
+  ocrConfidence: number;
+  findingCount: number;
+  noFindingsReason: string;
+}): string[] {
+  const reasons: string[] = [];
+
+  if (params.text.trim().length < params.minTextLength) {
+    reasons.push(params.shortTextReason);
+  }
+
+  if (params.ocrConfidence < MIN_OCR_CONFIDENCE) {
+    reasons.push("Η ανάγνωση της ετικέτας δεν ήταν αρκετά αξιόπιστη.");
+  }
+
+  if (params.findingCount === 0) {
+    reasons.push(params.noFindingsReason);
+  }
+
+  return reasons;
+}
+
+/** The result for a text that could not be scored: no number, only reasons. */
+export function insufficientDataScore(params: {
+  confidence: number;
+  lowConfidenceReason: string | null;
+  blockingReasons: string[];
+  modelReasons: string[];
+}): WorkerScore {
+  return {
+    score: null,
+    band: "insufficient_data",
+    deductions: [],
+    bonuses: [],
+    confidence: params.confidence,
+    lowConfidenceReason: params.lowConfidenceReason,
+    insufficientDataReasons: Array.from(
+      new Set([...params.blockingReasons, ...params.modelReasons]),
+    ),
+    scoringVersion,
+  };
+}
+
+interface SeverityFinding {
+  normalizedName: string;
+  severity: string;
+  title: string;
+  explanation: string;
+  evidenceType: string;
+}
+
+/**
+ * Fallback deductions from the model's own per-finding severities, for when
+ * no curated rule or threshold applies. One deduction per
+ * severity:ingredient, FALLBACK_POINTS each, at most MAX_DEDUCTIONS.
+ *
+ * `groupOf` puts findings into a group that is charged only once, by its
+ * first finding — the fallback's stand-in for a rule group (see
+ * deductionsFromFindings). A duplicate severity:ingredient is skipped before
+ * the group is considered, so it never uses up the group's one charge.
+ */
+export function deductionsFromModelSeverities<F extends SeverityFinding>(
+  findings: F[],
+  groupOf: (finding: F) => string | null = () => null,
+): Deductions {
+  const seen = new Set<string>();
+  const chargedGroups = new Set<string>();
+
+  return findings
+    .flatMap((finding) => {
+      const severity = finding.severity;
+
+      if (severity !== "attention" && severity !== "high_attention") {
+        return [];
+      }
+
+      const code = severity + ":" + finding.normalizedName;
+
+      if (seen.has(code)) {
+        return [];
+      }
+
+      seen.add(code);
+
+      const group = groupOf(finding);
+
+      if (group !== null) {
+        if (chargedGroups.has(group)) {
+          return [];
+        }
+
+        chargedGroups.add(group);
+      }
+
+      return [
+        {
+          code,
+          points: FALLBACK_POINTS[severity],
+          title: finding.title,
+          explanation: finding.explanation,
+          ingredientIds: [],
+          evidenceRequired: severity === "high_attention",
+          evidenceAvailable: finding.evidenceType !== "none",
+        },
+      ];
+    })
+    .slice(0, MAX_DEDUCTIONS);
+}
+
+export function bandForScore(score: number): WorkerScore["band"] {
+  return score >= 85
+    ? "excellent"
+    : score >= 70
+      ? "good"
+      : score >= 50
+        ? "moderate"
+        : score >= 30
+          ? "attention"
+          : "high_attention";
+}
+
+/**
+ * Turns a finished deduction list into the final score: adds the two
+ * shared bonuses, clamps to 0–100 and picks the band.
+ *
+ * - "Multiple positives" (+3) is withheld once something serious was
+ *   found: a product carrying a high_concern ingredient should not claw
+ *   back points for what its packaging chooses to boast about.
+ *   `positivesBonusAllowed` lets a caller add its own condition.
+ * - "No problems" (+5) must never coexist with an actual deduction — a
+ *   bonus that says "no problems" while a finding just docked points for a
+ *   real one (e.g. high ethanol content) is a direct contradiction.
+ *
+ * `earnedBonuses` are bonuses the caller already awarded from data (e.g.
+ * declared fibre in a nutrition table); they come first in the list.
+ */
+export function finalizeScore(params: {
+  deductions: Deductions;
+  earnedBonuses?: WorkerScore["bonuses"];
+  positivesCount: number;
+  positivesBonusAllowed?: boolean;
+  positivesBonusLabel: string;
+  noProblemsBonusLabel: string;
+  confidence: number;
+  lowConfidenceReason: string | null;
+}): WorkerScore {
+  const { deductions } = params;
+
+  const totalDeduction = deductions.reduce(
+    (total, deduction) => total + deduction.points,
+    0,
+  );
+
+  const bonuses: WorkerScore["bonuses"] = [...(params.earnedBonuses ?? [])];
+
+  if (
+    params.positivesCount >= 2 &&
+    !hasHighConcernDeduction(deductions) &&
+    (params.positivesBonusAllowed ?? true)
+  ) {
+    bonuses.push({ label: params.positivesBonusLabel, points: 3 });
+  }
+
+  if (deductions.length === 0) {
+    bonuses.push({ label: params.noProblemsBonusLabel, points: 5 });
+  }
+
+  const bonusPoints = bonuses.reduce(
+    (total, bonus) => total + bonus.points,
+    0,
+  );
+
+  const score = Math.max(
+    0,
+    Math.min(100, 100 - totalDeduction + bonusPoints),
+  );
+
+  return {
+    score,
+    band: bandForScore(score),
+    deductions,
+    bonuses,
+    confidence: params.confidence,
+    lowConfidenceReason: params.lowConfidenceReason,
+    insufficientDataReasons: [],
+    scoringVersion,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Ingredients
+// ---------------------------------------------------------------------------
+
 /**
  * Shared by every content category that scores a *list of substances* —
  * ingredients and chemical composition. Nutrition scores numbers against
@@ -85,7 +299,7 @@ export function hasHighConcernDeduction(
  */
 export function deductionsFromRules(
   matches: RuleMatch[],
-): WorkerScore["deductions"] {
+): Deductions {
   return matches
     .filter((match) => match.weightedPoints > 0)
     .map((match) => ({
@@ -116,17 +330,7 @@ export function deductionsFromRules(
  */
 function deductionsFromFindings(
   analysis: WorkerAnalysisResult,
-): WorkerScore["deductions"] {
-  const seen = new Set<string>();
-
-  // Fragrance is charged once, whichever fragrance finding comes first —
-  // the same thing the rule table does through its "fragrance_allergen"
-  // group (parfum plus the EU-declared fragrance substances). Without this,
-  // a label listing Parfum, Linalool and Limonene lost 24 points here but
-  // at most 6 on the normal rule path, so a D1 hiccup alone could drop a
-  // cosmetic by two bands.
-  let fragranceCharged = false;
-
+): Deductions {
   // "This is wheat/milk/egg" is a declaration, not a defect. The analysis
   // path already downgrades these to info before scoring; filtering again
   // here means no caller can reintroduce the penalty by scoring findings
@@ -140,57 +344,20 @@ function deductionsFromFindings(
         ),
     );
 
-  return scorableFindings
-    .flatMap((finding) => {
-      if (
-        finding.severity !== "attention" &&
-        finding.severity !== "high_attention"
-      ) {
-        return [];
-      }
+  // Fragrance is charged once, whichever fragrance finding comes first —
+  // the same thing the rule table does through its "fragrance_allergen"
+  // group (parfum plus the EU-declared fragrance substances). Without this,
+  // a label listing Parfum, Linalool and Limonene lost 24 points here but
+  // at most 6 on the normal rule path, so a D1 hiccup alone could drop a
+  // cosmetic by two bands.
+  return deductionsFromModelSeverities(scorableFindings, (finding) => {
+    const name = `${finding.ingredientName} ${finding.normalizedName}`;
 
-      const code =
-        finding.severity +
-        ":" +
-        finding.normalizedName;
-
-      if (seen.has(code)) {
-        return [];
-      }
-
-      seen.add(code);
-
-      const isFragrance =
-        matchFragranceAllergen(
-          `${finding.ingredientName} ${finding.normalizedName}`,
-        ) !== null ||
-        /\b(parfum|fragrance)\b/i.test(
-          `${finding.ingredientName} ${finding.normalizedName}`,
-        );
-
-      if (isFragrance) {
-        if (fragranceCharged) {
-          return [];
-        }
-
-        fragranceCharged = true;
-      }
-
-      return [
-        {
-          code,
-          points: FALLBACK_POINTS[finding.severity],
-          title: finding.title,
-          explanation: finding.explanation,
-          ingredientIds: [],
-          evidenceRequired:
-            finding.severity === "high_attention",
-          evidenceAvailable:
-            finding.evidenceType !== "none",
-        },
-      ];
-    })
-    .slice(0, MAX_DEDUCTIONS);
+    return matchFragranceAllergen(name) !== null ||
+      /\b(parfum|fragrance)\b/i.test(name)
+      ? "fragrance"
+      : null;
+  });
 }
 
 export function scoreInterpretation(
@@ -217,59 +384,31 @@ export function scoreInterpretation(
     ruleMatches?: RuleMatch[];
   },
 ): WorkerScore {
-  const extractionConfidence =
-    options?.extractionConfidence ?? 1;
-
   const lowConfidenceReason =
     options?.lowConfidenceReason ?? null;
 
   const confidence = Math.min(
     ocrConfidence,
-    extractionConfidence,
+    options?.extractionConfidence ?? 1,
     analysis.confidence,
   );
 
-  const blockingReasons: string[] = [];
-
-  if (
-    text.trim().length <
-    MIN_INGREDIENT_TEXT_LENGTH
-  ) {
-    blockingReasons.push(
-      "Δεν υπάρχει επαρκής λίστα συστατικών.",
-    );
-  }
-
-  if (ocrConfidence < MIN_OCR_CONFIDENCE) {
-    blockingReasons.push(
-      "Η ανάγνωση της ετικέτας δεν ήταν αρκετά αξιόπιστη.",
-    );
-  }
-
-  if (
-    analysis.ingredientFindings.length === 0
-  ) {
-    blockingReasons.push(
-      "Δεν εντοπίστηκαν αξιολογήσιμα συστατικά.",
-    );
-  }
+  const blockingReasons = blockingReasonsFor({
+    text,
+    minTextLength: MIN_INGREDIENT_TEXT_LENGTH,
+    shortTextReason: "Δεν υπάρχει επαρκής λίστα συστατικών.",
+    ocrConfidence,
+    findingCount: analysis.ingredientFindings.length,
+    noFindingsReason: "Δεν εντοπίστηκαν αξιολογήσιμα συστατικά.",
+  });
 
   if (blockingReasons.length > 0) {
-    return {
-      score: null,
-      band: "insufficient_data",
-      deductions: [],
-      bonuses: [],
+    return insufficientDataScore({
       confidence,
       lowConfidenceReason,
-      insufficientDataReasons: Array.from(
-        new Set([
-          ...blockingReasons,
-          ...analysis.insufficientDataReasons,
-        ]),
-      ),
-      scoringVersion,
-    };
+      blockingReasons,
+      modelReasons: analysis.insufficientDataReasons,
+    });
   }
 
   const ruleMatches = options?.ruleMatches ?? [];
@@ -279,71 +418,15 @@ export function scoreInterpretation(
       ? deductionsFromRules(ruleMatches)
       : deductionsFromFindings(analysis);
 
-  const totalDeduction = deductions.reduce(
-    (total, deduction) =>
-      total + deduction.points,
-    0,
-  );
-
-  const bonuses: WorkerScore["bonuses"] = [];
-
-  let bonusPoints = 0;
-
-  // Withheld once something serious was found: a product carrying a
-  // high_concern ingredient should not claw back points for what its
-  // packaging chooses to boast about.
-  if (
-    analysis.positives.length >= 2 &&
-    !hasHighConcernDeduction(deductions)
-  ) {
-    bonuses.push({
-      label: "Πολλαπλά θετικά χαρακτηριστικά",
-      points: 3,
-    });
-    bonusPoints += 3;
-  }
-
-  // Deliberately *not* keyed on potentialAllergens any more: rewarding the
-  // absence of milk/wheat/egg is the same -5 penalty for containing them,
-  // just spelled backwards. And it must never coexist with an actual
-  // deduction — a bonus that says "no problems" while a finding just docked
-  // points for a real one (e.g. high ethanol content) is a direct
-  // contradiction, not a narrower/complementary signal.
-  if (deductions.length === 0) {
-    bonuses.push({
-      label: "Δεν εντοπίστηκαν προβληματικά συστατικά",
-      points: 5,
-    });
-    bonusPoints += 5;
-  }
-
-  const score = Math.max(
-    0,
-    Math.min(
-      100,
-      100 - totalDeduction + bonusPoints,
-    ),
-  );
-
-  const band =
-    score >= 85
-      ? "excellent"
-      : score >= 70
-        ? "good"
-        : score >= 50
-          ? "moderate"
-          : score >= 30
-            ? "attention"
-            : "high_attention";
-
-  return {
-    score,
-    band,
+  // Deliberately *not* keyed on potentialAllergens: rewarding the absence of
+  // milk/wheat/egg is the same -5 penalty for containing them, just spelled
+  // backwards.
+  return finalizeScore({
     deductions,
-    bonuses,
+    positivesCount: analysis.positives.length,
+    positivesBonusLabel: "Πολλαπλά θετικά χαρακτηριστικά",
+    noProblemsBonusLabel: "Δεν εντοπίστηκαν προβληματικά συστατικά",
     confidence,
     lowConfidenceReason,
-    insufficientDataReasons: [],
-    scoringVersion,
-  };
+  });
 }

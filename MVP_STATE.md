@@ -122,7 +122,11 @@ GitHub Actions (`.github/workflows/ci.yml`). Το deploy παραμένει χε
   `nutritionScoring.ts`, `chemicalScoring.ts`) — συνειδητή επιλογή ώστε το
   tested ingredients path να μη σπάει από αλλαγές στα άλλα δύο, αλλά σημαίνει
   ότι ένα fix (όπως το `96c9d1d`) πρέπει να εφαρμοστεί χειροκίνητα και στα
-  τρία αρχεία, όπως ακριβώς έγινε εδώ.
+  τρία αρχεία, όπως ακριβώς έγινε εδώ. *(13/9: λύθηκε — τα κοινά βήματα
+  (insufficient data, fallback από severities του μοντέλου, bonuses, clamp,
+  bands) ζουν μία φορά στο `scoring.ts`· τα `nutritionScoring.ts` και
+  `chemicalScoring.ts` κρατούν μόνο ό,τι είναι δικό τους. Επαληθεύτηκε ότι
+  δίνουν ακριβώς το ίδιο αποτέλεσμα με πριν σε 60.000 τυχαίες εισόδους.)*
 - **Δεν υπάρχει CI/CD.** Τα deploys (`wrangler deploy` για τον worker,
   `git push` για το Cloudflare Pages frontend) είναι χειροκίνητα, χωρίς
   αυτόματο test gate πριν το production. *(13/9: προστέθηκε CI για tests,
