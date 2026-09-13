@@ -124,6 +124,57 @@ const NUTRITION_PHRASE_MARKERS = [
 
 const E_NUMBER_PATTERN = /\bE[\s-]?[1-9]\d{2,3}\b/g;
 
+/**
+ * A measured value in the units a water/mineral analysis is reported in:
+ * "78 mg/L", "0.005 µg/L", "450 µS/cm", "18°dH", "15 γαλλικοί βαθμοί",
+ * "pH 7.2". Element-symbol tokens with a value ("Ca 40") count too — see
+ * scoreCategories.
+ */
+const CHEMICAL_MEASUREMENT_PATTERN =
+  /\d+(?:[.,]\d+)?\s*(?:mg\s*\/\s*lt?\b|[μµ]g\s*\/\s*lt?\b|ppm\b|ppb\b|[μµ]s\s*\/\s*cm|°\s*(?:dh|f)\b|γαλλικ)|\bph\s*[:=]?\s*\d/giu;
+
+/** A measured nutrient amount: "450kcal", "1500kJ", "12g", "30 γρ", "3.4 g". */
+const NUTRITION_MEASUREMENT_PATTERN =
+  /\d+(?:[.,]\d+)?\s*(?:kcal|kj|gr|γρ|mg|g)(?!\p{L})/giu;
+
+/**
+ * How many measured values a text needs before its chemical/nutrition
+ * vocabulary is allowed to count. Two, not one: a shampoo label can carry a
+ * lone "pH 5.5" and a cosmetic a lone "150 ml", but a real water analysis or
+ * nutrition table is a list of measurements.
+ */
+const MIN_MEASUREMENTS = 2;
+
+/**
+ * Names that essentially only occur in a cosmetic/household INCI list. They
+ * are what an ingredient list still looks like once its "Ingredients:"
+ * heading is gone — which is the normal case here, see scoreCategories.
+ */
+const INCI_MARKERS = [
+  "aqua",
+  "parfum",
+  "glycerin",
+  "laureth",
+  "lauryl",
+  "cocamidopropyl",
+  "betaine",
+  "phenoxyethanol",
+  "tocopheryl",
+  "benzyl alcohol",
+  "isothiazolinone",
+  "sorbate",
+  "benzoate",
+  "dimethicone",
+  "cetearyl",
+  "linalool",
+  "limonene",
+  "citronellol",
+  "peg-",
+  "ppg-",
+  "polyquaternium",
+  "sodium hydroxide",
+];
+
 const INGREDIENT_PHRASE_MARKERS = [
   "συστατικά",
   "συστατικα",
@@ -160,8 +211,33 @@ interface CategoryScores {
   chemical_composition: number;
 }
 
+/**
+ * Chemical and nutrition vocabulary only counts once the text actually
+ * contains measurements (MIN_MEASUREMENTS). Their marker lists are full of
+ * words — "sulfate", "chloride", "potassium", "protein" — that are equally
+ * at home in an ingredient list ("Sodium Laureth Sulfate", "Sodium
+ * Chloride", "Potassium Sorbate", "Hydrolyzed Wheat Protein"). What sets a
+ * water analysis or a nutrition table apart is not those names but the
+ * amounts next to them.
+ *
+ * This matters more than it looks, because the text classified here has
+ * normally already lost its "Ingredients:" heading: extractIngredientText
+ * (review screen and Worker alike) returns only what follows the colon.
+ * Before this gate, a heading-less shampoo list scored 3 for
+ * chemical_composition on vocabulary alone against 1 for ingredients (comma
+ * density), and was routed to the water-analysis path.
+ */
 function scoreCategories(text: string): CategoryScores {
   const normalized = text.toLowerCase();
+
+  const chemicalMeasurements =
+    countPattern(text, CHEMICAL_MEASUREMENT_PATTERN) +
+    countPattern(text, CHEMICAL_TOKEN_PATTERN);
+
+  const nutritionMeasurements = countPattern(
+    text,
+    NUTRITION_MEASUREMENT_PATTERN,
+  );
 
   return {
     ingredients:
@@ -170,13 +246,18 @@ function scoreCategories(text: string): CategoryScores {
       // (e.g. "sulfate" also appears in chemical-analysis substance names),
       // so it is weighted the same as an element-with-value token below.
       countMarkers(normalized, INGREDIENT_PHRASE_MARKERS) * 2 +
+      countMarkers(normalized, INCI_MARKERS) +
       commaDensityBonus(text),
     nutrition:
-      countMarkers(normalized, NUTRITION_PHRASE_MARKERS) +
-      countPattern(text, E_NUMBER_PATTERN),
+      nutritionMeasurements >= MIN_MEASUREMENTS
+        ? countMarkers(normalized, NUTRITION_PHRASE_MARKERS) +
+          countPattern(text, E_NUMBER_PATTERN)
+        : 0,
     chemical_composition:
-      countMarkers(normalized, CHEMICAL_PHRASE_MARKERS) +
-      countPattern(text, CHEMICAL_TOKEN_PATTERN) * 2,
+      chemicalMeasurements >= MIN_MEASUREMENTS
+        ? countMarkers(normalized, CHEMICAL_PHRASE_MARKERS) +
+          countPattern(text, CHEMICAL_TOKEN_PATTERN) * 2
+        : 0,
   };
 }
 

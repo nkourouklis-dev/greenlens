@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { detectContentCategoryHeuristic } from "./contentCategory";
+import { extractIngredientText } from "./ingredientText";
 
 const ingredientsSamples = [
   "Συστατικά: Aqua, Glycerin, Cetearyl Alcohol, Parfum, Linalool, Sodium Benzoate",
@@ -83,4 +84,74 @@ test("heuristic result carries source 'heuristic'", () =>
   assert.equal(
     detectContentCategoryHeuristic(ingredientsSamples[0]).source,
     "heuristic",
+  ));
+
+// Regression (Lavender Lane Volume Boost hair shampoo, 5200410664631): the
+// exact label text. The review screen and the Worker classify the output of
+// extractIngredientText, which starts *after* "Συστατικά/Ingredients:", so
+// the heading that used to carry the decision is gone. Left with vocabulary
+// alone, "SULFATE", "CHLORIDE" and "POTASSIUM" outscored the comma-list
+// signal and the scan was routed to the water-analysis path, which then
+// reported "no concentrations detected".
+const LAVENDER_LANE_LIST =
+  "AQUA, SODIUM LAURETH SULFATE, DISODIUM LAURETH\nSULFOSUCCINATE, COCAMIDOPROPYL BETAINE, PEG-55 PROPYLENE GLYCOL OLEATE,\nHYDROLYZED WHEAT PROTEIN, PISUM SATIVUM (PEA) PEPTIDE, LEUCONOSTOC/RADISH\nROOT FERMENT FILTRATE, HYDROLYZED WHEAT STARCH, SALICYLIC ACID, HYDROXYETHYL\nUREA, TOCOPHERYL ACETATE, PARFUM, PPG-5-CETETH-20, SODIUM CHLORIDE,\nETHYLTRIMONIUM CHLORIDE METHACRYLATE/HYDROLYSED WHEAT PROTEIN COPOLYMER, TE-\nTRAMETHYL ACETYLOCTAHYDRONAPHTHALENES, SODIUM HYDROXIDE, CITRIC ACID,\nBENZYL ALCOHOL, BENZYL SALICYLATE, METHYLCHLOROISOTHIAZOLINONE, POTASSIUM\nSORBATE, METHYLISOTHIAZOLINONE";
+
+test("regression: Lavender Lane shampoo list without its heading is ingredients, not chemical_composition", () =>
+  assert.equal(
+    detectContentCategoryHeuristic(LAVENDER_LANE_LIST).category,
+    "ingredients",
+  ));
+
+test("regression: Lavender Lane shampoo list with its heading is ingredients", () =>
+  assert.equal(
+    detectContentCategoryHeuristic(
+      `Συστατικά/Ingredients: ${LAVENDER_LANE_LIST}`,
+    ).category,
+    "ingredients",
+  ));
+
+test("regression: the full photographed label, isolated the way the app isolates it, is ingredients", () => {
+  const rawOcr = [
+    "GR: Σαμπουάν μαλλιών για όγκο. Εφαρμόστε σε βρεγμένα μαλλιά, κάνετε απαλό μασάζ και ξεβγάλετε.",
+    "ENG: Volumizing hair shampoo. Apply to wet hair, massage gently and rinse. For external use. Keep out of reach of children.",
+    "DE: Volumengebendes Haarshampoo. Auf das nasse Haar auftragen, sanft einmassieren und ausspülen.",
+    `Συστατικά/Ingredients: ${LAVENDER_LANE_LIST}`,
+    "Tast Group - www.lavishcare.eu",
+    "Made in Greece, 1st km Thermis -Triadiou,",
+    "57001, Thessaloniki, Greece, +302310466994",
+  ].join("\n");
+
+  const isolated = extractIngredientText(rawOcr, 0.9);
+
+  assert.ok(isolated.ingredientText);
+  assert.equal(
+    detectContentCategoryHeuristic(isolated.ingredientText).category,
+    "ingredients",
+  );
+});
+
+test("chemical-sounding INCI names alone never make a label chemical_composition", () => {
+  const text =
+    "Sodium Chloride, Magnesium Sulfate, Calcium Carbonate, Potassium Chloride, Sodium Bicarbonate, Zinc Oxide";
+
+  assert.notEqual(
+    detectContentCategoryHeuristic(text).category,
+    "chemical_composition",
+  );
+});
+
+test("a shampoo printing a single pH value is still ingredients", () =>
+  assert.equal(
+    detectContentCategoryHeuristic(
+      "Aqua, Sodium Laureth Sulfate, Sodium Chloride, Cocamidopropyl Betaine, Parfum, Citric Acid, Potassium Sorbate. pH 5.5",
+    ).category,
+    "ingredients",
+  ));
+
+test("a heading-less food ingredient list with E-numbers and 'protein' is not nutrition", () =>
+  assert.notEqual(
+    detectContentCategoryHeuristic(
+      "Wheat flour, sugar, palm oil, whey protein, emulsifier E322, E471, raising agent E500, salt, flavouring",
+    ).category,
+    "nutrition",
   ));
