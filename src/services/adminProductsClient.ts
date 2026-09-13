@@ -379,6 +379,19 @@ async function adminRequest<T>(
   return body as T;
 }
 
+export async function updateAdminProductName(
+  barcode: string,
+  productName: string,
+): Promise<AdminProductDetail> {
+  const body = await adminRequest<{ product: AdminProductDetail }>(
+    `/api/admin/products/${encodeURIComponent(barcode)}`,
+    { method: "PATCH", body: JSON.stringify({ productName }) },
+    "Το όνομα δεν αποθηκεύτηκε.",
+  );
+
+  return body.product;
+}
+
 export async function listProductVersions(
   barcode: string,
 ): Promise<AdminProductVersion[]> {

@@ -194,7 +194,15 @@ function AdminProductsContent() {
                   {statusLabel(item.status)}
                 </span>
 
-                <p className="w-full truncate font-mono text-sm font-bold text-ink">
+                <p className="w-full truncate text-sm font-bold text-ink">
+                  {item.productName || (
+                    <span className="font-normal italic text-ink-faint">
+                      Χωρίς όνομα
+                    </span>
+                  )}
+                </p>
+
+                <p className="-mt-1.5 w-full truncate font-mono text-xs text-ink-muted">
                   {item.barcode}
                 </p>
 

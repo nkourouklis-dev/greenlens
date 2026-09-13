@@ -52,6 +52,10 @@ import {
   saveVerifiedProduct,
   deleteAdminProduct,
   validateVerifiedAnalysisResult,
+  normalizeProductName,
+  updateProductName,
+  fillMissingProductName,
+  PRODUCT_NAME_MAX_LENGTH,
   type AdminProductListItem,
   type AdminProductDetail,
 } from "./adminProducts";
@@ -1239,6 +1243,16 @@ async function runAdminRequest(
       );
     }
 
+    if (request.method === "PATCH") {
+      return runAdminRenameProduct(
+        productBarcode,
+        request,
+        env,
+        origin,
+        requestId,
+      );
+    }
+
     if (request.method === "DELETE") {
       return runAdminDeleteProduct(
         productBarcode,
@@ -1564,6 +1578,74 @@ async function runAdminGetProduct(
 
     return error(
       "Το προϊόν δεν φορτώθηκε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
+/**
+ * Name-only edit (PATCH). Kept apart from the PUT above because that one
+ * requires a complete ingredients analysis — a draft or nutrition row has
+ * none, yet still needs a name the PIM and scan history can show.
+ */
+async function runAdminRenameProduct(
+  barcode: string,
+  request: Request,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const body = await readJson(request);
+  const productName = isRecord(body)
+    ? normalizeProductName(body.productName)
+    : undefined;
+
+  if (productName === undefined) {
+    return error(
+      `Το όνομα πρέπει να είναι κείμενο έως ${PRODUCT_NAME_MAX_LENGTH} χαρακτήρες.`,
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  try {
+    const existing = await getAdminProduct(env.DB, barcode);
+
+    if (!existing) {
+      return error(
+        "Το προϊόν δεν βρέθηκε.",
+        404,
+        origin,
+        requestId,
+      );
+    }
+
+    await updateProductName(env.DB, barcode, productName);
+
+    const product = await getAdminProduct(env.DB, barcode);
+
+    console.log("admin_product_renamed", {
+      requestId,
+      barcode,
+      hasName: productName !== null,
+    });
+
+    return json({ product }, 200, origin, requestId);
+  } catch (caughtError) {
+    console.error("admin_product_rename_failed", {
+      requestId,
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Το όνομα δεν αποθηκεύτηκε.",
       502,
       origin,
       requestId,
@@ -2351,7 +2433,7 @@ function corsHeaders(
     headers["Access-Control-Allow-Origin"] =
       origin;
     headers["Access-Control-Allow-Methods"] =
-      "GET, POST, PUT, DELETE, OPTIONS";
+      "GET, POST, PUT, PATCH, DELETE, OPTIONS";
     headers["Access-Control-Allow-Headers"] =
       "Content-Type, X-Admin-Password";
   }
@@ -4053,6 +4135,17 @@ async function runIdentify(
         422,
         origin,
         requestId,
+      );
+    }
+
+    if (barcode) {
+      // Same "brand + name" string the client shows (ProductPhoto.tsx).
+      await fillMissingProductName(
+        env.DB,
+        barcode,
+        [identity.brand, identity.productName]
+          .filter(Boolean)
+          .join(" "),
       );
     }
 

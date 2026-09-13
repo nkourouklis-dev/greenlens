@@ -12,6 +12,7 @@ import {
   fetchAdminPhotoBlob,
   getAdminProduct,
   updateAdminProduct,
+  updateAdminProductName,
   type AdminProductDetail as AdminProductDetailType,
 } from "../services/adminProductsClient";
 
@@ -222,6 +223,11 @@ function AdminProductDetailContent() {
 
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
+  const [nameDraft, setNameDraft] = useState("");
+  const [isSavingName, setIsSavingName] = useState(false);
+  const [nameError, setNameError] = useState("");
+  const [nameSaved, setNameSaved] = useState(false);
+
   function load() {
     setIsLoading(true);
     setLoadError("");
@@ -229,6 +235,7 @@ function AdminProductDetailContent() {
     getAdminProduct(barcode)
       .then((loaded) => {
         setProduct(loaded);
+        setNameDraft(loaded.productName ?? "");
         setForm(buildFormState(loaded.analysisResult));
       })
       .catch((caughtError) => {
@@ -312,6 +319,41 @@ function AdminProductDetailContent() {
       );
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  /**
+   * Saves the name on its own, without touching the analysis form — so it
+   * works for drafts and nutrition rows too, and never costs the admin
+   * unsaved analysis edits.
+   */
+  async function handleSaveName() {
+    if (isSavingName) {
+      return;
+    }
+
+    setIsSavingName(true);
+    setNameError("");
+    setNameSaved(false);
+
+    try {
+      const updated = await updateAdminProductName(barcode, nameDraft);
+
+      setProduct((current) =>
+        current
+          ? { ...current, productName: updated.productName }
+          : updated,
+      );
+      setNameDraft(updated.productName ?? "");
+      setNameSaved(true);
+    } catch (caughtError) {
+      setNameError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Το όνομα δεν αποθηκεύτηκε.",
+      );
+    } finally {
+      setIsSavingName(false);
     }
   }
 
@@ -422,6 +464,58 @@ function AdminProductDetailContent() {
             <Trash2 size={16} />
             Διαγραφή
           </button>
+        </div>
+
+        <div className="mt-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            Όνομα προϊόντος
+          </p>
+
+          <div className="mt-2 flex gap-2">
+            <input
+              type="text"
+              value={nameDraft}
+              onChange={(event) => {
+                setNameDraft(event.target.value);
+                setNameSaved(false);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  void handleSaveName();
+                }
+              }}
+              maxLength={120}
+              placeholder="π.χ. Eubos Dry Skin Children Calm Body Lotion"
+              className="h-12 min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+            />
+
+            <button
+              type="button"
+              onClick={handleSaveName}
+              disabled={
+                isSavingName ||
+                nameDraft.trim() === (product.productName ?? "")
+              }
+              className="h-12 shrink-0 rounded-xl bg-accent px-4 text-sm font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+            >
+              {isSavingName ? "..." : "Αποθήκευση"}
+            </button>
+          </div>
+
+          {nameError && (
+            <p
+              role="alert"
+              className="mt-2 text-sm font-semibold text-red-400"
+            >
+              {nameError}
+            </p>
+          )}
+
+          {nameSaved && (
+            <p className="mt-2 text-xs text-emerald-300">
+              Το όνομα αποθηκεύτηκε.
+            </p>
+          )}
         </div>
 
         <AdminProductPhotos

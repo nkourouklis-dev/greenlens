@@ -385,6 +385,94 @@ export async function saveVerifiedProduct(
     .run();
 }
 
+export const PRODUCT_NAME_MAX_LENGTH = 120;
+
+/**
+ * Reads an admin-submitted product name: trimmed, empty means "clear it"
+ * (null). Returns undefined for anything that isn't an acceptable value,
+ * so the caller can reject the request rather than store garbage.
+ */
+export function normalizeProductName(
+  value: unknown,
+): string | null | undefined {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim().replace(/\s+/g, " ");
+
+  if (trimmed.length > PRODUCT_NAME_MAX_LENGTH) {
+    return undefined;
+  }
+
+  return trimmed === "" ? null : trimmed;
+}
+
+/**
+ * Name-only edit, independent of the analysis: a draft row (photos, no
+ * analysis) or a nutrition row has no editable analysis form, but still
+ * needs a human-readable name. Deliberately leaves `status` alone — naming
+ * a product is not the same as verifying its analysis.
+ */
+export async function updateProductName(
+  db: D1Like,
+  barcode: string,
+  productName: string | null,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE products
+       SET product_name = ?,
+           updated_at = datetime('now')
+       WHERE barcode = ?`,
+    )
+    .bind(productName, barcode)
+    .run();
+}
+
+/**
+ * Records a name found by /api/product/identify on a row that has none.
+ * Only ever fills a NULL: a name already on the row (typed by an admin, or
+ * from an earlier lookup) always wins over a fresh guess from a photo.
+ * Needed because a rescan of a cached product replays the stored result
+ * and never reaches the analysis save that would otherwise carry the name.
+ *
+ * Never throws — identifying the product must not fail over a cache write.
+ */
+export async function fillMissingProductName(
+  db: D1Like,
+  barcode: string,
+  productName: string,
+): Promise<void> {
+  const normalized = normalizeProductName(productName);
+
+  if (!normalized) {
+    return;
+  }
+
+  try {
+    await db
+      .prepare(
+        `UPDATE products
+         SET product_name = ?
+         WHERE barcode = ? AND (product_name IS NULL OR product_name = '')`,
+      )
+      .bind(normalized, barcode)
+      .run();
+  } catch (caughtError) {
+    console.error("product_name_fill_failed", {
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+  }
+}
+
 /**
  * Deletes the product row and every one of its photos, both the D1 rows
  * and the underlying R2 objects — a hard delete, not a soft/deferred one.
