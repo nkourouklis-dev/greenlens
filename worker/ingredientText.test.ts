@@ -353,3 +353,58 @@ test("keeps a headingless INCI list that is followed by a manufacturer footer", 
   assert(!result.ingredientText?.includes("Hobein"));
   assert(!result.ingredientText?.includes("Germany"));
 });
+
+// Regression (Τραγανές Μπουκιές cereal, 5201024865216): the exact bilingual
+// label. Two independent false rejections stacked on it:
+//  - the EU-mandated ingredient percentages ("46,6%", "12%", "5,7%"...) were
+//    counted as nutrition-table measurements, and together with "salt" made
+//    the list look like a nutrition table;
+//  - "natural flavouring" plus the allergen statement "May contain ...
+//    cereals containing gluten" counted as two marketing-claim words.
+const CEREAL_LABEL =
+  "Συστατικά: Νιφάδες βρώμης ολικής άλεσης (46,6%),\n" +
+  "ηλιέλαιο (12%), ζάχαρη, σιρόπι γλυκόζης, καλαμπόκι (5,7%),\n" +
+  "ρυζάλευρο (4,9%), ολιγοφρουκτόζη, σιτάλευρο ολικής\n" +
+  "άλεσης (4,4%), μέλι (0,5%), μελάσα, αλάτι, φυσική\n" +
+  "αρωματική ύλη, βύνη (από κριθάρι), αντιοξειδωτικά\n" +
+  "(τοκοφερόλες). Πιθανόν να περιέχει διάφορα είδη ξηρών\n" +
+  "καρπών, σόγια και άλλα δημητριακά τα οποία περιέχουν\n" +
+  "γλουτένη.\n" +
+  "Crunchy cereal clusters of oats,\n" +
+  "cornflakes and rice.\n" +
+  "Ingredients: Wholegrain rolled oats (46,6%), sunflower oil\n" +
+  "(12%), sugar, glucose syrup, maize (5,7%), rice flour (4,9%),\n" +
+  "oligofructose, wholegrain wheat flour (4,4%), honey,\n" +
+  "(0,5%), molasses, salt, natural flavouring, malt (barley),\n" +
+  "antioxidants (tocopherols). May contain several kinds of\n" +
+  "nuts, soya and the other cereals containing gluten.";
+
+test("regression: a bilingual cereal ingredient list with percentages and an allergen statement is accepted", () => {
+  const result = extractIngredientText(CEREAL_LABEL, 0.9);
+  assert(result.isValid, result.reasons.join("; "));
+  assert.equal(result.labelType, "ingredients");
+  assert(result.ingredientText?.includes("βρώμης"));
+});
+
+test("regression: the English half of the cereal label alone is accepted", () => {
+  const english = CEREAL_LABEL.slice(CEREAL_LABEL.indexOf("Ingredients:"));
+  const result = extractIngredientText(english, 0.9);
+  assert(result.isValid, result.reasons.join("; "));
+  assert.equal(result.labelType, "ingredients");
+});
+
+test("a nutrition table with %RI columns is still rejected as nutrition", () => {
+  const text =
+    "Nutrition declaration per 100g\nEnergy 1650 kJ / 392 kcal 20%\nFat 12 g 17%\nSaturates 1.5 g 8%\nCarbohydrate 60 g 23%\nSugars 18 g 20%\nProtein 8 g 16%\nSalt 0.4 g 7%";
+  const result = extractIngredientText(text, 0.9);
+  assert(!result.isValid);
+  assert.equal(result.labelType, "nutrition");
+});
+
+test("a real marketing claim is still rejected after allergen wording is ignored", () => {
+  const result = extractIngredientText(
+    "100% natural, gluten free, organic snack. May contain nuts.",
+    0.9,
+  );
+  assert(!result.isValid);
+});

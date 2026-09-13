@@ -341,14 +341,21 @@ function countMarkers(text: string, markers: string[]): number {
 
 /**
  * Counts numeric values that carry a measurement unit, e.g. "25 g",
- * "500 kcal", "12%". This is the strongest signal of a nutrition table.
+ * "500 kcal". This is the strongest signal of a nutrition table.
+ *
+ * Percentages are deliberately not counted. EU food labels must state the
+ * share of characterising ingredients inside the ingredient list itself
+ * ("oats (46,6%), sunflower oil (12%), maize (5,7%)"), so "%" is as typical
+ * of an ingredient list as of a nutrition table \u2014 and a real table always
+ * carries its gram/kcal values anyway. Counting it rejected a plain cereal
+ * list as a "nutrition table" once it also mentioned salt.
  */
 function countNumericUnits(text: string): number {
   const normalized = text.toLowerCase();
 
   const matches =
     normalized.match(
-      /\d+(?:[.,]\d+)?\s*(kcal|kj|mg|\u00b5g|\u03bcg|g\b|\u03b3\u03c1|ml|%)/g,
+      /\d+(?:[.,]\d+)?\s*(kcal|kj|mg|\u00b5g|\u03bcg|g\b|\u03b3\u03c1|ml)/g,
     ) ?? [];
 
   return matches.length;
@@ -489,8 +496,29 @@ function hasStructuredFormat(text: string): boolean {
   return commaSeparated || semicolonSeparated || multiline;
 }
 
+/**
+ * Wording every food ingredient list is required or expected to carry,
+ * removed before looking for marketing claims: the precautionary allergen
+ * statement ("May contain nuts, soya and cereals containing gluten") and
+ * the legal ingredient name "natural flavouring". Both share words with
+ * real claims ("gluten free", "all natural"), and together they used to
+ * reach the two-word claim threshold on an ordinary cereal label.
+ */
+const MANDATORY_LABEL_WORDING = [
+  /may contain[^.]*/g,
+  /traces? of[^.]*/g,
+  /πιθαν(?:ον|ώς|ως)?\s+να\s+περιέ?χει[^.]*/g,
+  /ί?ι?χνη[^.]*/g,
+  /natural flavou?rings?/g,
+  /natural aromas?/g,
+  /containing gluten/g,
+];
+
 function isLikelyMarketingClaim(text: string): boolean {
-  const normalized = normalize(text);
+  const normalized = MANDATORY_LABEL_WORDING.reduce(
+    (current, pattern) => current.replace(pattern, " "),
+    normalize(text),
+  );
 
   const claimPatterns = [
     "suitable for",

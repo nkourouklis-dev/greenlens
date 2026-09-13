@@ -4626,6 +4626,10 @@ function countNutritionMarkers(
 
 // Nutrition tables always carry numeric values with units next to the markers.
 // Ingredient lists mention the same words without measurement pairs.
+// No "%": EU ingredient lists state ingredient shares in percent ("oats
+// (46,6%)"), so counting it blocked the nutrition-rejection override below
+// for exactly the food labels it exists to rescue — same reasoning as
+// countNumericUnits in ingredientText.ts.
 function countNumericUnits(
   value: string,
 ): number {
@@ -4633,7 +4637,7 @@ function countNumericUnits(
 
   const matches =
     normalized.match(
-      /\d+(?:[.,]\d+)?\s*(kcal|kj|mg|µg|μg|g\b|γρ|ml|%)/g,
+      /\d+(?:[.,]\d+)?\s*(kcal|kj|mg|µg|μg|g\b|γρ|ml)/g,
     ) ?? [];
 
   return matches.length;
