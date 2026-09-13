@@ -1,0 +1,43 @@
+# Runs the same checks we run by hand before a deploy, on every push to
+# main and every pull request. It does not deploy: `wrangler deploy` (worker)
+# is still run manually, and Cloudflare Pages builds the frontend on push.
+# A red run here means "don't deploy this commit" until it's fixed.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 24, not an LTS floor: worker/ingredientGrounding.test.ts runs every
+      # D1 migration through node:sqlite.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Worker tests
+        run: npm run worker:test
+
+      # Also generates worker/worker-configuration.d.ts (gitignored), which
+      # the frontend build below needs for the worker modules it imports.
+      - name: Worker typecheck
+        run: npm run worker:typecheck
+
+      - name: Frontend typecheck and build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
