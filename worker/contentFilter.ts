@@ -198,10 +198,20 @@ export function filterIrrelevantSegments(
     return { text, removedSegments: [] };
   }
 
-  const segments = text
-    .split(/[,;\n]+/)
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0);
+  // Split with the delimiters captured, so each segment remembers what
+  // separated it from the next one.
+  const parts = text.split(/([,;\n]+)/);
+  const entries: Array<{ segment: string; delimiter: string }> = [];
+
+  for (let index = 0; index < parts.length; index += 2) {
+    const segment = parts[index].trim();
+
+    if (segment.length > 0) {
+      entries.push({ segment, delimiter: parts[index + 1] ?? "" });
+    }
+  }
+
+  const segments = entries.map((entry) => entry.segment);
 
   // Nothing to split on: filtering a single free-form block on the same
   // rules as a token risks destroying real content (e.g. a nutrition
@@ -220,26 +230,56 @@ export function filterIrrelevantSegments(
     return { text, removedSegments: [] };
   }
 
-  const kept: string[] = [];
+  const kept: Array<{ segment: string; delimiter: string }> = [];
   const removed: string[] = [];
 
-  for (const segment of segments) {
-    const normalizedSegment = normalize(segment);
+  for (const entry of entries) {
+    const normalizedSegment = normalize(entry.segment);
 
     const reject =
       isBoilerplateSegment(normalizedSegment) ||
-      isMeaninglessShortCode(segment, normalizedSegment, category) ||
+      isMeaninglessShortCode(entry.segment, normalizedSegment, category) ||
       matchesProductIdentity(normalizedSegment, context);
 
     if (reject) {
-      removed.push(segment);
+      removed.push(entry.segment);
     } else {
-      kept.push(segment);
+      kept.push(entry);
     }
   }
 
   return {
-    text: kept.join(", "),
+    text:
+      category === "ingredients"
+        ? joinKeepingLineBreaks(kept)
+        : kept.map((entry) => entry.segment).join(", "),
     removedSegments: removed,
   };
+}
+
+/**
+ * Rejoins ingredient segments without turning a bare line break into a
+ * comma. A line break on a label is ambiguous — "Cetearyl↵Alcohol," is one
+ * INCI name wrapped at the edge of the print area, while "WHEAT↵FLOUR↵96g"
+ * separates items — and only the reader of the full text can tell which.
+ * Rewriting it as ", " decided for them, wrongly for every wrapped name:
+ * the model was handed "Cetearyl, Alcohol", reported "Cetearyl" as its own
+ * ingredient, and that name matched no curated entry. A comma or semicolon
+ * the label itself printed still becomes ", ".
+ */
+function joinKeepingLineBreaks(
+  kept: Array<{ segment: string; delimiter: string }>,
+): string {
+  return kept
+    .map((entry, index) => {
+      if (index === kept.length - 1) {
+        return entry.segment;
+      }
+
+      const isBareLineBreak =
+        entry.delimiter.includes("\n") && !/[,;]/.test(entry.delimiter);
+
+      return entry.segment + (isBareLineBreak ? "\n" : ", ");
+    })
+    .join("");
 }

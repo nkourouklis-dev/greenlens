@@ -230,3 +230,29 @@ test("regression: keeps a full real INCI list intact while dropping several kind
   assert.ok(!result.text.includes("PET"));
   assert.equal(result.removedSegments.length, 3);
 });
+
+// Regression (EUBOS, "Κετηλάρη"): the label wraps "Cetearyl Alcohol" across
+// two lines. Turning that bare line break into ", " handed the model
+// "Cetearyl, Alcohol", so it reported a separate ingredient "Cetearyl" that
+// matched no curated entry. Line breaks must survive filtering as line
+// breaks; only delimiters the label itself printed become ", ".
+test("keeps a bare line break inside an ingredient name instead of turning it into a comma", () => {
+  const result = filterIrrelevantSegments(
+    "Aqua (Water), Glycerin, Cetearyl\nAlcohol, Cetearyl Ethylhexanoate, Isohexadecane,\nAlcohol, Sorbitol",
+    "ingredients",
+  );
+
+  assert.ok(result.text.includes("Cetearyl\nAlcohol"));
+  assert.ok(!result.text.includes("Cetearyl, Alcohol"));
+  assert.ok(result.text.includes("Isohexadecane, Alcohol"));
+  assert.deepEqual(result.removedSegments, []);
+});
+
+test("still drops a boilerplate line from a line-broken ingredient block", () => {
+  const result = filterIrrelevantSegments(
+    "WHEAT\nFLOUR\nMade in Italy\nSUNFLOWER OIL, SALT",
+    "ingredients",
+  );
+
+  assert.equal(result.text, "WHEAT\nFLOUR\nSUNFLOWER OIL, SALT");
+});

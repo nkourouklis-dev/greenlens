@@ -2,6 +2,7 @@ import {
   buildAllergenNotice,
   withoutAllergenOnlyItems,
 } from "../../worker/allergens";
+import { UNVERIFIED_INGREDIENT_DESCRIPTION } from "../../worker/ingredientInsights";
 import type {
   AllergenNotice,
   ExecutiveSummary,
@@ -30,28 +31,11 @@ const ratingBySeverity: Record<IngredientFinding["severity"], IngredientRating> 
   unknown: "neutral",
 };
 
-const categoryKeywords: Array<[IngredientCategory, string[]]> = [
-  ["fragrance", ["άρωμα", "αρωμα", "fragrance", "parfum"]],
-  ["preservative", ["συντηρητικ", "preservative"]],
-  ["colorant", ["χρωστικ", "colorant", "colour", "color"]],
-  ["surfactant", ["απορρυπαντ", "αφριστικ", "surfactant", "sulfate", "sulphate"]],
-  ["humectant", ["ενυδατ", "humectant", "moistur"]],
-  ["emollient", ["μαλακτικ", "emollient"]],
-  ["antioxidant", ["αντιοξειδωτικ", "antioxidant", "vitamin e", "vitamin c"]],
-  ["active", ["δραστικ", "active ingredient", "retinol", "niacinamide"]],
-];
-
-function inferCategoryFromText(text: string): IngredientCategory {
-  const normalized = text.toLowerCase();
-
-  for (const [category, keywords] of categoryKeywords) {
-    if (keywords.some((keyword) => normalized.includes(keyword))) {
-      return category;
-    }
-  }
-
-  return "other";
-}
+// Legacy records carry only the model's own title/explanation, with no
+// curated lookup behind them, so none of it is shown as a description or
+// used to guess a category — the same rule as the Worker's
+// groundIngredientFindings.
+const LEGACY_CATEGORY: IngredientCategory = "other";
 
 /**
  * Rebuilds insight cards for a history item that predates the
@@ -88,11 +72,11 @@ export function deriveIngredientInsights(
     insights.push({
       name: finding.ingredientName,
       normalizedName: finding.normalizedName,
-      category: inferCategoryFromText(`${finding.title} ${finding.explanation}`),
+      category: LEGACY_CATEGORY,
       rating,
       scoreImpact: deduction ? -deduction.points : 0,
-      shortDescription: finding.title,
-      whyRated: finding.explanation,
+      shortDescription: "",
+      whyRated: UNVERIFIED_INGREDIENT_DESCRIPTION,
       // Empty, not [finding.explanation]: whyRated above is already that
       // same sentence, so repeating it here just shows it twice on the
       // card — see worker/ingredientInsights.ts for the server-side twin

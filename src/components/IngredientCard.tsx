@@ -100,9 +100,13 @@ export default function IngredientCard(props: {
 
       {open && (
         <>
-          <p className="mt-3 text-sm leading-6 text-slate-300">
-            {insight.shortDescription}
-          </p>
+          {/* Empty when the ingredient has no curated/OFF entry — the card
+              then shows only the grounded whyRated line below. */}
+          {insight.shortDescription && (
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              {insight.shortDescription}
+            </p>
+          )}
 
           {insight.whyRated && insight.whyRated !== insight.shortDescription && (
             <p className="mt-1 text-sm leading-6 text-slate-400">

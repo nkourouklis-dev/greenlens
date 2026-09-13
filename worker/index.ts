@@ -23,6 +23,7 @@ import {
 import {
   buildExecutiveSummary,
   buildIngredientInsights,
+  groundIngredientFindings,
   type ExecutiveSummary,
   type IngredientInsight,
 } from "./ingredientInsights";
@@ -3301,6 +3302,15 @@ async function analyzeIngredientsCore(
 
     result.attentionItems = withoutAllergenOnlyItems(
       result.attentionItems,
+    );
+
+    // After allergen classification (it reads the model's wording) and
+    // before scoring/insights (they copy title/explanation into what the
+    // user sees): nothing the model wrote about an ingredient's name or
+    // nature survives past this line — see groundIngredientFindings.
+    result.ingredientFindings = await groundIngredientFindings(
+      result.ingredientFindings,
+      env.DB,
     );
 
     // No caveat to surface here any more: reaching this point already means

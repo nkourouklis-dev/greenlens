@@ -59,31 +59,48 @@ const ratingBySeverity: Record<Finding["severity"], IngredientRating> = {
   unknown: "neutral",
 };
 
-// Lightweight, deterministic keyword fallback used only when an ingredient
-// has no static registry entry. It never looks at the score — it only
-// guesses a display category from the AI's own free-text explanation, so
-// the UI still has something better than "other" to show.
-const categoryKeywords: Array<[IngredientCategory, string[]]> = [
-  ["fragrance", ["άρωμα", "αρωμα", "fragrance", "parfum", "αρωματ"]],
-  ["preservative", ["συντηρητικ", "preservative"]],
-  ["colorant", ["χρωστικ", "colorant", "colour", "color"]],
-  ["surfactant", ["απορρυπαντ", "αφριστικ", "surfactant", "sulfate", "sulphate"]],
-  ["humectant", ["ενυδατ", "humectant", "moistur"]],
-  ["emollient", ["μαλακτικ", "emollient"]],
-  ["antioxidant", ["αντιοξειδωτικ", "antioxidant", "vitamin e", "vitamin c"]],
-  ["active", ["δραστικ", "active ingredient", "retinol", "niacinamide"]],
-];
+/**
+ * What an ingredient card says when nothing verified is known about it.
+ * A statement about the data, not about the ingredient — so it can never be
+ * wrong the way a guessed description can.
+ */
+export const UNVERIFIED_INGREDIENT_DESCRIPTION =
+  "Δεν υπάρχει επαληθευμένη περιγραφή για αυτό το συστατικό.";
 
-function inferCategoryFromText(text: string): IngredientCategory {
-  const normalized = text.toLowerCase();
+/**
+ * Replaces the model's free-text `title`/`explanation` on every finding with
+ * text that has a verifiable origin: the ingredient's name exactly as the
+ * label prints it, and the curated/OFF description from ingredient_knowledge
+ * — or, with no entry, UNVERIFIED_INGREDIENT_DESCRIPTION.
+ *
+ * Why at all: the analysis prompt asks the model to write those two fields
+ * in Greek, and for an INCI name it has no grounding for, it improvises.
+ * "Cetearyl" came back as title "Κετηλάρη" (a made-up transliteration) and
+ * explanation "Εμμολσιωτικό" (a misspelled calque of "emulsifier"), which
+ * then flowed unchecked into the stored analysis, the ingredient card and
+ * the PIM form. This is the same "no fabricated data" rule the OFF import
+ * already follows for concerns/benefits, applied to names and descriptions.
+ *
+ * Run on the live analysis path only, after allergen classification (which
+ * reads the model's wording to spot allergy-only findings) and before
+ * scoring. Not on an admin save: text an admin typed is human-verified.
+ */
+export async function groundIngredientFindings(
+  findings: Finding[],
+  db: D1Like,
+): Promise<Finding[]> {
+  const knowledgeByName = await lookupIngredientKnowledgeBatch(
+    db,
+    findings.map((finding) => finding.normalizedName),
+  );
 
-  for (const [category, keywords] of categoryKeywords) {
-    if (keywords.some((keyword) => normalized.includes(keyword))) {
-      return category;
-    }
-  }
-
-  return "other";
+  return findings.map((finding) => ({
+    ...finding,
+    title: finding.ingredientName,
+    explanation:
+      knowledgeByName.get(finding.normalizedName)?.shortDescription ??
+      UNVERIFIED_INGREDIENT_DESCRIPTION,
+  }));
 }
 
 function inferEvidenceLevel(finding: Finding): EvidenceLevel {
@@ -194,10 +211,16 @@ export async function buildIngredientInsights(
     return {
       name: finding.ingredientName,
       normalizedName: finding.normalizedName,
-      category: knowledge?.category ?? inferCategoryFromText(`${finding.title} ${finding.explanation}`),
+      // No fallback to anything the model wrote: without a curated/OFF entry
+      // the category is "other" and the description is empty, rather than a
+      // category guessed from — or a name copied out of — the model's
+      // improvised Greek (see groundIngredientFindings above).
+      category: knowledge?.category ?? "other",
       rating,
       scoreImpact: deduction ? -deduction.points : 0,
-      shortDescription: knowledge?.shortDescription ?? finding.title,
+      shortDescription: knowledge?.shortDescription ?? "",
+      // Grounded on the live path (curated text or the "unverified" notice)
+      // and human-written after an admin edit — never raw model prose.
       whyRated: finding.explanation,
       // No fallback to [finding.explanation] here: whyRated above already
       // *is* finding.explanation, so that fallback used to render the
