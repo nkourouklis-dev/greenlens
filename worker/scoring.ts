@@ -1,5 +1,8 @@
 import type { WorkerAnalysisResult } from "./analysis";
-import { isAllergenDeclarationOnly } from "./allergens";
+import {
+  isAllergenDeclarationOnly,
+  matchFragranceAllergen,
+} from "./allergens";
 import type { RuleMatch } from "./ingredientRules";
 
 export const scoringVersion = "2026.09.3";
@@ -116,6 +119,14 @@ function deductionsFromFindings(
 ): WorkerScore["deductions"] {
   const seen = new Set<string>();
 
+  // Fragrance is charged once, whichever fragrance finding comes first —
+  // the same thing the rule table does through its "fragrance_allergen"
+  // group (parfum plus the EU-declared fragrance substances). Without this,
+  // a label listing Parfum, Linalool and Limonene lost 24 points here but
+  // at most 6 on the normal rule path, so a D1 hiccup alone could drop a
+  // cosmetic by two bands.
+  let fragranceCharged = false;
+
   // "This is wheat/milk/egg" is a declaration, not a defect. The analysis
   // path already downgrades these to info before scoring; filtering again
   // here means no caller can reintroduce the penalty by scoring findings
@@ -148,6 +159,22 @@ function deductionsFromFindings(
       }
 
       seen.add(code);
+
+      const isFragrance =
+        matchFragranceAllergen(
+          `${finding.ingredientName} ${finding.normalizedName}`,
+        ) !== null ||
+        /\b(parfum|fragrance)\b/i.test(
+          `${finding.ingredientName} ${finding.normalizedName}`,
+        );
+
+      if (isFragrance) {
+        if (fragranceCharged) {
+          return [];
+        }
+
+        fragranceCharged = true;
+      }
 
       return [
         {
