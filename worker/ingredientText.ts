@@ -818,6 +818,90 @@ function extractIngredientTextWithoutHeading(
   return candidate;
 }
 
+/**
+ * Sentences that follow an ingredient list on the label but are not part of
+ * it: precautionary allergen statements, production claims, storage and
+ * date advice. Matched against the normalized start of a sentence.
+ */
+const TRAILING_STATEMENT_PREFIXES = [
+  "πιθανον να περιεχει",
+  "μπορει να περιεχει",
+  "ενδεχεται να περιεχει",
+  "περιεχει ιχνη",
+  "ιχνη",
+  "may contain",
+  "traces of",
+  "contains traces",
+  "για να παραχθουν",
+  "made with",
+  "prepared with",
+  "φυλασσεται",
+  "διατηρειται",
+  "store in",
+  "keep in",
+  "best before",
+  "αναλωση κατα προτιμηση",
+];
+
+// "Συστατικά:", "Συστατικά/Ingredients:", "INCI:", "Σύνθεση:" ...
+const LEADING_INGREDIENT_HEADING =
+  /^\s*(?:συστατικ[άα]|ingredients?|ingr[ée]dients|inci|zutaten|ingredienti|ingredientes|σ[ύυ]νθεση|composition)(?:\s*\/\s*[\p{L} ]+)?\s*[:：\-–]\s*/iu;
+
+// Leftovers of an adjacent table at the end of the block: a lone "%",
+// a column header such as "Ανά 30g+" / "per 100 g".
+function isTrailingTableFragment(line: string): boolean {
+  return !/\p{L}{2,}/u.test(line) || /^(?:αν[άα]|per)\s+\d/iu.test(line);
+}
+
+/**
+ * The ingredient list as a person would write it down: one line, words that
+ * the print wrapped with a hyphen rejoined, no "Ingredients:" heading, and
+ * nothing after the list itself (allergen "may contain" statement, "100 g
+ * made with 63 g wholegrain", storage advice, table column headers).
+ *
+ * This is what gets stored as `sourceText` — the "Κείμενο συστατικών" field
+ * in the PIM and the input the score is recomputed from — so it must read
+ * as an ingredient list, not as a raw OCR block. The model still receives
+ * the uncleaned block: the precautionary allergen statement matters to it.
+ *
+ * Never returns less than it was given something to work with: if cleaning
+ * would leave nothing, the trimmed input comes back unchanged.
+ */
+export function cleanIngredientText(text: string): string {
+  const lines = text
+    // "Ιμβερτοποιη-\nμένο" → "Ιμβερτοποιημένο", "TE-\nTRAMETHYL" → "TETRAMETHYL"
+    .replace(/(\p{L})-[ \t]*\r?\n[ \t]*(\p{L})/gu, "$1$2")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  while (lines.length > 1 && isTrailingTableFragment(lines[lines.length - 1])) {
+    lines.pop();
+  }
+
+  const joined = lines
+    .join(" ")
+    .replace(/\s{2,}/g, " ")
+    .replace(LEADING_INGREDIENT_HEADING, "")
+    .trim();
+
+  const sentences = joined.split(/(?<=[.;])\s+/);
+
+  const cutAt = sentences.findIndex(
+    (sentence, index) =>
+      index > 0 &&
+      TRAILING_STATEMENT_PREFIXES.some((prefix) =>
+        normalize(sentence).startsWith(prefix),
+      ),
+  );
+
+  const kept = (cutAt > 0 ? sentences.slice(0, cutAt) : sentences)
+    .join(" ")
+    .trim();
+
+  return kept.length > 0 ? kept : text.trim();
+}
+
 export function extractIngredientText(
   rawText: string,
   ocrConfidence: number,

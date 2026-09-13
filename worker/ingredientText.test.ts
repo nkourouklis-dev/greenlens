@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  cleanIngredientText,
   extractIngredientText,
 } from "./ingredientText";
 
@@ -435,4 +436,40 @@ test("an ingredient that merely mentions dietary fibre does not end the list", (
   );
   assert(result.isValid, result.reasons.join("; "));
   assert(result.ingredientText?.includes("Μέλι"));
+});
+
+// The stored/scored ingredient text ("Κείμενο συστατικών" in the PIM) must
+// read as an ingredient list. For the Nestlé label the raw block carried
+// OCR line breaks, a hyphen-wrapped word, the allergen and wholegrain
+// sentences and two leftovers of the table header ("%", "Ανά 30g+").
+test("cleanIngredientText turns the Nestlé OCR block into the plain ingredient list", () => {
+  const isolated = extractIngredientText(NESTLE_CLUSTERS_OCR, 0.96).ingredientText ?? "";
+
+  assert.equal(
+    cleanIngredientText(isolated),
+    "Σιτάρι ολικής άλεσης 63,3%, Ζάχαρη, Αμύγδαλα 9,2%, Αλεύρι σιταριού 5,3%, Σιρόπι γλυκόζης, Νιφάδες σιταριού 1,8%, Εκχύλισμα βύνης κριθαριού (κριθάρι, βύνη κριθαριού), Ιμβερτοποιημένο σιρόπι ζάχαρης, Νιφάδες βρώμης 1,4%, Ανθρακικό ασβέστιο, Φοινικέλαιο, Αλάτι, Μέλι 0,3%, Αλεύρι ρυζιού 0,3%, Μελάσα, Φυσική αρωματική ύλη, Ρυθμιστής οξύτητας (φωσφορικά άλατα νατρίου), Σίδηρος, Βιταμίνη Β3, Β5, Β9, Β6, Β2.",
+  );
+});
+
+test("cleanIngredientText drops a bilingual heading and rejoins an upper-case hyphen wrap", () => {
+  assert.equal(
+    cleanIngredientText(
+      "Συστατικά/Ingredients: AQUA, SODIUM CHLORIDE, TE-\nTRAMETHYL ACETYLOCTAHYDRONAPHTHALENES, PARFUM",
+    ),
+    "AQUA, SODIUM CHLORIDE, TETRAMETHYL ACETYLOCTAHYDRONAPHTHALENES, PARFUM",
+  );
+});
+
+test("cleanIngredientText does not cut the list at an abbreviation full stop", () => {
+  assert.equal(
+    cleanIngredientText(
+      "Alcohol Denat. (Αιθυλική Αλκοόλη) 70% vol, Aqua,\nGlycerin, Parfum. May contain traces of nuts.",
+    ),
+    "Alcohol Denat. (Αιθυλική Αλκοόλη) 70% vol, Aqua, Glycerin, Parfum.",
+  );
+});
+
+test("cleanIngredientText never empties its input", () => {
+  assert.equal(cleanIngredientText("  %\n"), "%");
+  assert.equal(cleanIngredientText(""), "");
 });
