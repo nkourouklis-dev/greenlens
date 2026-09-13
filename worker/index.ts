@@ -2037,7 +2037,7 @@ async function storeScanPhoto(
   params: {
     barcode: string;
     image: File;
-    labelType: LabelType;
+    photoType: PhotoType;
     requestId: string;
   },
 ): Promise<void> {
@@ -2047,10 +2047,7 @@ async function storeScanPhoto(
     return;
   }
 
-  const photoType: PhotoType =
-    params.labelType === "nutrition"
-      ? "nutrition"
-      : "ingredients";
+  const photoType = params.photoType;
 
   const r2Key = `photos/${barcode}/${photoType}/${Date.now()}.jpg`;
 
@@ -2309,7 +2306,10 @@ async function runOcr(
     await storeScanPhoto(env, {
       barcode: barcode ?? "",
       image,
-      labelType: result.labelType,
+      photoType:
+        result.labelType === "nutrition"
+          ? "nutrition"
+          : "ingredients",
       requestId,
     });
 
@@ -4065,6 +4065,20 @@ async function runIdentify(
   }
 
   try {
+    // The front-of-pack shot is the one the mobile flow takes purely for
+    // identification, and it is also the photo the PIM prefers as a
+    // product's thumbnail — so it is kept whether or not identification
+    // below succeeds. storeScanPhoto never throws and skips an empty
+    // barcode, same as for the label photo in /api/ocr/extract.
+    if (barcode) {
+      await storeScanPhoto(env, {
+        barcode,
+        image,
+        photoType: "front",
+        requestId,
+      });
+    }
+
     let identity: ProductIdentity | null = null;
 
     // Try barcode lookup first if provided
