@@ -18,6 +18,7 @@ const AdminProducts = lazy(() => import("./pages/AdminProducts"));
 const AdminScanFailures = lazy(
   () => import("./pages/AdminScanFailures"),
 );
+const AdminUsage = lazy(() => import("./pages/AdminUsage"));
 const AdminProductDetail = lazy(
   () => import("./pages/AdminProductDetail"),
 );
@@ -55,6 +56,10 @@ export default function App() {
               <Route
                 path="/admin/scan-failures"
                 element={<AdminScanFailures />}
+              />
+              <Route
+                path="/admin/usage"
+                element={<AdminUsage />}
               />
               <Route
                 path="/admin/products"

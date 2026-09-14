@@ -111,6 +111,71 @@ export async function listAdminScanFailures(
     : [];
 }
 
+export type UsageLevel = "ok" | "warning" | "over";
+
+export interface AdminUsageBudget {
+  id: string;
+  label: string;
+  period: "day" | "month";
+  used: number;
+  limit: number;
+  ratio: number;
+  level: UsageLevel;
+  note: string;
+}
+
+export interface AdminUsageDay {
+  day: string;
+  azureOcr: number;
+  workersAiVision: number;
+  workersAiText: number;
+}
+
+export interface AdminUsage {
+  day: string;
+  month: string;
+  budgets: AdminUsageBudget[];
+  level: UsageLevel;
+  history: AdminUsageDay[];
+}
+
+/** What the app has spent against what it may spend before anything is owed. */
+export async function getAdminUsage(): Promise<AdminUsage> {
+  if (apiConfigurationError) {
+    throw new UserFacingError(apiConfigurationError);
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(`${apiBaseUrl}/api/admin/usage`, {
+      headers: authHeaders(),
+    });
+  } catch {
+    throw new UserFacingError(
+      "Δεν ήταν δυνατή η σύνδεση με την υπηρεσία.",
+    );
+  }
+
+  if (!response.ok) {
+    throw new UserFacingError(
+      await parseErrorMessage(response, "Τα στοιχεία χρήσης δεν φορτώθηκαν."),
+    );
+  }
+
+  const body: unknown = await response.json().catch(() => null);
+
+  if (
+    !body ||
+    typeof body !== "object" ||
+    !(body as { usage?: unknown }).usage
+  ) {
+    throw new UserFacingError("Τα στοιχεία χρήσης δεν φορτώθηκαν.");
+  }
+
+  return (body as { usage: AdminUsage }).usage;
+}
+
 export async function listAdminProducts(options: {
   status?: string;
   search?: string;

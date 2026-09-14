@@ -5,13 +5,16 @@ import {
   Camera,
   ChevronLeft,
   ChevronRight,
+  Gauge,
 } from "lucide-react";
 import AdminGate from "../components/AdminGate";
 import AdminPhotoThumbnail from "../components/AdminPhotoThumbnail";
 import { AssistantReportPanel } from "../components/AdminAssistantPanel";
 import {
+  getAdminUsage,
   listAdminProducts,
   type AdminProductListItem,
+  type AdminUsage,
 } from "../services/adminProductsClient";
 
 interface StatusOption {
@@ -56,6 +59,29 @@ function AdminProductsContent() {
   const [pageSize, setPageSize] = useState(24);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+
+  // An alarm nobody is shown is not an alarm: the usage warning is raised
+  // here, on the screen the admin actually opens, not only on its own page.
+  const [usage, setUsage] = useState<AdminUsage | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getAdminUsage()
+      .then((result) => {
+        if (!cancelled) {
+          setUsage(result);
+        }
+      })
+      .catch(() => {
+        // Silent: a catalogue that loads is worth more than a warning
+        // about a counter, and the usage page reports its own failures.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Debounce the barcode search box before it drives a request.
   useEffect(() => {
@@ -122,17 +148,45 @@ function AdminProductsContent() {
           </button>
         </div>
 
-        {/* The refusals log, kept beside the catalogue rather than buried:
-            a scan the app would not score is the one thing the catalogue
-            cannot show you, because it never became a product. */}
-        <button
-          type="button"
-          onClick={() => navigate("/admin/scan-failures")}
-          className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-line text-sm font-semibold text-ink-muted"
-        >
-          <AlertTriangle size={15} />
-          Αποτυχίες σάρωσης
-        </button>
+        {usage && usage.level !== "ok" && (
+          <button
+            type="button"
+            onClick={() => navigate("/admin/usage")}
+            className={`mt-3 flex w-full items-center gap-2 rounded-xl border p-3 text-left text-sm font-semibold leading-5 ${
+              usage.level === "over"
+                ? "border-red-500/40 bg-red-950/40 text-red-100"
+                : "border-amber-500/40 bg-amber-950/40 text-amber-100"
+            }`}
+          >
+            <Gauge size={16} className="shrink-0" />
+            {usage.level === "over"
+              ? "Ένα όριο χρήσης ξεπεράστηκε — δες τι τρέχει."
+              : "Ένα όριο χρήσης πέρασε το 80%."}
+          </button>
+        )}
+
+        {/* The refusals log and the meter, kept beside the catalogue rather
+            than buried: a scan the app would not score, and what a scan
+            costs, are the two things the catalogue cannot show you. */}
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            onClick={() => navigate("/admin/scan-failures")}
+            className="flex h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-line text-sm font-semibold text-ink-muted"
+          >
+            <AlertTriangle size={15} />
+            Αποτυχίες
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate("/admin/usage")}
+            className="flex h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-line text-sm font-semibold text-ink-muted"
+          >
+            <Gauge size={15} />
+            Χρήση
+          </button>
+        </div>
 
         <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
           {STATUS_OPTIONS.map((option) => (

@@ -16,6 +16,12 @@ import {
   type ScanFailureRow,
 } from "./scanFailures";
 import {
+  readUsageReport,
+  recordUsage,
+  resolveBudgets,
+  type UsageReport,
+} from "./usage";
+import {
   classifyAllergenFindings,
   withoutAllergenOnlyItems,
   type AllergenNotice,
@@ -173,6 +179,17 @@ type AdminEnvironment = Env & {
   ADMIN_PASSWORD?: string;
 };
 
+/**
+ * Optional overrides for the spending budgets the usage alarm measures
+ * against — plain vars, not secrets, set in wrangler.jsonc. Both are
+ * optional because both have documented defaults in usage.ts; the Workers
+ * AI one in particular is a proxy that real traffic is expected to correct.
+ */
+type UsageBudgetEnvironment = {
+  AZURE_OCR_MONTHLY_BUDGET?: string;
+  WORKERS_AI_DAILY_BUDGET?: string;
+};
+
 const visionModel =
   "@cf/moondream/moondream3.1-9B-A2B";
 
@@ -233,6 +250,7 @@ type JsonBody =
       service: "greenlens-ocr";
     }
   | { failures: ScanFailureRow[] }
+  | { usage: UsageReport }
   | {
       answer: string;
     }
@@ -1033,6 +1051,8 @@ async function runAssistDraft(
     temperature: 0.3,
   });
 
+  await recordUsage(env.DB, "workers_ai_text");
+
   const modelText = extractModelText(modelOutput);
 
   const draft = modelText
@@ -1094,6 +1114,8 @@ async function runAssistReport(
     max_tokens: 600,
     temperature: 0.2,
   });
+
+  await recordUsage(env.DB, "workers_ai_text");
 
   const text = extractModelText(modelOutput);
 
@@ -1226,6 +1248,13 @@ async function runAdminRequest(
     url.pathname === "/api/admin/scan-failures"
   ) {
     return runAdminListScanFailures(url, env, origin, requestId);
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname === "/api/admin/usage"
+  ) {
+    return runAdminUsage(env, origin, requestId);
   }
 
   const rescoreBarcode = matchAdminProductRescorePath(
@@ -2009,15 +2038,6 @@ async function runAdminDeleteProduct(
  * back to the ingredients photo, because many packs print the ingredient
  * list and the nutrition table in the one panel that got photographed.
  */
-/**
- * Recomputes a stored score from the stored label text — no OCR, no model.
- *
- * The PIM's edit form covers ingredients only, so a nutrition row whose
- * numbers came back wrong had no cheap way back: the only repair was a full
- * re-analysis, which re-reads the photograph and replaces everything. Both
- * categories now score deterministically from text, so both can simply be
- * recomputed.
- */
 async function runAdminListScanFailures(
   url: URL,
   env: Env,
@@ -2049,6 +2069,53 @@ async function runAdminListScanFailures(
   }
 }
 
+/**
+ * What the app has spent this month and today, against the budgets it is
+ * allowed to spend before anything is owed.
+ *
+ * Reads the app's own counters rather than either provider's API: the point
+ * of the page is to fire at 80% while there is still free allowance to
+ * protect, and a billing API reports what has already been billed.
+ */
+async function runAdminUsage(
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  try {
+    const usage = await readUsageReport(
+      env.DB,
+      resolveBudgets(env as Env & UsageBudgetEnvironment),
+    );
+
+    return json({ usage }, 200, origin, requestId);
+  } catch (caughtError) {
+    console.error("admin_usage_failed", {
+      requestId,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Τα στοιχεία χρήσης δεν φορτώθηκαν.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
+/**
+ * Recomputes a stored score from the stored label text — no OCR, no model.
+ *
+ * The PIM's edit form covers ingredients only, so a nutrition row whose
+ * numbers came back wrong had no cheap way back: the only repair was a full
+ * re-analysis, which re-reads the photograph and replaces everything. Both
+ * categories now score deterministically from text, so both can simply be
+ * recomputed.
+ */
 async function runAdminRescoreProduct(
   barcode: string,
   env: Env,
@@ -2348,6 +2415,8 @@ async function runAdminAnalyzeProduct(
       azureEnv.AZURE_VISION_KEY,
       azureEnv.AZURE_VISION_LANGUAGE,
     );
+
+    await recordUsage(env.DB, "azure_ocr");
   } catch (caughtError) {
     console.error("admin_analyze_ocr_failed", {
       requestId,
@@ -2649,6 +2718,11 @@ async function runOcr(
         azureEnv.AZURE_VISION_KEY,
         azureEnv.AZURE_VISION_LANGUAGE,
       );
+
+    // Counted only once the transaction actually happened: a call that
+    // threw before Azure answered was never billed, and a counter that
+    // guesses high is a false alarm on the page meant to prevent them.
+    await recordUsage(env.DB, "azure_ocr");
 
     const evaluation =
       evaluateLabelText(result.rawText);
@@ -3325,6 +3399,8 @@ async function resolveContentCategory(
       temperature: 0,
     });
 
+    await recordUsage(env.DB, "workers_ai_text");
+
     const modelText = extractModelText(modelOutput);
     const cleanedText = modelText ? stripCodeFences(modelText) : null;
 
@@ -3764,6 +3840,8 @@ async function analyzeIngredientsCore(
       },
     );
 
+    await recordUsage(env.DB, "workers_ai_text");
+
     const modelText =
       extractModelText(modelOutput);
 
@@ -4146,6 +4224,8 @@ async function analyzeNutritionCore(
       temperature: 0.2,
     });
 
+    await recordUsage(env.DB, "workers_ai_text");
+
     const modelText = extractModelText(modelOutput);
     const cleanedText = modelText ? stripCodeFences(modelText) : null;
 
@@ -4431,6 +4511,8 @@ async function runChemicalAnalysisPath(
       temperature: 0.2,
     });
 
+    await recordUsage(env.DB, "workers_ai_text");
+
     const modelText = extractModelText(modelOutput);
     const cleanedText = modelText ? stripCodeFences(modelText) : null;
 
@@ -4688,6 +4770,8 @@ async function runIdentify(
           stream: false,
         },
       );
+
+      await recordUsage(env.DB, "workers_ai_vision");
 
       identity =
         parseProductIdentity(modelOutput);
