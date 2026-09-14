@@ -3,6 +3,32 @@ import {
   type NutritionPanel,
 } from "./nutritionPanel";
 
+/** Minimal shape used from D1 — same pattern as productPhotos.ts. */
+export interface D1PreparedStatementLike {
+  bind(...values: unknown[]): D1PreparedStatementLike;
+  first<T = Record<string, unknown>>(): Promise<T | null>;
+  run(): Promise<unknown>;
+}
+
+export interface D1Like {
+  prepare(query: string): D1PreparedStatementLike;
+}
+
+/**
+ * Bumped whenever the shape of what we extract from an OFF record changes,
+ * so old rows are ignored rather than served by newer code that expects
+ * different fields.
+ */
+const CACHE_SCHEMA_VERSION = 1;
+
+/**
+ * A product OFF knows about barely changes; a barcode it does not know is
+ * exactly the thing most likely to change, since anyone can add it
+ * tomorrow. Hence two clocks.
+ */
+const HIT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const MISS_TTL_MS = 24 * 60 * 60 * 1000;
+
 interface BarcodeProductResult {
   productName: string | null;
   brand: string | null;
@@ -130,23 +156,100 @@ function validateBarcode(barcode: string): boolean {
   return len >= 8 && len <= 14;
 }
 
-export async function lookupProductByBarcode(
+const EMPTY_RESULT: BarcodeProductResult = {
+  productName: null,
+  brand: null,
+  netContent: null,
+  nutritionPanel: null,
+  confidence: 0,
+  source: null,
+};
+
+/**
+ * The cached answer for this barcode, or null when there isn't a usable one.
+ *
+ * Every failure here — no table yet, unreadable row, D1 hiccup — means the
+ * same thing: ask Open Food Facts. A cache that can break the lookup it is
+ * meant to speed up would be worse than no cache.
+ */
+async function readCachedLookup(
+  db: D1Like,
   barcode: string,
-  options?: { timeoutMs?: number },
-): Promise<BarcodeProductResult> {
-  const timeoutMs = options?.timeoutMs ?? 4000;
+): Promise<BarcodeProductResult | null> {
+  try {
+    const row = await db
+      .prepare(
+        "SELECT result, found, fetched_at_ms FROM openfoodfacts_cache WHERE barcode = ? AND schema_version = ?",
+      )
+      .bind(barcode, CACHE_SCHEMA_VERSION)
+      .first<{
+        result: string;
+        found: number;
+        fetched_at_ms: number;
+      }>();
 
-  if (!validateBarcode(barcode)) {
-    return {
-      productName: null,
-      brand: null,
-      netContent: null,
-      nutritionPanel: null,
-      confidence: 0,
-      source: null,
-    };
+    if (!row) {
+      return null;
+    }
+
+    const age = Date.now() - row.fetched_at_ms;
+
+    if (age > (row.found === 1 ? HIT_TTL_MS : MISS_TTL_MS)) {
+      return null;
+    }
+
+    const parsed: unknown = JSON.parse(row.result);
+
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as BarcodeProductResult)
+      : null;
+  } catch {
+    return null;
   }
+}
 
+/** Best-effort write. A cache miss costs a request; a throw costs the scan. */
+async function writeCachedLookup(
+  db: D1Like,
+  barcode: string,
+  result: BarcodeProductResult,
+): Promise<void> {
+  try {
+    await db
+      .prepare(
+        `INSERT INTO openfoodfacts_cache (barcode, schema_version, result, found, fetched_at_ms)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(barcode) DO UPDATE SET
+           schema_version = excluded.schema_version,
+           result = excluded.result,
+           found = excluded.found,
+           fetched_at_ms = excluded.fetched_at_ms`,
+      )
+      .bind(
+        barcode,
+        CACHE_SCHEMA_VERSION,
+        JSON.stringify(result),
+        result.source === null ? 0 : 1,
+        Date.now(),
+      )
+      .run();
+  } catch (error) {
+    console.error("openfoodfacts_cache_write_failed", {
+      barcode,
+      message:
+        error instanceof Error ? error.message : String(error).slice(0, 200),
+    });
+  }
+}
+
+/**
+ * Asks Open Food Facts, then Open Beauty Facts. No caching and no barcode
+ * validation — both belong to the exported wrapper below.
+ */
+async function fetchFromOpenFoodFacts(
+  barcode: string,
+  timeoutMs: number,
+): Promise<{ result: BarcodeProductResult; completed: boolean }> {
   const encodedBarcode = encodeURIComponent(barcode.trim());
 
   const controller = new AbortController();
@@ -171,9 +274,16 @@ export async function lookupProductByBarcode(
       if (extracted && (extracted.productName || extracted.brand)) {
         clearTimeout(timeoutId);
         return {
-          ...extracted,
-          confidence: extracted.productName ? 0.98 : extracted.brand ? 0.80 : 0.60,
-          source: "openfoodfacts",
+          result: {
+            ...extracted,
+            confidence: extracted.productName
+              ? 0.98
+              : extracted.brand
+                ? 0.8
+                : 0.6,
+            source: "openfoodfacts",
+          },
+          completed: true,
         };
       }
     }
@@ -196,43 +306,75 @@ export async function lookupProductByBarcode(
       if (extracted && (extracted.productName || extracted.brand)) {
         clearTimeout(timeoutId);
         return {
-          ...extracted,
-          confidence: extracted.productName ? 0.98 : extracted.brand ? 0.80 : 0.60,
-          source: "openbeautyfacts",
+          result: {
+            ...extracted,
+            confidence: extracted.productName
+              ? 0.98
+              : extracted.brand
+                ? 0.8
+                : 0.6,
+            source: "openbeautyfacts",
+          },
+          completed: true,
         };
       }
     }
 
     clearTimeout(timeoutId);
-    return {
-      productName: null,
-      brand: null,
-      netContent: null,
-      nutritionPanel: null,
-      confidence: 0,
-      source: null,
-    };
-  } catch (error) {
+
+    // Both services answered and neither knows this barcode. That is a real
+    // answer about the product, and worth not asking for again immediately.
+    return { result: EMPTY_RESULT, completed: true };
+  } catch {
     clearTimeout(timeoutId);
-    if (error instanceof Error && error.name === "AbortError") {
-      // Timeout or abort - return null result
-      return {
-        productName: null,
-        brand: null,
-        netContent: null,
-        nutritionPanel: null,
-        confidence: 0,
-        source: null,
-      };
-    }
-    // Network error or other failure - return null result (fallback to AI)
-    return {
-      productName: null,
-      brand: null,
-      netContent: null,
-      nutritionPanel: null,
-      confidence: 0,
-      source: null,
-    };
+
+    // A timeout or a network error says nothing about the product, only
+    // about the moment. The caller still gets a blank result so the scan
+    // carries on, but `completed: false` keeps it out of the cache — one bad
+    // minute must not blank a perfectly well-known barcode for a day.
+    return { result: EMPTY_RESULT, completed: false };
   }
+}
+
+/**
+ * Product identity and per-100 quantities for a barcode, from Open Food
+ * Facts (or Open Beauty Facts for cosmetics).
+ *
+ * Pass `db` to serve repeat scans from D1 instead of calling out again. The
+ * same barcodes come back constantly — re-checking a product is what the app
+ * is for — and this call sits on the critical path of a scan the user is
+ * waiting on, twice: once to name the product, once as the nutrition
+ * fallback for a label photographed without its table.
+ *
+ * Without `db` it behaves exactly as it always has.
+ */
+export async function lookupProductByBarcode(
+  barcode: string,
+  options?: { timeoutMs?: number; db?: D1Like },
+): Promise<BarcodeProductResult> {
+  if (!validateBarcode(barcode)) {
+    return EMPTY_RESULT;
+  }
+
+  const key = barcode.trim();
+  const db = options?.db;
+
+  if (db) {
+    const cached = await readCachedLookup(db, key);
+
+    if (cached) {
+      return cached;
+    }
+  }
+
+  const { result, completed } = await fetchFromOpenFoodFacts(
+    key,
+    options?.timeoutMs ?? 4000,
+  );
+
+  if (db && completed) {
+    await writeCachedLookup(db, key, result);
+  }
+
+  return result;
 }

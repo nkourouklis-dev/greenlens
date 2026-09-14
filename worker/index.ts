@@ -3113,10 +3113,13 @@ type IngredientsAnalysisOutcome =
  */
 async function nutritionPanelFromBarcode(
   barcode: string,
+  env: Env,
   requestId: string,
 ): Promise<NutritionPanel | null> {
   try {
-    const lookup = await lookupProductByBarcode(barcode);
+    const lookup = await lookupProductByBarcode(barcode, {
+      db: env.DB,
+    });
 
     console.log("nutrition_panel_from_openfoodfacts", {
       requestId,
@@ -3215,7 +3218,9 @@ async function analyzeIngredientsCore(
   // gate, so neither is trusted further than the other.
   const nutritionPanel =
     photoPanel ??
-    (barcode ? await nutritionPanelFromBarcode(barcode, requestId) : null);
+    (barcode
+      ? await nutritionPanelFromBarcode(barcode, env, requestId)
+      : null);
 
   const nutritionOnlyRejection =
     reasons.length > 0 &&
@@ -4331,8 +4336,9 @@ async function runIdentify(
     // Try barcode lookup first if provided
     if (barcode) {
       const lookupStarted = Date.now();
-      const barcodeResult =
-        await lookupProductByBarcode(barcode);
+      const barcodeResult = await lookupProductByBarcode(barcode, {
+        db: env.DB,
+      });
 
       console.log(
         "product_lookup_completed",
