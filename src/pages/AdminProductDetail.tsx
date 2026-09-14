@@ -5,6 +5,7 @@ import AdminGate from "../components/AdminGate";
 import AdminProductPhotos from "../components/AdminProductPhotos";
 import EditableStringList from "../components/EditableStringList";
 import ProductVersionsPanel from "../components/ProductVersionsPanel";
+import ScoreBreakdownPanel from "../components/ScoreBreakdownPanel";
 import { AssistantDraftPanel } from "../components/AdminAssistantPanel";
 import {
   analyzeAdminProduct,
@@ -15,6 +16,7 @@ import {
   updateAdminProductName,
   type AdminProductDetail as AdminProductDetailType,
 } from "../services/adminProductsClient";
+import type { ScoreBreakdown } from "../types";
 
 const SEVERITY_OPTIONS = [
   "positive",
@@ -81,6 +83,45 @@ function ingredientTextFromFindings(
     .map((finding) => finding.ingredientName.trim())
     .filter((name) => name.length > 0)
     .join(", ");
+}
+
+/**
+ * The parts of a stored analysis this screen can show without being able to
+ * edit them — nutrition and chemical rows, which the edit form has no fields
+ * for yet.
+ *
+ * Returns null only when there is genuinely nothing scored to show, so the
+ * caller renders the panel exactly when there is a result behind it.
+ */
+function readOnlyAnalysisOf(analysisResult: unknown): {
+  score: ScoreBreakdown;
+  summary: string;
+  sourceText: string;
+} | null {
+  if (!isRecord(analysisResult) || !isRecord(analysisResult.score)) {
+    return null;
+  }
+
+  const score = analysisResult.score;
+
+  if (
+    typeof score.score !== "number" &&
+    score.score !== null
+  ) {
+    return null;
+  }
+
+  return {
+    score: score as unknown as ScoreBreakdown,
+    summary:
+      typeof analysisResult.summary === "string"
+        ? analysisResult.summary
+        : "",
+    sourceText:
+      typeof analysisResult.sourceText === "string"
+        ? analysisResult.sourceText
+        : "",
+  };
 }
 
 function buildFormState(analysisResult: unknown): FormState {
@@ -445,6 +486,8 @@ function AdminProductDetailContent() {
     (analysisCategory === "ingredients" ||
       analysisCategory === undefined);
 
+  const readOnlyAnalysis = readOnlyAnalysisOf(product.analysisResult);
+
   return (
     <main className="min-h-screen bg-canvas px-4 pb-28 pt-5 text-ink">
       <section className="mx-auto max-w-2xl">
@@ -564,12 +607,53 @@ function AdminProductDetailContent() {
           </div>
         )}
 
+        {/* A non-ingredients row is analyzed and scored like any other — it
+            just can't be hand-edited yet. It used to render nothing at all
+            here, so a perfectly good nutrition analysis looked like no
+            analysis, and the notice above it read as though the app had
+            declined to do the work. Showing the result read-only says what
+            is actually true: this was analyzed, here is the verdict, the
+            fields just aren't editable. */}
+        {product.status !== "draft" && !canEdit && readOnlyAnalysis && (
+          <div className="mt-5 space-y-3">
+            <ScoreBreakdownPanel
+              score={readOnlyAnalysis.score}
+              insights={[]}
+            />
+
+            {readOnlyAnalysis.summary && (
+              <div className="rounded-xl border border-line-subtle bg-surface/70 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+                  Περίληψη
+                </p>
+
+                <p className="mt-1 text-sm leading-6 text-ink-muted">
+                  {readOnlyAnalysis.summary}
+                </p>
+              </div>
+            )}
+
+            {readOnlyAnalysis.sourceText && (
+              <div className="rounded-xl border border-line-subtle bg-surface/70 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+                  Κείμενο που βαθμολογήθηκε
+                </p>
+
+                <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-ink-muted">
+                  {readOnlyAnalysis.sourceText}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         {product.status !== "draft" && !canEdit && (
-          <p className="mt-5 rounded-xl border border-line-subtle bg-surface/70 p-3 text-sm leading-6 text-ink-muted">
-            Η επεξεργασία υποστηρίζεται προς το παρόν μόνο για
-            αναλύσεις συστατικών (κατηγορία: {String(analysisCategory)}
-            ). Αν η φωτογραφία έχει λίστα συστατικών, ανάλυσέ την
-            ξανά ως συστατικά παρακάτω.
+          <p className="mt-3 rounded-xl border border-line-subtle bg-surface/70 p-3 text-sm leading-6 text-ink-muted">
+            Κατηγορία: {String(analysisCategory)}. Η ανάλυση έγινε
+            κανονικά· η επεξεργασία των πεδίων με το χέρι υποστηρίζεται
+            προς το παρόν μόνο για αναλύσεις συστατικών. Αν η
+            φωτογραφία έχει λίστα συστατικών, ανάλυσέ την ξανά ως
+            συστατικά παρακάτω.
           </p>
         )}
 

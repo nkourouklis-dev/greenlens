@@ -3900,6 +3900,12 @@ async function analyzeNutritionCore(
       executiveSummary,
       allergenNotice: allergens.notice,
       contentCategory: "nutrition" as const,
+      // The panel text the score was computed from, same as the ingredients
+      // path persists. Its absence was why a nutrition row in the PIM had
+      // nothing to show but its photos: the score existed, the evidence for
+      // it did not, and there was no way to tell a bad read from a bad
+      // product.
+      sourceText: modelInputText,
     };
 
     // See the matching comment in runIngredientsAnalysis: score.score can
