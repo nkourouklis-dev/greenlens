@@ -1826,6 +1826,12 @@ async function runAdminUpdateProduct(
           validated.envelope,
           rescored.score,
         ),
+        // The text the recompute actually scored, not the one submitted:
+        // they differ when the form still holds raw OCR (a row analyzed
+        // before cleaning existed, or text pasted in with line breaks), and
+        // storing the submitted one would leave the row's "Κείμενο
+        // συστατικών" arguing for a different score than the row's number.
+        sourceText: rescored.sourceText,
         score: rescored.score,
         ingredientInsights: rescored.ingredientInsights,
       },

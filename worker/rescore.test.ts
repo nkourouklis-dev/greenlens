@@ -362,3 +362,56 @@ test("a PIM save reproduces the score a mixed-label scan computed", async () => 
 
   assert.notEqual(withoutPanel.score.score, withPanel.score.score);
 });
+
+const SLS_ROW: FakeRuleRow = {
+  alias: "sodium lauryl sulfate",
+  normalized_name: "sodium lauryl sulfate",
+  rule_severity: "caution",
+  penalty_points: 8,
+  bulk_weighted: 0,
+  rule_group: null,
+  short_description: "Ισχυρό απορρυπαντικό",
+  concerns: JSON.stringify(["Μπορεί να ερεθίσει ευαίσθητο δέρμα"]),
+};
+
+// A scan cleans the OCR block before scoring it; the recompute used to
+// score whatever text it was handed. On a row stored before cleaning
+// existed — or on text an admin pastes in — the two disagreed: the scanner
+// joined a line-wrapped "Sodium / Lauryl Sulfate" and charged it, the PIM
+// save did not, and the same hand wash was 71 in one place and 79 in the
+// other.
+test("a PIM save scores the same line-wrapped label a scan does", async () => {
+  const wrapped =
+    "Aqua, Trideceth-50, Sodium\n" +
+    "Lauryl Sulfate, Potassium Olivate";
+
+  const db = createFakeD1([SLS_ROW]);
+
+  const wrappedResult = await rescoreIngredientsResult(db, analysis, wrapped);
+
+  const flatResult = await rescoreIngredientsResult(
+    db,
+    analysis,
+    "Aqua, Trideceth-50, Sodium Lauryl Sulfate, Potassium Olivate",
+  );
+
+  assert.equal(wrappedResult.score.score, flatResult.score.score);
+  assert.equal(
+    wrappedResult.score.deductions.some(
+      (deduction) => deduction.code === "caution:sodium lauryl sulfate",
+    ),
+    true,
+  );
+});
+
+// ...and the row keeps the text that score was computed from, so the PIM
+// never shows a list arguing for a different number than the one beside it.
+test("the recompute hands back the text it actually scored", async () => {
+  const { sourceText } = await rescoreIngredientsResult(
+    createFakeD1([SLS_ROW]),
+    analysis,
+    "Συστατικά: Aqua, Sodium\nLauryl Sulfate",
+  );
+
+  assert.equal(sourceText, "Aqua, Sodium Lauryl Sulfate");
+});

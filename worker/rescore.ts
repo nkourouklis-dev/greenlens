@@ -28,6 +28,7 @@ import {
 } from "./ingredientRules";
 import { scoreInterpretation, type WorkerScore } from "./scoring";
 import type { NutritionPanel } from "./nutritionPanel";
+import { cleanIngredientText } from "./ingredientText";
 
 /**
  * A verified row's text was read and corrected by a human, so the OCR and
@@ -41,6 +42,12 @@ export interface RescoreOutcome {
   score: WorkerScore;
   ingredientInsights: IngredientInsight[];
   ruleMatches: RuleMatch[];
+  /**
+   * The text the score was actually computed from, cleaned. Callers persist
+   * this rather than what they passed in, so the stored "Κείμενο συστατικών"
+   * and the stored score stay two views of one thing.
+   */
+  sourceText: string;
 }
 
 export async function rescoreIngredientsResult(
@@ -58,10 +65,18 @@ export async function rescoreIngredientsResult(
 ): Promise<RescoreOutcome> {
   const ruleSet = await loadScoringRules(db);
 
-  const ruleMatches = matchScoringRules(sourceText, ruleSet);
+  // Cleaned first, exactly as a live scan cleans before scoring
+  // (analyzeIngredientsCore). Without this the two disagree: a scan joins a
+  // line-wrapped "Sodium / Lauryl Sulfate" and charges it, while a save of
+  // the same row scored the raw text and missed it — the same product at 71
+  // from the scanner and 79 from the PIM. It also matters for text an admin
+  // pastes in by hand, which arrives with whatever line breaks it had.
+  const cleanedText = cleanIngredientText(sourceText);
+
+  const ruleMatches = matchScoringRules(cleanedText, ruleSet);
 
   const score = scoreInterpretation(
-    sourceText,
+    cleanedText,
     HUMAN_VERIFIED_CONFIDENCE,
     result,
     {
@@ -83,7 +98,12 @@ export async function rescoreIngredientsResult(
     ruleMatches,
   );
 
-  return { score, ingredientInsights, ruleMatches };
+  return {
+    score,
+    ingredientInsights,
+    ruleMatches,
+    sourceText: cleanedText,
+  };
 }
 
 /**
