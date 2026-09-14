@@ -16,6 +16,7 @@ import {
   type ScanFailureRow,
 } from "./scanFailures";
 import {
+  findBudgetBreach,
   readUsageReport,
   recordUsage,
   resolveBudgets,
@@ -2589,12 +2590,61 @@ async function storeScanPhoto(
   }
 }
 
+/**
+ * Refuses a paid request once a spending budget is exhausted.
+ *
+ * Guards the three public paths that commit money — OCR, identify and
+ * analysis — and deliberately not the admin ones: those belong to the
+ * account owner, who can see the meter and decide for themselves, and
+ * locking them out would also lock them out of the screens that explain
+ * why. The usage page says the same thing in more detail.
+ *
+ * Fails open (see findBudgetBreach): a broken counter must not become a
+ * broken app.
+ */
+async function refuseIfOverBudget(
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response | null> {
+  const breach = await findBudgetBreach(
+    env.DB,
+    resolveBudgets(env as Env & UsageBudgetEnvironment),
+  );
+
+  if (!breach) {
+    return null;
+  }
+
+  console.warn("usage_budget_exhausted", {
+    requestId,
+    budget: breach.id,
+    used: breach.used,
+    limit: breach.limit,
+  });
+
+  return error(
+    breach.period === "day"
+      ? "Η ανάλυση είναι σε παύση για σήμερα: εξαντλήθηκε το ημερήσιο όριο της υπηρεσίας. Δοκίμασε ξανά αύριο."
+      : "Η ανάλυση είναι σε παύση: εξαντλήθηκε το μηνιαίο όριο της υπηρεσίας. Δοκίμασε ξανά τον επόμενο μήνα.",
+    429,
+    origin,
+    requestId,
+  );
+}
+
 async function runOcr(
   request: Request,
   env: Env,
   origin: string | null,
   requestId: string,
 ): Promise<Response> {
+  const overBudget = await refuseIfOverBudget(env, origin, requestId);
+
+  if (overBudget) {
+    return overBudget;
+  }
+
   const contentType =
     request.headers.get("content-type") ?? "";
 
@@ -3239,6 +3289,12 @@ async function runAnalysis(
   origin: string | null,
   requestId: string,
 ): Promise<Response> {
+  const overBudget = await refuseIfOverBudget(env, origin, requestId);
+
+  if (overBudget) {
+    return overBudget;
+  }
+
   const requestBody = await readJson(request);
 
   if (!isAnalysisRequest(requestBody)) {
@@ -4645,6 +4701,12 @@ async function runIdentify(
   origin: string | null,
   requestId: string,
 ): Promise<Response> {
+  const overBudget = await refuseIfOverBudget(env, origin, requestId);
+
+  if (overBudget) {
+    return overBudget;
+  }
+
   const contentType =
     request.headers.get("content-type") ?? "";
 

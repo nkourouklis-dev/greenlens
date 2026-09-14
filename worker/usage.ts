@@ -189,6 +189,53 @@ export interface UsageReport {
   history: UsageDayRow[];
 }
 
+export interface BudgetBreach {
+  id: string;
+  label: string;
+  period: "day" | "month";
+  used: number;
+  limit: number;
+}
+
+/**
+ * The budget that is already spent, if any — the check a paid path makes
+ * before it commits to spending more.
+ *
+ * Fails open on purpose. If this read throws, the answer is "carry on":
+ * a database hiccup must not take the app down, and the alternative to a
+ * few euros of unplanned spend is every scan failing for everyone.
+ */
+export async function findBudgetBreach(
+  db: D1Like,
+  budgets: BudgetLimits,
+  now: Date = new Date(),
+): Promise<BudgetBreach | null> {
+  let report: UsageReport;
+
+  try {
+    report = await readUsageReport(db, budgets, now);
+  } catch (error) {
+    console.error("usage_breach_check_failed", {
+      message:
+        error instanceof Error ? error.message : String(error).slice(0, 200),
+    });
+
+    return null;
+  }
+
+  const breached = report.budgets.find((budget) => budget.level === "over");
+
+  return breached
+    ? {
+        id: breached.id,
+        label: breached.label,
+        period: breached.period,
+        used: breached.used,
+        limit: breached.limit,
+      }
+    : null;
+}
+
 interface RawUsageRow {
   day: string;
   service: string;

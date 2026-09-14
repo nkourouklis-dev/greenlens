@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  findBudgetBreach,
   readUsageReport,
   recordUsage,
   resolveBudgets,
@@ -181,4 +182,46 @@ test("the read window covers the whole month, not just 30 days", async () => {
   await readUsageReport(fake.db, budgets, new Date("2026-01-31T10:00:00Z"));
 
   assert.equal(fake.calls[0].bound[0], "2026-01-01");
+});
+
+const noon = new Date("2026-09-14T12:00:00Z");
+
+test("nothing is refused while there is allowance left", async () => {
+  const fake = createFakeD1();
+
+  fake.rows.push({ day: "2026-09-14", service: "workers_ai_text", calls: 9 });
+
+  assert.equal(await findBudgetBreach(fake.db, budgets, noon), null);
+});
+
+test("an exhausted budget is named, with its clock", async () => {
+  const fake = createFakeD1();
+
+  fake.rows.push({ day: "2026-09-14", service: "workers_ai_text", calls: 10 });
+
+  const breach = await findBudgetBreach(fake.db, budgets, noon);
+
+  assert.equal(breach?.id, "workers_ai");
+  assert.equal(breach?.period, "day");
+  assert.equal(breach?.used, 10);
+  assert.equal(breach?.limit, 10);
+});
+
+test("a monthly budget is reported on the monthly clock", async () => {
+  const fake = createFakeD1();
+
+  fake.rows.push({ day: "2026-09-02", service: "azure_ocr", calls: 100 });
+
+  const breach = await findBudgetBreach(fake.db, budgets, noon);
+
+  assert.equal(breach?.id, "azure_ocr");
+  assert.equal(breach?.period, "month");
+});
+
+// The alternative to a few euros of unplanned spend would be every scan
+// failing for everyone, which is the worse failure.
+test("a broken counter lets the app carry on rather than taking it down", async () => {
+  const fake = createFakeD1({ throwOnPrepare: true });
+
+  assert.equal(await findBudgetBreach(fake.db, budgets, noon), null);
 });
