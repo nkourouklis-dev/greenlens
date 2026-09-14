@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
-import { Camera, RotateCcw, ScanBarcode, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Camera, ImageUp, RotateCcw, ScanBarcode, Trash2, X } from "lucide-react";
 import ManualBarcodeInput from "../components/ManualBarcodeInput";
 import { useCameraViewport } from "../contexts/CameraContext";
 import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
+import { usePhotoFilePicker } from "../hooks/usePhotoFilePicker";
 import {
   clearStoredAdminPassword,
   getStoredAdminPassword,
@@ -57,6 +58,8 @@ export default function AdminCapture() {
   >({});
   const [activeSlot, setActiveSlot] =
     useState<PhotoType | null>(null);
+
+  const pendingPickSlot = useRef<PhotoType | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -160,6 +163,25 @@ export default function AdminCapture() {
     setSubmitError("");
   }
 
+  function fillSlot(slot: PhotoType, file: File) {
+    const previewUrl = URL.createObjectURL(file);
+
+    setPhotos((current) => {
+      const existing = current[slot];
+
+      if (existing) {
+        URL.revokeObjectURL(existing.previewUrl);
+      }
+
+      return {
+        ...current,
+        [slot]: { file, previewUrl },
+      };
+    });
+
+    setActiveSlot(null);
+  }
+
   async function handleCapture() {
     const slot = activeSlot;
 
@@ -173,22 +195,25 @@ export default function AdminCapture() {
       return;
     }
 
-    const previewUrl = URL.createObjectURL(captured.file);
+    fillSlot(slot, captured.file);
+  }
 
-    setPhotos((current) => {
-      const existing = current[slot];
+  // One picker serves all three slots: `pendingPickSlot` records which
+  // thumbnail was tapped, since the OS dialog comes back long after the
+  // click that opened it.
+  const filePicker = usePhotoFilePicker((file) => {
+    const slot = pendingPickSlot.current;
 
-      if (existing) {
-        URL.revokeObjectURL(existing.previewUrl);
-      }
+    pendingPickSlot.current = null;
 
-      return {
-        ...current,
-        [slot]: { file: captured.file, previewUrl },
-      };
-    });
+    if (slot) {
+      fillSlot(slot, file);
+    }
+  });
 
-    setActiveSlot(null);
+  function pickFileFor(type: PhotoType) {
+    pendingPickSlot.current = type;
+    filePicker.open();
   }
 
   function handleDeletePhoto(type: PhotoType) {
@@ -445,6 +470,8 @@ export default function AdminCapture() {
             </p>
           )}
 
+          {filePicker.input}
+
           <div className="mt-4 space-y-3">
             {PHOTO_SLOTS.map((slot) => {
               const photo = photos[slot.type];
@@ -461,14 +488,31 @@ export default function AdminCapture() {
                       className="h-20 w-20 shrink-0 rounded-xl object-cover"
                     />
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => setActiveSlot(slot.type)}
-                      aria-label={`Λήψη: ${slot.label}`}
-                      className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-line bg-canvas text-ink-faint active:scale-95"
-                    >
-                      <Camera size={28} />
-                    </button>
+                    /* Shoot it or choose it. On a phone the live camera is
+                       the fast path and stays the bigger target; at a desk
+                       — where there may be no camera at all — the picker
+                       next to it is the only one that works, so it is
+                       always offered rather than hidden behind a failure. */
+                    <div className="flex h-20 w-20 shrink-0 flex-col gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setActiveSlot(slot.type)}
+                        aria-label={`Λήψη: ${slot.label}`}
+                        className="flex flex-1 items-center justify-center rounded-xl border-2 border-dashed border-line bg-canvas text-ink-faint active:scale-95"
+                      >
+                        <Camera size={24} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => pickFileFor(slot.type)}
+                        aria-label={`Επιλογή αρχείου: ${slot.label}`}
+                        className="flex h-7 items-center justify-center gap-1 rounded-lg border border-line bg-canvas text-[10px] font-semibold text-ink-faint active:scale-95"
+                      >
+                        <ImageUp size={13} />
+                        Αρχείο
+                      </button>
+                    </div>
                   )}
 
                   <div className="min-w-0 flex-1">
@@ -490,6 +534,15 @@ export default function AdminCapture() {
                         className="flex h-11 w-11 items-center justify-center rounded-full border border-line text-ink-muted active:scale-95"
                       >
                         <RotateCcw size={18} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => pickFileFor(slot.type)}
+                        aria-label={`Αντικατάσταση από αρχείο: ${slot.label}`}
+                        className="flex h-11 w-11 items-center justify-center rounded-full border border-line text-ink-muted active:scale-95"
+                      >
+                        <ImageUp size={18} />
                       </button>
 
                       <button

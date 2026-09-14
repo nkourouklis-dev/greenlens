@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { estimateSharpness, useCameraViewport } from "../contexts/CameraContext";
+import { usePhotoFilePicker } from "../hooks/usePhotoFilePicker";
 
 interface PhotoCaptureProps {
   title: string;
@@ -175,6 +176,28 @@ export default function PhotoCapture({
     }
   }
 
+  // A file chosen from disk or the gallery goes through the same state a
+  // live shot does, so everything after this point — the preview, the
+  // "this exact photo will be sent" warning, the continue button — is
+  // unchanged. The blur warning is skipped rather than guessed at: it is
+  // computed from the live frame, and "looks blurry" about a file the user
+  // deliberately chose would be noise, not help.
+  function acceptFile(chosen: File) {
+    const nextPreviewUrl = URL.createObjectURL(chosen);
+
+    setCaptureError(false);
+    setFile(chosen);
+    setIsBlurry(false);
+    setPreviewUrl((currentPreviewUrl) => {
+      if (currentPreviewUrl) URL.revokeObjectURL(currentPreviewUrl);
+      return nextPreviewUrl;
+    });
+  }
+
+  // Declared after acceptFile so the callback is not reading a binding
+  // that is still being initialised.
+  const filePicker = usePhotoFilePicker(acceptFile);
+
   function retake() {
     setFile(null);
     setIsBlurry(false);
@@ -282,22 +305,56 @@ export default function PhotoCapture({
         </p>
       )}
 
+      {filePicker.input}
+
       {previewUrl ? (
-        <button
-          type="button"
-          onClick={retake}
-          className="flex h-10 items-center justify-center rounded-xl border border-line text-sm font-semibold text-ink-muted"
-        >
-          Λήψη ξανά
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={retake}
+            className="flex h-10 flex-1 items-center justify-center rounded-xl border border-line text-sm font-semibold text-ink-muted"
+          >
+            Λήψη ξανά
+          </button>
+
+          <button
+            type="button"
+            onClick={filePicker.open}
+            className="flex h-10 flex-1 items-center justify-center rounded-xl border border-line text-sm font-semibold text-ink-muted"
+          >
+            Επιλογή αρχείου
+          </button>
+        </div>
+      ) : isCameraActive ? (
+        <>
+          <button
+            type="button"
+            onClick={takePhoto}
+            disabled={isCapturing}
+            className="h-12 w-full rounded-xl bg-accent px-5 text-sm font-bold text-on-accent disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+          >
+            {isCapturing ? "Λήψη..." : "Λήψη φωτογραφίας"}
+          </button>
+
+          <button
+            type="button"
+            onClick={filePicker.open}
+            className="flex h-10 items-center justify-center rounded-xl border border-line text-sm font-semibold text-ink-muted"
+          >
+            Επιλογή από αρχείο ή συλλογή
+          </button>
+        </>
       ) : (
+        /* No live camera — a computer without a webcam, or permission
+           refused. Choosing a file is the only way forward here, so it
+           becomes the primary action rather than a footnote under a button
+           that can never work. */
         <button
           type="button"
-          onClick={takePhoto}
-          disabled={!isCameraActive || isCapturing}
-          className="h-12 w-full rounded-xl bg-accent px-5 text-sm font-bold text-on-accent disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+          onClick={filePicker.open}
+          className="h-12 w-full rounded-xl bg-accent px-5 text-sm font-bold text-on-accent"
         >
-          {isCapturing ? "Λήψη..." : "Λήψη φωτογραφίας"}
+          Επιλογή φωτογραφίας από τη συσκευή
         </button>
       )}
 

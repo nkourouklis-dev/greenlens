@@ -38,9 +38,15 @@ function currentPhoto(
  * missing. Uploads go through the same endpoint the capture flow uses, so a
  * photo added here is indistinguishable from one taken in store.
  *
- * `capture="environment"` opens the camera directly on a phone and falls
- * back to the file picker on desktop, which is why this screen doesn't
- * carry the live-viewport machinery AdminCapture needs.
+ * A plain file input, which is why this screen doesn't carry the
+ * live-viewport machinery AdminCapture needs: the OS picker it opens is
+ * already the right control on both devices — "camera or photo library" on
+ * a phone, "browse files" on a computer.
+ *
+ * It used to carry `capture="environment"`, which sends a phone straight
+ * into its camera and hides the library entirely. That made a photo already
+ * on the phone — or one shot earlier and edited — impossible to attach, and
+ * bought nothing on desktop, where the attribute is ignored anyway.
  */
 export default function AdminProductPhotos(props: {
   barcode: string;
@@ -104,7 +110,6 @@ export default function AdminProductPhotos(props: {
         ref={inputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         className="hidden"
         onChange={(event) => {
           const file = event.target.files?.[0];
