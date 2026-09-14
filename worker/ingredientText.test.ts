@@ -4,6 +4,7 @@ import {
   cleanIngredientText,
   extractIngredientText,
 } from "./ingredientText";
+import { NESTLE_CLUSTERS_OCR } from "./labelFixtures";
 
 // Test 1: Greek heading inline
 test("extracts Greek heading with inline ingredients", () => {
@@ -417,7 +418,6 @@ test("a real marketing claim is still rejected after allergen wording is ignored
 // two-word boundary "διατροφικές πληροφορίες" never occurs. The block ran on
 // through the whole table and was rejected as a nutrition table — even
 // though a human reading the photo sees an ordinary ingredient list.
-const NESTLE_CLUSTERS_OCR = "Balance\nΟΓΙΩΤΗΣ\nζι ψήσιμο\nNestlé®\nκαι γλυκά!\nΚαλή Διατροφή, Καλύτερη Ζωή\nΣυστατικά: Σιτάρι ολικής άλεσης\n63,3%, Ζάχαρη, Αμύγδαλα 9,2%, Αλεύρι\nσιταριού 5,3%, Σιρόπι γλυκόζης, Νιφάδες\nσιταριού 1,8%, Εκχύλισμα βύνης κριθαριού\n(κριθάρι, βύνη κριθαριού), Ιμβερτοποιη-\nμένο σιρόπι ζάχαρης, Νιφάδες βρώμης\n1,4%, Ανθρακικό ασβέστιο, Φοινικέλαιο,\nΑλάτι, Μέλι 0,3%, Αλεύρι ρυζιού 0,3%,\nΜελάσα, Φυσική αρωματική ύλη, Ρυθμιστής\nοξύτητας (φωσφορικά άλατα νατρίου),\nΣίδηρος, Βιταμίνη Β3, Β5, Β9, Β6, Β2.\nΠιθανόν να περιέχει γάλα, φιστίκια\nκαι άλλους ξηρούς καρπούς.\nΓια να παραχθούν 100g αυτού του προϊόντος\nέχουν χρησιμοποιηθεί 63,3g δημητριακά ολικής\nάλεσης.\n%\nΑνά 30g+\nΔΙΑΤΡΟΦΙΚΕΣ\nΑνά\nΑνά\n125ml\nΠΛΗΡΟΦΟΡΙΕΣ\n100g\n30g\nημιαποβουτυ-\nPOWER\nρωμένο γάλα\nΕνέργεια\n1652kJ\n496kJ\n750kJ\nREADY\n392kcal\n118kcal\n178kcal\nΛιπαρά\n7,3g\n2,2g\n4,2g\nεκ των οποίων\nκορεσμένα\n1,4g\n0,4g\n1,6g\nΥδατάνθρακες\n66,5g\n20,0g\n26,1g\nεκ των οποίων\nσάκχαρα\n19,9g\n6,0g\n11,8g\nΕδώδιμες ίνες\n9,6g\n2,9g\n2,9g\nΠρωτεΐνες\n10,3g\n3,1g\n7,4g\nΑλάτι\n0,91g\n0,27g\n0,42g\nΟι βιταμίνες του συμπλέγματος Β (Β2, Β3, Β5, Β6)\nσυμβάλλουν στη φυσιολογική λειτουργία των\nμεταβολικών διεργασιών που αποσκοπούν στην\nπαραγωγή ενέργειας. Στα πλαίσια μιας\nισορροπημένης διατροφής και ενός υγιεινού τρόπου ζωής.\nΒΙΤΑΜΙΝΕΣ &\nΜΕΤΑΛΛΑ\n(%Δ.Τ.Α .* )\nΡιβοφλαβίνη (Β2)\n1,18 mg (84%) 0,35 mg\n0,59 mg\nΝιασίνη (Β3)\n13,9 mg (87%)\n4,17mg\n4,29 mg\nΒιταμίνη Β6\n0,37 mg\nΦολικό οξύ (Β9)\n1,02 mg (73%) |0,31 mg\n182 μg (91%) 54,6 μg\n59,2 μg\nΠαντοθενικό οξύ (Β5) 4,46 mg (74%)\n1,34mg\n1,79 mg\nΑσβέστιο\n524 mg (66%)\n157 mg\n309 mg\nΣίδηρος\n11,7 mg (84%) |3,51mg\n3,57 mg\n*%Δ.Τ.Α .: Διατροφική Τιμή Αναφοράς σύμφωνα\nμε τον κανονισμό 1169/2011/ΕΚ.\nΕίναι καλό να μιλάτε";
 
 test("regression: an ingredient list above a column-split nutrition table is isolated and accepted", () => {
   const result = extractIngredientText(NESTLE_CLUSTERS_OCR, 0.96);
@@ -472,4 +472,28 @@ test("cleanIngredientText does not cut the list at an abbreviation full stop", (
 test("cleanIngredientText never empties its input", () => {
   assert.equal(cleanIngredientText("  %\n"), "%");
   assert.equal(cleanIngredientText(""), "");
+});
+
+// An E-number has at most one letter in a row, which is how a final
+// ingredient line such as "..., e250." used to be mistaken for a leftover
+// table cell and dropped. That costs a real deduction now that the cleaned
+// text is the text the score is computed from.
+test("cleanIngredientText keeps a final ingredient named as an E-number", () => {
+  assert.equal(
+    cleanIngredientText("Συστατικά: Χοιρινό κρέας, αλάτι,\ne250."),
+    "Χοιρινό κρέας, αλάτι, e250.",
+  );
+
+  assert.equal(
+    cleanIngredientText("Νερό, ζάχαρη,\nε150d\n%\nΑνά 30g+"),
+    "Νερό, ζάχαρη, ε150d",
+  );
+});
+
+// ...while the cells that really are table leftovers still go.
+test("cleanIngredientText still drops a stray table cell under the list", () => {
+  assert.equal(
+    cleanIngredientText("Νερό, ζάχαρη, αλάτι\n100g\nper 100 g"),
+    "Νερό, ζάχαρη, αλάτι",
+  );
 });

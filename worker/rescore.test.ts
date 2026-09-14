@@ -13,6 +13,9 @@ import {
 } from "./rescore";
 import type { WorkerScore } from "./scoring";
 import { validateVerifiedAnalysisResult } from "./adminProducts";
+import { readNutritionPanel } from "./nutritionPanel";
+import { cleanIngredientText, extractIngredientText } from "./ingredientText";
+import { NESTLE_CLUSTERS_OCR } from "./labelFixtures";
 
 interface FakeRuleRow {
   alias: string;
@@ -34,6 +37,29 @@ const SUGAR_ROW: FakeRuleRow = {
   rule_group: "added_sugar",
   short_description: "Προστιθέμενη ζάχαρη",
   concerns: JSON.stringify(["Υψηλή πρόσληψη προστιθέμενων σακχάρων"]),
+};
+
+
+const SALT_ROW: FakeRuleRow = {
+  alias: "αλάτι",
+  normalized_name: "sodium chloride",
+  rule_severity: "caution",
+  penalty_points: 8,
+  bulk_weighted: 1,
+  rule_group: "salt",
+  short_description: "Αλάτι",
+  concerns: JSON.stringify(["Υψηλή πρόσληψη νατρίου"]),
+};
+
+const PALM_OIL_ROW: FakeRuleRow = {
+  alias: "φοινικέλαιο",
+  normalized_name: "palm oil",
+  rule_severity: "caution",
+  penalty_points: 12,
+  bulk_weighted: 1,
+  rule_group: null,
+  short_description: "Φοινικέλαιο",
+  concerns: JSON.stringify(["Περιβαλλοντικές επιπτώσεις καλλιέργειας"]),
 };
 
 /**
@@ -286,4 +312,53 @@ test("the whole envelope's free text follows the new score", () => {
     "Πηγή ινών",
     "Σκορ 95/100",
   ]);
+});
+
+/**
+ * A PIM save runs no OCR and no model, so everything the scan scored from
+ * has to be on the stored row. The nutrition quantities of a mixed label are
+ * the half that is easiest to lose: drop them and the recompute silently
+ * rescores the product as if its label had carried no table.
+ */
+test("a PIM save reproduces the score a mixed-label scan computed", async () => {
+  const scanned = {
+    ...analysis,
+    // Exactly what a scan of this label stores: the cleaned ingredient
+    // list, plus the quantities read off the table on the same photo.
+    sourceText: cleanIngredientText(
+      extractIngredientText(NESTLE_CLUSTERS_OCR, 0.96).ingredientText ?? "",
+    ),
+    nutritionPanel: readNutritionPanel(NESTLE_CLUSTERS_OCR),
+    executiveSummary: { overallVerdict: "Μέτρια επιλογή" },
+    allergenNotice: null,
+  };
+
+  const validated = validateVerifiedAnalysisResult(scanned);
+
+  assert(validated, "the stored envelope did not validate");
+  assert.deepEqual(validated.nutritionPanel, scanned.nutritionPanel);
+  assert.deepEqual(validated.envelope.nutritionPanel, scanned.nutritionPanel);
+
+  const db = createFakeD1([SUGAR_ROW, SALT_ROW, PALM_OIL_ROW]);
+
+  const withPanel = await rescoreIngredientsResult(
+    db,
+    validated.core,
+    validated.sourceText,
+    validated.nutritionPanel,
+  );
+
+  // Sugar comes off the table (-20), salt off the table (-12), palm oil off
+  // the list (-12), and the fibre/protein bonuses off the table (+6/+4).
+  assert.equal(withPanel.score.score, 66);
+
+  // ...and the same row saved without its panel would not: that is the
+  // regression this test exists for.
+  const withoutPanel = await rescoreIngredientsResult(
+    db,
+    validated.core,
+    validated.sourceText,
+  );
+
+  assert.notEqual(withoutPanel.score.score, withPanel.score.score);
 });

@@ -4,8 +4,14 @@ import {
   matchFragranceAllergen,
 } from "./allergens";
 import type { RuleMatch } from "./ingredientRules";
+import type { NutritionPanel } from "./nutritionPanel";
+import {
+  bonusesFor,
+  penaltiesFor,
+  type NutrientReading,
+} from "./nutritionThresholds";
 
-export const scoringVersion = "2026.09.3";
+export const scoringVersion = "2026.09.4";
 
 export interface WorkerScore {
   score: number | null;
@@ -208,6 +214,28 @@ export function deductionsFromModelSeverities<F extends SeverityFinding>(
     .slice(0, MAX_DEDUCTIONS);
 }
 
+/**
+ * Deductions charged for declared quantities rather than for names: each
+ * nutrient banded against the published thresholds (see
+ * nutritionThresholds.ts). Used by the nutrition path for the whole score
+ * and by the ingredients path for the sugar/salt part of a mixed label.
+ */
+export function deductionsFromThresholds(
+  readings: NutrientReading[],
+  isBeverage: boolean,
+): Deductions {
+  return penaltiesFor(readings, isBeverage).map((penalty) => ({
+    code: "threshold:" + penalty.key,
+    points: penalty.points,
+    title: penalty.title,
+    explanation: penalty.explanation,
+    ingredientIds: [],
+    evidenceRequired: false,
+    // The threshold is the evidence: a published band, not a per-scan guess.
+    evidenceAvailable: true,
+  }));
+}
+
 export function bandForScore(score: number): WorkerScore["band"] {
   return score >= 85
     ? "excellent"
@@ -291,6 +319,17 @@ export function finalizeScore(params: {
 // ---------------------------------------------------------------------------
 // Ingredients
 // ---------------------------------------------------------------------------
+
+/**
+ * The `ingredient_knowledge.rule_group`s whose whole job is to stand in for
+ * a quantity nobody could read off the ingredient list. A nutrition table
+ * declares those quantities outright, so on a label carrying one these rules
+ * step aside for the thresholds instead of being charged on top of them.
+ */
+const THRESHOLD_OWNED_RULE_GROUPS = new Set([
+  "added_sugar",
+  "salt",
+]);
 
 /**
  * Shared by every content category that scores a *list of substances* —
@@ -382,6 +421,13 @@ export function scoreInterpretation(
      * so a scan still yields a score rather than a blank one.
      */
     ruleMatches?: RuleMatch[];
+    /**
+     * Per-100 quantities read off a nutrition table printed on the same
+     * label (see nutritionPanel.ts). Present only for "mixed" labels, and
+     * only when the numbers passed their plausibility checks — so omitting
+     * it, or passing null, is exactly today's ingredients-only behaviour.
+     */
+    nutritionPanel?: NutritionPanel | null;
   },
 ): WorkerScore {
   const lowConfidenceReason =
@@ -413,17 +459,58 @@ export function scoreInterpretation(
 
   const ruleMatches = options?.ruleMatches ?? [];
 
-  const deductions =
+  const panel = options?.nutritionPanel ?? null;
+
+  const panelReadings = panel?.readings ?? [];
+
+  // A mixed label carries both kinds of evidence for the same thing. "Ζάχαρη
+  // appears second in the list" is a guess at how much sugar is in there;
+  // "σάκχαρα 19,9g ανά 100g" is the answer, printed on the same photo. So
+  // where the numbers exist, they replace the rules that were standing in
+  // for them — and only those rules: palm oil, sweeteners, parabens,
+  // fragrance and the rest are things a quantity table says nothing about,
+  // and keep costing exactly what they cost today.
+  const scoredRuleMatches =
+    panelReadings.length > 0
+      ? ruleMatches.filter(
+          (match) =>
+            !THRESHOLD_OWNED_RULE_GROUPS.has(
+              match.rule.ruleGroup ?? "",
+            ),
+        )
+      : ruleMatches;
+
+  const ingredientDeductions =
     ruleMatches.length > 0
-      ? deductionsFromRules(ruleMatches)
+      ? deductionsFromRules(scoredRuleMatches)
       : deductionsFromFindings(analysis);
+
+  const deductions =
+    panelReadings.length > 0
+      ? [
+          ...deductionsFromThresholds(
+            panelReadings,
+            panel?.isBeverage ?? false,
+          ),
+          ...ingredientDeductions,
+        ]
+          .sort((left, right) => right.points - left.points)
+          .slice(0, MAX_DEDUCTIONS)
+      : ingredientDeductions;
 
   // Deliberately *not* keyed on potentialAllergens: rewarding the absence of
   // milk/wheat/egg is the same -5 penalty for containing them, just spelled
   // backwards.
   return finalizeScore({
     deductions,
+    // Fibre and protein, earned from the declared amounts — the same
+    // bonuses the nutrition-only path awards for the same table.
+    earnedBonuses: bonusesFor(panelReadings),
     positivesCount: analysis.positives.length,
+    // Same rule as the nutrition path: once there are real numbers to
+    // judge, the model's prose about how wholesome the product is does not
+    // get to add points on top of them.
+    positivesBonusAllowed: panelReadings.length === 0,
     positivesBonusLabel: "Πολλαπλά θετικά χαρακτηριστικά",
     noProblemsBonusLabel: "Δεν εντοπίστηκαν προβληματικά συστατικά",
     confidence,

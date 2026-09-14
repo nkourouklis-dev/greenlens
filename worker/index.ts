@@ -88,8 +88,10 @@ import {
   lookupProductByBarcode,
 } from "./productLookup";
 import {
+  cleanIngredientText,
   extractIngredientText,
 } from "./ingredientText";
+import { readNutritionPanel } from "./nutritionPanel";
 import {
   evaluateContentGate,
 } from "./contentGate";
@@ -1700,6 +1702,7 @@ async function runAdminUpdateProduct(
       env.DB,
       validated.core,
       validated.sourceText,
+      validated.nutritionPanel,
     );
 
     console.log("admin_product_rescored", {
@@ -3039,6 +3042,22 @@ async function analyzeIngredientsCore(
   const modelInputText =
     extraction.ingredientText ?? analysisText;
 
+  // What gets stored and scored: the ingredient list as a person would
+  // write it down. `analysisText` is the raw OCR block — line breaks
+  // mid-word, the "Συστατικά:" heading, the precautionary allergen
+  // sentence and stray table fragments ("%", "Ανά 30g+") — and it used to
+  // be both the scored input and the "Κείμενο συστατικών" an admin sees.
+  // The model still gets the uncleaned block below: the allergen statement
+  // is exactly what it needs and exactly what cleaning removes.
+  const scoredText = cleanIngredientText(analysisText);
+
+  // Sugar and salt on a label that also prints a nutrition table are judged
+  // from the declared quantities instead of from their place in the list —
+  // see nutritionPanel.ts. Read off the full confirmed text (the table
+  // sits outside the isolated ingredient block) and null whenever no
+  // trustworthy table is there, which is every ingredients-only label.
+  const nutritionPanel = readNutritionPanel(confirmedText);
+
   const nutritionOnlyRejection =
     reasons.length > 0 &&
     reasons.every(isNutritionRejectionReason);
@@ -3104,6 +3123,9 @@ async function analyzeIngredientsCore(
     ocrConfidence,
     confirmedTextLength: confirmedText.length,
     analysisTextLength: analysisText.length,
+    scoredTextLength: scoredText.length,
+    nutritionPanelNutrients:
+      nutritionPanel?.readings.map((reading) => reading.key) ?? null,
     sectionWasSliced: evaluation.sectionWasSliced,
     nutritionMarkerCount:
       evaluation.nutritionMarkerCount,
@@ -3361,7 +3383,7 @@ async function analyzeIngredientsCore(
     const ruleSet = await loadScoringRules(env.DB);
 
     const ruleMatches = matchScoringRules(
-      analysisText,
+      scoredText,
       ruleSet,
     );
 
@@ -3377,13 +3399,14 @@ async function analyzeIngredientsCore(
     });
 
     const score = scoreInterpretation(
-      analysisText,
+      scoredText,
       ocrConfidence,
       result,
       {
         extractionConfidence: gate.confidence,
         lowConfidenceReason: null,
         ruleMatches,
+        nutritionPanel,
       },
     );
 
@@ -3413,7 +3436,12 @@ async function analyzeIngredientsCore(
       // The exact text the score was computed from. Persisted so the PIM
       // can recompute the score after an edit without re-running OCR, and
       // so a stored score stays reproducible from its own input.
-      sourceText: analysisText,
+      sourceText: scoredText,
+      // The other half of that input. The PIM recompute runs no OCR and no
+      // model, so the quantities the score was built from have to travel
+      // with it or an admin save would silently rescore the product as if
+      // the label had carried no nutrition table at all.
+      nutritionPanel,
     };
 
     // Only cache a genuinely complete, scored result — score.score can

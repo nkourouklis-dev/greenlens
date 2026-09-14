@@ -847,10 +847,19 @@ const TRAILING_STATEMENT_PREFIXES = [
 const LEADING_INGREDIENT_HEADING =
   /^\s*(?:συστατικ[άα]|ingredients?|ingr[ée]dients|inci|zutaten|ingredienti|ingredientes|σ[ύυ]νθεση|composition)(?:\s*\/\s*[\p{L} ]+)?\s*[:：\-–]\s*/iu;
 
-// Leftovers of an adjacent table at the end of the block: a lone "%",
-// a column header such as "Ανά 30g+" / "per 100 g".
+// Leftovers of an adjacent table at the end of the block: a lone "%", a
+// column header such as "Ανά 30g+" / "per 100 g", or a stray cell value
+// ("100g") that the column-by-column read left hanging under the list.
+//
+// Deliberately not "has no two consecutive letters": that also swallowed a
+// final ingredient named as an E-number ("..., ε150d", "..., e250."), which
+// costs a deduction now that this text is what gets scored.
 function isTrailingTableFragment(line: string): boolean {
-  return !/\p{L}{2,}/u.test(line) || /^(?:αν[άα]|per)\s+\d/iu.test(line);
+  return (
+    !/\p{L}/u.test(line) ||
+    /^(?:αν[άα]|per)\s+\d/iu.test(line) ||
+    /^\d+(?:[.,]\d+)?\s*(?:g|gr|γρ|mg|ml|kj|kcal)$/i.test(line)
+  );
 }
 
 /**

@@ -27,6 +27,7 @@ import {
   type RuleMatch,
 } from "./ingredientRules";
 import { scoreInterpretation, type WorkerScore } from "./scoring";
+import type { NutritionPanel } from "./nutritionPanel";
 
 /**
  * A verified row's text was read and corrected by a human, so the OCR and
@@ -46,6 +47,14 @@ export async function rescoreIngredientsResult(
   db: D1Like,
   result: WorkerAnalysisResult,
   sourceText: string,
+  /**
+   * The nutrition quantities the original scan read off the same label
+   * (worker/nutritionPanel.ts), carried through the stored analysis. Passing
+   * them back in is what makes a PIM save reproduce the scan's score: the
+   * recompute never re-runs OCR, so it cannot read the table again, and
+   * dropping it would rescore a mixed label as an ingredients-only one.
+   */
+  nutritionPanel: NutritionPanel | null = null,
 ): Promise<RescoreOutcome> {
   const ruleSet = await loadScoringRules(db);
 
@@ -59,6 +68,7 @@ export async function rescoreIngredientsResult(
       extractionConfidence: HUMAN_VERIFIED_CONFIDENCE,
       lowConfidenceReason: null,
       ruleMatches,
+      nutritionPanel,
     },
   );
 

@@ -1,6 +1,7 @@
 import {
   blockingReasonsFor,
   deductionsFromModelSeverities,
+  deductionsFromThresholds,
   finalizeScore,
   insufficientDataScore,
   MAX_DEDUCTION_COUNT,
@@ -10,7 +11,6 @@ import { isAllergenDeclarationOnly } from "./allergens";
 import {
   bonusesFor,
   isBeverageTable,
-  penaltiesFor,
   readNutrients,
 } from "./nutritionThresholds";
 import type { WorkerNutritionResult } from "./nutritionAnalysis";
@@ -75,19 +75,10 @@ export function scoreNutrition(
   const readings = readNutrients(scorableFindings);
   const isBeverage = isBeverageTable(text);
 
-  const thresholdDeductions = penaltiesFor(
+  const thresholdDeductions = deductionsFromThresholds(
     readings,
     isBeverage,
-  ).map((penalty) => ({
-    code: "threshold:" + penalty.key,
-    points: penalty.points,
-    title: penalty.title,
-    explanation: penalty.explanation,
-    ingredientIds: [],
-    evidenceRequired: false,
-    // The threshold is the evidence: a published band, not a per-scan guess.
-    evidenceAvailable: true,
-  }));
+  );
 
   // All-or-nothing rather than per-row: once any quantity was read, the
   // thresholds own the score. Mixing the two would charge a nutrient twice

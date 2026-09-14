@@ -7,6 +7,10 @@
 
 import { parseAnalysis, type WorkerAnalysisResult } from "./analysis";
 import type { ProductCacheStatus } from "./productCache";
+import {
+  parseNutritionPanel,
+  type NutritionPanel,
+} from "./nutritionPanel";
 
 /**
  * An admin submission that passed validation, split into the parts the
@@ -17,6 +21,12 @@ import type { ProductCacheStatus } from "./productCache";
 export interface VerifiedAnalysisSubmission {
   core: WorkerAnalysisResult;
   sourceText: string;
+  /**
+   * The nutrition quantities the original scan read off the label, when it
+   * carried a table. Validated and handed back so the recompute scores the
+   * row the same way the scan did — see rescore.ts.
+   */
+  nutritionPanel: NutritionPanel | null;
   envelope: Record<string, unknown>;
 }
 
@@ -347,12 +357,18 @@ export function validateVerifiedAnalysisResult(
     return null;
   }
 
+  const nutritionPanel = parseNutritionPanel(
+    candidate.nutritionPanel,
+  );
+
   return {
     core,
     sourceText: candidate.sourceText,
+    nutritionPanel,
     envelope: {
       ...core,
       sourceText: candidate.sourceText,
+      nutritionPanel,
       executiveSummary: candidate.executiveSummary,
       allergenNotice: candidate.allergenNotice ?? null,
       contentCategory: "ingredients",
