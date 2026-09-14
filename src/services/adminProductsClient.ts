@@ -189,6 +189,50 @@ export async function updateAdminProduct(
   return body.product;
 }
 
+/**
+ * Removes one photo from a product. Returns the product's remaining photos,
+ * so the caller renders what the server now holds rather than its own guess
+ * at what should be left.
+ */
+export async function deleteAdminPhoto(
+  barcode: string,
+  photoId: number,
+): Promise<AdminProductPhoto[]> {
+  if (apiConfigurationError) {
+    throw new UserFacingError(apiConfigurationError);
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(
+      `${apiBaseUrl}/api/admin/photos/${encodeURIComponent(barcode)}?id=${photoId}`,
+      { method: "DELETE", headers: authHeaders() },
+    );
+  } catch {
+    throw new UserFacingError(
+      "Δεν ήταν δυνατή η σύνδεση με την υπηρεσία.",
+    );
+  }
+
+  if (!response.ok) {
+    throw new UserFacingError(
+      await parseErrorMessage(
+        response,
+        "Η διαγραφή της φωτογραφίας απέτυχε.",
+      ),
+    );
+  }
+
+  const body: unknown = await response.json().catch(() => null);
+
+  return body &&
+    typeof body === "object" &&
+    Array.isArray((body as { photos?: unknown }).photos)
+    ? ((body as { photos: AdminProductPhoto[] }).photos)
+    : [];
+}
+
 export async function deleteAdminProduct(
   barcode: string,
 ): Promise<void> {

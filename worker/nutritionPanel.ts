@@ -336,15 +336,16 @@ const SCORED_KEYS: NutrientKey[] = [
 ];
 
 /**
- * The declared per-100 quantities of a nutrition table printed on the same
- * label as an ingredient list, or null when no table could be read from the
- * text or the numbers read from it are not believable.
+ * Turns a set of per-100 quantities into a scoreable panel, or null when
+ * they fail the plausibility checks. The single gate every source of
+ * quantities goes through, so a number from Open Food Facts is trusted
+ * exactly as far as one read off a photo — no further.
  */
-export function readNutritionPanel(
-  rawText: string,
+function buildPanel(
+  values: Map<PanelKey, PanelValue>,
+  energyKcal: number | null,
+  isBeverage: boolean,
 ): NutritionPanel | null {
-  const { values, energyKcal } = readPanelValues(rawText);
-
   if (!isPlausible(values, energyKcal)) {
     return null;
   }
@@ -363,9 +364,89 @@ export function readNutritionPanel(
     }
   }
 
-  return readings.length > 0
-    ? { readings, isBeverage: isBeverageTable(rawText) }
-    : null;
+  return readings.length > 0 ? { readings, isBeverage } : null;
+}
+
+/**
+ * The declared per-100 quantities of a nutrition table printed on the same
+ * label as an ingredient list, or null when no table could be read from the
+ * text or the numbers read from it are not believable.
+ */
+export function readNutritionPanel(
+  rawText: string,
+): NutritionPanel | null {
+  const { values, energyKcal } = readPanelValues(rawText);
+
+  return buildPanel(values, energyKcal, isBeverageTable(rawText));
+}
+
+/** The Open Food Facts `nutriments` keys for each quantity we score. */
+const OFF_FIELDS: Array<[PanelKey, string]> = [
+  ["sugars", "sugars_100g"],
+  ["saturates", "saturated-fat_100g"],
+  ["salt", "salt_100g"],
+  ["fibre", "fiber_100g"],
+  ["protein", "proteins_100g"],
+  ["fat", "fat_100g"],
+  ["carbohydrate", "carbohydrates_100g"],
+];
+
+function numberAt(
+  source: Record<string, unknown>,
+  field: string,
+): number | null {
+  const value = source[field];
+
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN;
+
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+/**
+ * The same panel, built from an Open Food Facts product record instead of
+ * from the photo. Used only when the photo did not yield a table of its
+ * own: a label in the hand beats a crowd-sourced record of it, and a
+ * community edit should not be able to change a score that a legible
+ * photograph already answered.
+ *
+ * Runs through the identical plausibility gate. OFF is crowd-sourced and
+ * carries its own share of misplaced decimal points, so "someone typed it
+ * into a database" is not better evidence than "OCR read it off the pack" —
+ * just different evidence, available when the other is missing.
+ */
+export function panelFromOpenFoodFacts(
+  nutriments: unknown,
+  isBeverage: boolean,
+): NutritionPanel | null {
+  if (typeof nutriments !== "object" || nutriments === null) {
+    return null;
+  }
+
+  const source = nutriments as Record<string, unknown>;
+
+  const values = new Map<PanelKey, PanelValue>();
+
+  for (const [key, field] of OFF_FIELDS) {
+    const grams = numberAt(source, field);
+
+    if (grams !== null) {
+      // OFF normalises everything to grams per 100 g/ml, so the declared
+      // string is reconstructed rather than quoted from a label.
+      values.set(key, {
+        grams,
+        declared: `${Math.round(grams * 100) / 100} g`,
+      });
+    }
+  }
+
+  const energyKcal = numberAt(source, "energy-kcal_100g");
+
+  return buildPanel(values, energyKcal, isBeverage);
 }
 
 const SCORED_KEY_SET = new Set<string>(SCORED_KEYS);

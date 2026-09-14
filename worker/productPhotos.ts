@@ -126,6 +126,39 @@ export async function pruneUserPhotos(
 }
 
 /**
+ * Removes one photo from the catalogue, returning its R2 key so the caller
+ * can delete the stored object too, or null when the barcode has no such
+ * photo.
+ *
+ * Scoped by barcode as well as by id on purpose: the id alone would let a
+ * mistyped request delete a photo belonging to a different product, and the
+ * admin UI always knows which product it is looking at.
+ */
+export async function deleteProductPhoto(
+  db: D1Like,
+  barcode: string,
+  photoId: number,
+): Promise<string | null> {
+  const row = await db
+    .prepare(
+      "SELECT r2_key FROM product_photos WHERE id = ? AND barcode = ?",
+    )
+    .bind(photoId, barcode)
+    .first<{ r2_key: string }>();
+
+  if (!row) {
+    return null;
+  }
+
+  await db
+    .prepare("DELETE FROM product_photos WHERE id = ? AND barcode = ?")
+    .bind(photoId, barcode)
+    .run();
+
+  return row.r2_key;
+}
+
+/**
  * Lists every photo captured for a barcode, newest first.
  */
 export async function listProductPhotos(

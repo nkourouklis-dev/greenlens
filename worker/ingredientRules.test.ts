@@ -208,3 +208,53 @@ test("an empty rule set matches nothing rather than throwing", () => {
     [],
   );
 });
+
+// A claim that an ingredient is ABSENT used to be charged as if it were
+// present: a no-added-sugar biscuit was docked the full added-sugar
+// penalty for saying "Χωρίς προσθήκη ζάχαρης" on its own label. Same
+// mistake the rule table exists to avoid, only backwards — scoring a word
+// instead of what the label says about it.
+const NEGATION_RULES = ruleSet([
+  ["ζάχαρη", SUGAR],
+  ["sugar", SUGAR],
+  ["αλάτι", rule("sodium chloride", 8)],
+]);
+
+function matched(text: string): string[] {
+  return matchScoringRules(text, NEGATION_RULES).map(
+    (match) => match.rule.normalizedName,
+  );
+}
+
+test("an ingredient declared absent is not charged", () => {
+  assert.deepEqual(matched("Αλεύρι, φοινικέλαιο. Χωρίς προσθήκη ζάχαρης."), []);
+  assert.deepEqual(matched("Water, oats. No added sugars."), []);
+  assert.deepEqual(matched("Water, oats. Sugar free."), []);
+  assert.deepEqual(matched("Νερό, βρώμη. Δεν περιέχει ζάχαρη."), []);
+});
+
+test("the negation stops at the comma, so a real list after a claim still counts", () => {
+  // "Χωρίς γλουτένη" is the claim; everything after the comma is the list.
+  assert.deepEqual(matched("Χωρίς γλουτένη, ζάχαρη, αλάτι"), [
+    "sugar",
+    "sodium chloride",
+  ]);
+});
+
+test("a claim in a later sentence does not excuse an earlier ingredient", () => {
+  assert.deepEqual(matched("Νερό, ζάχαρη. Χωρίς συντηρητικά."), ["sugar"]);
+});
+
+test("a negated mention does not shadow a real one further down the list", () => {
+  assert.deepEqual(matched("Sugar-free syrup, water, ζάχαρη, αλάτι"), [
+    "sugar",
+    "sodium chloride",
+  ]);
+});
+
+test("free-range next to an ingredient is not a negation", () => {
+  assert.deepEqual(matched("ζάχαρη, free-range αυγά, αλάτι"), [
+    "sugar",
+    "sodium chloride",
+  ]);
+});

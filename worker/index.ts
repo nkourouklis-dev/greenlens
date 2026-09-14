@@ -41,6 +41,7 @@ import {
   ensureDraftProduct,
   hasProductPhoto,
   insertProductPhoto,
+  deleteProductPhoto,
   listProductPhotos,
   pruneUserPhotos,
   isPhotoType,
@@ -91,7 +92,10 @@ import {
   cleanIngredientText,
   extractIngredientText,
 } from "./ingredientText";
-import { readNutritionPanel } from "./nutritionPanel";
+import {
+  readNutritionPanel,
+  type NutritionPanel,
+} from "./nutritionPanel";
 import {
   evaluateContentGate,
 } from "./contentGate";
@@ -1142,6 +1146,16 @@ async function runAdminRequest(
         requestId,
       );
     }
+
+    if (request.method === "DELETE") {
+      return runAdminDeletePhoto(
+        photosBarcode,
+        url,
+        env,
+        origin,
+        requestId,
+      );
+    }
   }
 
   if (
@@ -1393,6 +1407,93 @@ async function runAdminUploadPhoto(
     origin,
     requestId,
   );
+}
+
+/**
+ * Deletes one photo of a product: the D1 row first, then the R2 object.
+ *
+ * That order is deliberate. If the R2 delete fails the catalogue is already
+ * consistent — the admin sees the photo gone, which is what they asked for —
+ * and the orphan costs storage, nothing more. The other order can leave a
+ * row pointing at an object that no longer exists, which breaks the
+ * thumbnail for everyone.
+ */
+async function runAdminDeletePhoto(
+  barcode: string,
+  url: URL,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const photoId = Number(url.searchParams.get("id"));
+
+  if (!Number.isInteger(photoId) || photoId <= 0) {
+    return error(
+      "Λείπει το αναγνωριστικό της φωτογραφίας.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  try {
+    const r2Key = await deleteProductPhoto(
+      env.DB,
+      barcode,
+      photoId,
+    );
+
+    if (r2Key === null) {
+      return error(
+        "Η φωτογραφία δεν βρέθηκε.",
+        404,
+        origin,
+        requestId,
+      );
+    }
+
+    try {
+      await env.PHOTOS.delete(r2Key);
+    } catch (storageError) {
+      console.error("admin_photo_object_delete_failed", {
+        requestId,
+        barcode,
+        r2Key,
+        message:
+          storageError instanceof Error
+            ? storageError.message
+            : String(storageError).slice(0, 300),
+      });
+    }
+
+    console.log("admin_photo_deleted", {
+      requestId,
+      barcode,
+      photoId,
+      r2Key,
+    });
+
+    const photos = await listProductPhotos(env.DB, barcode);
+
+    return json({ photos }, 200, origin, requestId);
+  } catch (caughtError) {
+    console.error("admin_photo_delete_failed", {
+      requestId,
+      barcode,
+      photoId,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Η φωτογραφία δεν διαγράφηκε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
 }
 
 async function runAdminListPhotos(
@@ -2996,6 +3097,47 @@ type IngredientsAnalysisOutcome =
  * by the bulk in-store flow and later analyzed from the PIM goes through
  * the exact same logic a live scan would.
  */
+/**
+ * The per-100 quantities Open Food Facts holds for a barcode, or null.
+ *
+ * Never allowed to fail an analysis: OFF is a third-party service on the
+ * critical path of a scan that is already working, so a timeout, an outage
+ * or a record with no nutrition data all mean the same thing here — score
+ * from the ingredient rules, exactly as before this existed.
+ */
+async function nutritionPanelFromBarcode(
+  barcode: string,
+  requestId: string,
+): Promise<NutritionPanel | null> {
+  try {
+    const lookup = await lookupProductByBarcode(barcode);
+
+    console.log("nutrition_panel_from_openfoodfacts", {
+      requestId,
+      barcode,
+      source: lookup.source,
+      found: lookup.nutritionPanel !== null,
+      nutrients:
+        lookup.nutritionPanel?.readings.map(
+          (reading) => reading.key,
+        ) ?? null,
+    });
+
+    return lookup.nutritionPanel;
+  } catch (caughtError) {
+    console.error("nutrition_panel_lookup_failed", {
+      requestId,
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 200),
+    });
+
+    return null;
+  }
+}
+
 async function analyzeIngredientsCore(
   barcode: string,
   confirmedText: string,
@@ -3056,7 +3198,18 @@ async function analyzeIngredientsCore(
   // see nutritionPanel.ts. Read off the full confirmed text (the table
   // sits outside the isolated ingredient block) and null whenever no
   // trustworthy table is there, which is every ingredients-only label.
-  const nutritionPanel = readNutritionPanel(confirmedText);
+  const photoPanel = readNutritionPanel(confirmedText);
+
+  // Failing that, the quantities Open Food Facts holds for this barcode —
+  // it stores them per 100 g already, and a photo of an ingredient list
+  // very often crops the table out entirely. Only as a fallback, and never
+  // to overrule the photo: the pack in the user's hand is the primary
+  // source, and a community edit should not move a score that a legible
+  // photograph already answered. Both go through the same plausibility
+  // gate, so neither is trusted further than the other.
+  const nutritionPanel =
+    photoPanel ??
+    (barcode ? await nutritionPanelFromBarcode(barcode, requestId) : null);
 
   const nutritionOnlyRejection =
     reasons.length > 0 &&
@@ -3126,6 +3279,12 @@ async function analyzeIngredientsCore(
     scoredTextLength: scoredText.length,
     nutritionPanelNutrients:
       nutritionPanel?.readings.map((reading) => reading.key) ?? null,
+    nutritionPanelSource:
+      nutritionPanel === null
+        ? null
+        : photoPanel
+          ? "photo"
+          : "openfoodfacts",
     sectionWasSliced: evaluation.sectionWasSliced,
     nutritionMarkerCount:
       evaluation.nutritionMarkerCount,

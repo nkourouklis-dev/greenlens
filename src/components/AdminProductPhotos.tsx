@@ -1,8 +1,11 @@
 import { useRef, useState } from "react";
-import { Camera, RotateCcw } from "lucide-react";
+import { Camera, RotateCcw, Trash2 } from "lucide-react";
 import AdminPhotoThumbnail from "./AdminPhotoThumbnail";
 import { uploadAdminPhoto, type PhotoType } from "../services/adminClient";
-import type { AdminProductPhoto } from "../services/adminProductsClient";
+import {
+  deleteAdminPhoto,
+  type AdminProductPhoto,
+} from "../services/adminProductsClient";
 
 /**
  * The same three named shots the in-store capture flow asks for
@@ -60,6 +63,44 @@ export default function AdminProductPhotos(props: {
   const [uploadingSlot, setUploadingSlot] =
     useState<PhotoType | null>(null);
   const [uploadError, setUploadError] = useState("");
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  // Confirmed before it happens, never undone after: the object is gone
+  // from R2 and the row from D1, and there is no bin to fish it back out
+  // of. The label goes in the prompt so "Διαγραφή;" on the wrong row is
+  // visibly the wrong row.
+  async function removePhoto(
+    photo: AdminProductPhoto,
+    label: string,
+  ) {
+    if (deletingId !== null) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Να διαγραφεί οριστικά η φωτογραφία «${label}»;`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingId(photo.id);
+    setUploadError("");
+
+    try {
+      await deleteAdminPhoto(props.barcode, photo.id);
+      props.onUploaded();
+    } catch (caughtError) {
+      setUploadError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Η διαγραφή απέτυχε.",
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   function pickFor(type: PhotoType) {
     if (uploadingSlot) {
@@ -167,15 +208,27 @@ export default function AdminProductPhotos(props: {
               </div>
 
               {photo && (
-                <button
-                  type="button"
-                  onClick={() => pickFor(slot.type)}
-                  disabled={isUploading}
-                  aria-label={`Νέα λήψη: ${slot.label}`}
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-line text-ink-muted active:scale-95 disabled:opacity-50"
-                >
-                  <RotateCcw size={18} />
-                </button>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => pickFor(slot.type)}
+                    disabled={isUploading}
+                    aria-label={`Νέα λήψη: ${slot.label}`}
+                    className="flex h-11 w-11 items-center justify-center rounded-full border border-line text-ink-muted active:scale-95 disabled:opacity-50"
+                  >
+                    <RotateCcw size={18} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void removePhoto(photo, slot.label)}
+                    disabled={isUploading || deletingId === photo.id}
+                    aria-label={`Διαγραφή: ${slot.label}`}
+                    className="flex h-11 w-11 items-center justify-center rounded-full border border-line text-red-400 active:scale-95 disabled:opacity-50"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
               )}
             </div>
           );
@@ -199,13 +252,24 @@ export default function AdminProductPhotos(props: {
 
           <div className="mt-2 flex gap-3 overflow-x-auto pb-1">
             {otherPhotos.map((photo) => (
-              <AdminPhotoThumbnail
-                key={photo.id}
-                r2Key={photo.r2Key}
-                alt={photo.photoType}
-                className="h-20 w-20 rounded-xl object-cover"
-                onClick={() => props.onOpen(photo.r2Key)}
-              />
+              <div key={photo.id} className="relative shrink-0">
+                <AdminPhotoThumbnail
+                  r2Key={photo.r2Key}
+                  alt={photo.photoType}
+                  className="h-20 w-20 rounded-xl object-cover"
+                  onClick={() => props.onOpen(photo.r2Key)}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => void removePhoto(photo, photo.photoType)}
+                  disabled={deletingId === photo.id}
+                  aria-label={`Διαγραφή: ${photo.photoType}`}
+                  className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full border border-line bg-canvas text-red-400 active:scale-95 disabled:opacity-50"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             ))}
           </div>
         </div>

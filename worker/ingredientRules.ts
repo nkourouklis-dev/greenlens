@@ -209,6 +209,83 @@ function isWholeWordMatch(
 }
 
 /**
+ * Words that turn a mention of an ingredient into a statement that it is
+ * *absent*. "Χωρίς προσθήκη ζάχαρης" and "no added sugars" both used to be
+ * charged the full added-sugar penalty — the same mistake the whole rule
+ * table exists to avoid, only backwards: scoring a word rather than what
+ * the label says about it. A no-added-sugar biscuit was docked 30 points
+ * for saying so.
+ */
+const NEGATION_MARKERS = [
+  "χωρίς",
+  "χωρις",
+  "δεν περιέχει",
+  "δεν περιεχει",
+  "μηδενικ",
+  "no",
+  "not",
+  "without",
+  "free from",
+  "zero",
+  "sans",
+  "ohne",
+];
+
+/**
+ * True when the text immediately before a match, within the same
+ * comma-separated segment and the same sentence, negates it.
+ *
+ * Scoped that tightly on purpose. "Χωρίς γλουτένη, ζάχαρη, αλάτι" is a
+ * gluten-free claim followed by a real ingredient list, so the negation has
+ * to stop at the comma; and "Νερό, ζάχαρη. Χωρίς συντηρητικά." must not let
+ * a claim in a later sentence excuse the sugar in an earlier one, which is
+ * why only text *before* the match counts.
+ */
+function isNegatedAt(
+  text: string,
+  index: number,
+  matchEnd: number,
+  segmentStart: number,
+): boolean {
+  const lastSentenceBreak = text.lastIndexOf(".", index - 1);
+
+  const windowStart = Math.max(
+    segmentStart,
+    lastSentenceBreak + 1,
+  );
+
+  const before = text.slice(windowStart, index);
+
+  if (
+    NEGATION_MARKERS.some((marker) =>
+      new RegExp(
+        `(?:^|[^\\p{L}\\p{N}])${marker}(?![\\p{L}\\p{N}])`,
+        "u",
+      ).test(before),
+    )
+  ) {
+    return true;
+  }
+
+  // "Sugar free", "sugar-free" — the negation trails the ingredient
+  // instead. Start past the word's own ending ("sugars"), and note the
+  // separator class excludes a comma, so "ζάχαρη, free-range αυγά" stays a
+  // real sugar match.
+  let wordEnd = matchEnd;
+
+  while (
+    wordEnd < text.length &&
+    isLetterOrDigit(text[wordEnd])
+  ) {
+    wordEnd += 1;
+  }
+
+  return /^[-\s]*free(?![\p{L}\p{N}])/u.test(
+    text.slice(wordEnd),
+  );
+}
+
+/**
  * Finds every rule-carrying ingredient present in the label text, keeping
  * only the first (highest-quantity) occurrence of each ingredient and only
  * the costliest member of each rule group — a drink listing three sweeteners
@@ -265,8 +342,6 @@ export function matchScoringRules(
         continue;
       }
 
-      claimed.push([index, index + alias.length]);
-
       let position = 0;
 
       for (let i = segmentStarts.length - 1; i >= 0; i -= 1) {
@@ -275,6 +350,23 @@ export function matchScoringRules(
           break;
         }
       }
+
+      // "Χωρίς προσθήκη ζάχαρης" is a claim that there is none, not an
+      // ingredient. Deliberately not `claimed` first: a negated mention
+      // must not shadow a real one later in the list, so a label reading
+      // "sugar-free syrup, ..., ζάχαρη" still costs what the ζάχαρη costs.
+      if (
+        isNegatedAt(
+          text,
+          index,
+          index + alias.length,
+          segmentStarts[position],
+        )
+      ) {
+        continue;
+      }
+
+      claimed.push([index, index + alias.length]);
 
       const weightedPoints = rule.bulkWeighted
         ? Math.round(

@@ -4,7 +4,7 @@ import {
   cleanIngredientText,
   extractIngredientText,
 } from "./ingredientText";
-import { NESTLE_CLUSTERS_OCR } from "./labelFixtures";
+import { NESTLE_CLUSTERS_OCR, OAT_DRINK_OCR } from "./labelFixtures";
 
 // Test 1: Greek heading inline
 test("extracts Greek heading with inline ingredients", () => {
@@ -496,4 +496,65 @@ test("cleanIngredientText still drops a stray table cell under the list", () => 
     cleanIngredientText("Νερό, ζάχαρη, αλάτι\n100g\nper 100 g"),
     "Νερό, ζάχαρη, αλάτι",
   );
+});
+
+// Barcode 5430003127100. The photo carries a complete, ordinary ingredient
+// list, and the app answered "Δεν εντοπίστηκε λίστα συστατικών σε αυτή τη
+// φωτογραφία". Two filters meant to reject a shot of the WRONG panel — one
+// for marketing claims, one for storage advice — were run against a block
+// that held the list AND everything printed beside it. "gluten" plus
+// "free" alone met the claim threshold, so the list went out with them.
+test("regression: a list printed beside a gluten-free claim is still a list", () => {
+  const result = extractIngredientText(OAT_DRINK_OCR, 0.9);
+
+  assert(result.isValid, result.reasons.join("; "));
+  assert.equal(result.labelType, "ingredients");
+  assert(result.ingredientText?.includes("rapeseed oil"));
+  assert(result.ingredientText?.includes("gellan gum"));
+});
+
+// ...and it must not matter whether the label bothered to print a heading:
+// the two paths used to carry separate copies of the same filters.
+test("the same list scores the same with or without an Ingredients heading", () => {
+  const withoutHeading = extractIngredientText(OAT_DRINK_OCR, 0.9);
+
+  const withHeading = extractIngredientText(
+    OAT_DRINK_OCR.replace("Water, gluten-free", "Ingredients: Water, gluten-free"),
+    0.9,
+  );
+
+  assert(withHeading.isValid, withHeading.reasons.join("; "));
+  assert.equal(
+    cleanIngredientText(withoutHeading.ingredientText ?? ""),
+    cleanIngredientText(withHeading.ingredientText ?? ""),
+  );
+});
+
+// The product description runs into the list on a headingless carton, and
+// "with added calcium." matched on the word calcium alone — dragging a
+// sentence fragment into the stored list and shifting every ingredient one
+// position, which is what the rule table weights penalties by.
+test("the list starts at the list, not at the sentence that mentions an ingredient", () => {
+  const text = extractIngredientText(OAT_DRINK_OCR, 0.9).ingredientText ?? "";
+
+  assert(text.startsWith("Water,"), text.slice(0, 40));
+  assert(!text.includes("with added calcium"));
+});
+
+// A photo of nothing but claims, or nothing but storage advice, is still
+// rejected — that is what those two filters are for.
+test("a panel with no list is still rejected", () => {
+  const claimsOnly = extractIngredientText(
+    "Gluten-free. Suitable for vegans. Organic and all natural.",
+    0.9,
+  );
+
+  assert.equal(claimsOnly.isValid, false);
+
+  const storageOnly = extractIngredientText(
+    "Store in a cool, dry place away from direct sunlight and moisture.",
+    0.9,
+  );
+
+  assert.equal(storageOnly.isValid, false);
 });

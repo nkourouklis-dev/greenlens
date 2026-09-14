@@ -1,7 +1,19 @@
+import {
+  panelFromOpenFoodFacts,
+  type NutritionPanel,
+} from "./nutritionPanel";
+
 interface BarcodeProductResult {
   productName: string | null;
   brand: string | null;
   netContent: string | null;
+  /**
+   * Per-100 quantities from the record, when it carries a believable set.
+   * Same shape the OCR path produces (nutritionPanel.ts), so a score cannot
+   * tell which one it was handed — and null more often than not, since OFF
+   * coverage is thin outside the big brands.
+   */
+  nutritionPanel: NutritionPanel | null;
   confidence: number;
   source: "openfoodfacts" | "openbeautyfacts" | null;
 }
@@ -28,9 +40,58 @@ function deduplicateBrandFromName(
   return { brand, productName };
 }
 
+/**
+ * Categories that mean the numbers are per 100 ml of something drunk.
+ *
+ * Matched whole, never as a suffix. Open Food Facts files ordinary groceries
+ * under the umbrella "en:plant-based-foods-and-beverages", so "does any tag
+ * end in -beverages" called a box of breakfast cereal a drink and put its
+ * 19,9 g of sugar on the drinks scale — a 60-point penalty instead of 20,
+ * which is two bands of the final score.
+ */
+const BEVERAGE_CATEGORY_TAGS = new Set([
+  "en:beverages",
+  "en:waters",
+  "en:sodas",
+  "en:juices",
+  "en:fruit-juices",
+  "en:nectars",
+  "en:juices-and-nectars",
+  "en:plant-based-beverages",
+  "en:dairy-drinks",
+  "en:iced-teas",
+  "en:energy-drinks",
+  "en:sweetened-beverages",
+]);
+
+/**
+ * A record declared per 100 ml rather than per 100 g. Read off the product
+ * categories rather than guessed from the name, and it matters: sugars in a
+ * drink are banded far more harshly (nutritionThresholds.ts).
+ */
+export function isBeverageProduct(
+  product: Record<string, unknown>,
+): boolean {
+  const tags = product.categories_tags;
+
+  return (
+    Array.isArray(tags) &&
+    tags.some(
+      (tag) =>
+        typeof tag === "string" &&
+        BEVERAGE_CATEGORY_TAGS.has(tag.trim().toLowerCase()),
+    )
+  );
+}
+
 function extractFromOpenFoodFacts(
   data: Record<string, unknown>,
-): { productName: string | null; brand: string | null; netContent: string | null } | null {
+): {
+  productName: string | null;
+  brand: string | null;
+  netContent: string | null;
+  nutritionPanel: NutritionPanel | null;
+} | null {
   if (!data.code || !data.product) {
     return null;
   }
@@ -55,6 +116,10 @@ function extractFromOpenFoodFacts(
     productName: dedup.productName,
     brand: dedup.brand,
     netContent,
+    nutritionPanel: panelFromOpenFoodFacts(
+      product.nutriments,
+      isBeverageProduct(product),
+    ),
   };
 }
 
@@ -76,6 +141,7 @@ export async function lookupProductByBarcode(
       productName: null,
       brand: null,
       netContent: null,
+      nutritionPanel: null,
       confidence: 0,
       source: null,
     };
@@ -142,6 +208,7 @@ export async function lookupProductByBarcode(
       productName: null,
       brand: null,
       netContent: null,
+      nutritionPanel: null,
       confidence: 0,
       source: null,
     };
@@ -153,6 +220,7 @@ export async function lookupProductByBarcode(
         productName: null,
         brand: null,
         netContent: null,
+        nutritionPanel: null,
         confidence: 0,
         source: null,
       };
@@ -162,6 +230,7 @@ export async function lookupProductByBarcode(
       productName: null,
       brand: null,
       netContent: null,
+      nutritionPanel: null,
       confidence: 0,
       source: null,
     };

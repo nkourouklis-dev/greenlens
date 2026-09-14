@@ -584,6 +584,42 @@ function isLikelyStorageOrDirections(text: string): boolean {
  * gate that makes extractIngredientTextWithHeading reject such a fragment
  * and fall through to the next heading occurrence instead of returning it.
  */
+/**
+ * How many comma-separated segments a block needs before it is treated as a
+ * list in its own right rather than as a sentence that happens to contain
+ * commas. Four is past the point where prose ("Store in a cool, dry place
+ * away from sunlight") can reach by accident.
+ */
+const MIN_LIST_SEGMENTS = 4;
+
+/**
+ * Evidence that a block really is a list of substances: several
+ * comma-separated segments, and at least two words naming something a food
+ * or cosmetic is actually made of.
+ *
+ * This is what lets the claim and storage filters stay strict without
+ * throwing real lists away. They were written to reject a photo of the
+ * *wrong panel* — pure marketing copy, or storage advice — but they run
+ * against a candidate that may hold both the list and whatever else is
+ * printed beside it, and almost every carton prints something beside it.
+ * A gluten-free oat drink ("Water, gluten-free oats 11%, rapeseed oil,
+ * acidity regulator (dipotassium phosphate), calcium, salt, emulsifier
+ * (DATEM), stabilizer (gellan gum). Gluten-free and no added sugars.") was
+ * discarded whole, with a complete and perfectly scoreable list in it,
+ * because "gluten" and "free" together already met the claim threshold.
+ */
+function hasStrongIngredientListEvidence(candidate: string): boolean {
+  const segments = candidate
+    .split(/[,;·]/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+
+  return (
+    segments.length >= MIN_LIST_SEGMENTS &&
+    countIngredientMarkers(candidate) >= 2
+  );
+}
+
 function looksLikeRealIngredientBlock(candidate: string): boolean {
   if (candidate.length < 10) {
     return false;
@@ -593,12 +629,18 @@ function looksLikeRealIngredientBlock(candidate: string): boolean {
     return false;
   }
 
-  if (isLikelyMarketingClaim(candidate)) {
-    return false;
-  }
+  // A block that carries its own list evidence is not disqualified by what
+  // is printed next to it. One that doesn't still is: that is the case
+  // these two filters exist for — a photo of nothing but claims, or
+  // nothing but storage advice.
+  if (!hasStrongIngredientListEvidence(candidate)) {
+    if (isLikelyMarketingClaim(candidate)) {
+      return false;
+    }
 
-  if (isLikelyStorageOrDirections(candidate)) {
-    return false;
+    if (isLikelyStorageOrDirections(candidate)) {
+      return false;
+    }
   }
 
   return (
@@ -765,6 +807,25 @@ function extractIngredientTextWithoutHeading(
     return null;
   }
 
+  // The first line naming an ingredient is not always where the list
+  // starts. On a carton with no heading, the product description runs into
+  // it — "Gluten-free oat drink / with added calcium. / Water, oats 11%,
+  // ..." — and "with added calcium." matches on the word calcium alone,
+  // dragging a sentence fragment into the stored list and shifting every
+  // ingredient's position by one.
+  //
+  // A line that ends a sentence and holds no separator is prose, not the
+  // first item of a list, so the list starts at the next candidate line.
+  // A bare "Aqua" opening a cosmetic list has no full stop and is left
+  // exactly where it is.
+  while (
+    startIndex + 1 < lines.length &&
+    /\.$/.test(lines[startIndex]) &&
+    !/[,;]/.test(lines[startIndex])
+  ) {
+    startIndex += 1;
+  }
+
   const tail: string[] = [];
 
   for (const line of lines.slice(startIndex)) {
@@ -790,21 +851,16 @@ function extractIngredientTextWithoutHeading(
     return null;
   }
 
-  // Only reject when the block really behaves like a nutrition table.
-  // Counting vocabulary alone rejected valid ingredient lists.
-  if (looksLikeNutritionTable(candidate)) {
-    return null;
-  }
-
-  if (isLikelyMarketingClaim(candidate)) {
-    return null;
-  }
-
-  if (isLikelyStorageOrDirections(candidate)) {
-    return null;
-  }
-
   if (candidate.length < 12) {
+    return null;
+  }
+
+  // The same test the heading path applies, and now literally the same
+  // code: this used to carry its own copy of the nutrition-table, claim and
+  // storage vetoes, so the gluten-free-oat-drink bug had to be fixed in two
+  // places or it would only be half fixed — a label with a heading scored,
+  // the identical label without one did not.
+  if (!looksLikeRealIngredientBlock(candidate)) {
     return null;
   }
 
