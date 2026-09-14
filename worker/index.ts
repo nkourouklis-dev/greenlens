@@ -11,6 +11,11 @@ import {
 } from "./analysis";
 import { isAllowedOrigin } from "./cors";
 import {
+  listScanFailures,
+  recordScanFailure,
+  type ScanFailureRow,
+} from "./scanFailures";
+import {
   classifyAllergenFindings,
   withoutAllergenOnlyItems,
   type AllergenNotice,
@@ -226,6 +231,7 @@ type JsonBody =
       status: "ok";
       service: "greenlens-ocr";
     }
+  | { failures: ScanFailureRow[] }
   | {
       answer: string;
     }
@@ -1214,6 +1220,13 @@ async function runAdminRequest(
     );
   }
 
+  if (
+    request.method === "GET" &&
+    url.pathname === "/api/admin/scan-failures"
+  ) {
+    return runAdminListScanFailures(url, env, origin, requestId);
+  }
+
   const rescoreBarcode = matchAdminProductRescorePath(
     url.pathname,
   );
@@ -2004,6 +2017,37 @@ async function runAdminDeleteProduct(
  * categories now score deterministically from text, so both can simply be
  * recomputed.
  */
+async function runAdminListScanFailures(
+  url: URL,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  try {
+    const failures = await listScanFailures(
+      env.DB,
+      Number(url.searchParams.get("limit") ?? 50),
+    );
+
+    return json({ failures }, 200, origin, requestId);
+  } catch (caughtError) {
+    console.error("admin_scan_failures_list_failed", {
+      requestId,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Η λίστα αποτυχιών δεν φορτώθηκε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
 async function runAdminRescoreProduct(
   barcode: string,
   env: Env,
@@ -3195,6 +3239,19 @@ async function runAnalysis(
         requestId,
       );
     default:
+      // The classifier could not tell what this label even is, which is the
+      // most opaque failure of all from the user's side — and the one most
+      // worth having the text of.
+      await recordScanFailure(env.DB, {
+        barcode: requestBody.barcode || null,
+        contentCategory: "unknown",
+        labelType: null,
+        reasons: ["Δεν αναγνωρίστηκε ο τύπος περιεχομένου της ετικέτας."],
+        sourceText: confirmedText,
+        ocrConfidence: requestBody.ocrConfidence,
+        requestId,
+      });
+
       return unknownCategoryResponse(origin, requestId);
   }
 }
@@ -3524,16 +3581,30 @@ async function analyzeIngredientsCore(
       },
     );
 
+    const userReasons = extraction.isValid
+      ? [
+          "Δεν εντοπίστηκε ένδειξη «Συστατικά» στο κείμενο — η ανάγνωση μπορεί να είναι αβέβαιη. Ξαναφωτογράφισε την πίσω πλευρά της συσκευασίας.",
+        ]
+      : [
+          "Δεν εντοπίστηκε λίστα συστατικών σε αυτή τη φωτογραφία. Ξαναφωτογράφισε την πίσω πλευρά της συσκευασίας.",
+        ];
+
+    // The text is the point: a reason says a photo failed, the text says
+    // why, and it is what a regression test needs. See scanFailures.ts.
+    await recordScanFailure(env.DB, {
+      barcode: barcode || null,
+      contentCategory: "ingredients",
+      labelType: ocrLabelType,
+      reasons: [...userReasons, ...gate.reasons],
+      sourceText: confirmedText,
+      ocrConfidence,
+      requestId,
+    });
+
     return {
       ok: false,
       kind: "insufficient",
-      reasons: extraction.isValid
-        ? [
-            "Δεν εντοπίστηκε ένδειξη «Συστατικά» στο κείμενο — η ανάγνωση μπορεί να είναι αβέβαιη. Ξαναφωτογράφισε την πίσω πλευρά της συσκευασίας.",
-          ]
-        : [
-            "Δεν εντοπίστηκε λίστα συστατικών σε αυτή τη φωτογραφία. Ξαναφωτογράφισε την πίσω πλευρά της συσκευασίας.",
-          ],
+      reasons: userReasons,
     };
   }
 
@@ -3931,6 +4002,16 @@ async function analyzeNutritionCore(
       ocrConfidence,
     });
 
+    await recordScanFailure(env.DB, {
+      barcode: barcode || null,
+      contentCategory: "nutrition",
+      labelType: null,
+      reasons: gate.reasons,
+      sourceText: confirmedText,
+      ocrConfidence,
+      requestId,
+    });
+
     return {
       ok: false,
       kind: "insufficient",
@@ -4201,6 +4282,16 @@ async function runChemicalAnalysisPath(
       gateReasons: gate.reasons,
       textLength: confirmedText.length,
       ocrConfidence,
+    });
+
+    await recordScanFailure(env.DB, {
+      barcode: null,
+      contentCategory: "chemical_composition",
+      labelType: null,
+      reasons: gate.reasons,
+      sourceText: confirmedText,
+      ocrConfidence,
+      requestId,
     });
 
     return chemicalInsufficientResponse(

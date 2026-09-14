@@ -15,6 +15,9 @@ const IngredientsReview = lazy(() => import("./pages/IngredientsReview"));
 const AnalysisRun = lazy(() => import("./pages/AnalysisRun"));
 const AdminCapture = lazy(() => import("./pages/AdminCapture"));
 const AdminProducts = lazy(() => import("./pages/AdminProducts"));
+const AdminScanFailures = lazy(
+  () => import("./pages/AdminScanFailures"),
+);
 const AdminProductDetail = lazy(
   () => import("./pages/AdminProductDetail"),
 );
@@ -49,6 +52,10 @@ export default function App() {
               <Route path="/history" element={<History />} />
               <Route path="/admin/capture" element={<AdminCapture />} />
               <Route path="/admin" element={<AdminProducts />} />
+              <Route
+                path="/admin/scan-failures"
+                element={<AdminScanFailures />}
+              />
               <Route
                 path="/admin/products"
                 element={<AdminProducts />}

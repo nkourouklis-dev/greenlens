@@ -63,6 +63,54 @@ async function parseErrorMessage(
   return fallback;
 }
 
+export interface AdminScanFailure {
+  id: number;
+  barcode: string | null;
+  contentCategory: string;
+  labelType: string | null;
+  reasons: string[];
+  sourceText: string;
+  ocrConfidence: number | null;
+  requestId: string | null;
+  createdAt: string;
+}
+
+/** Every scan the app refused to score, newest first. */
+export async function listAdminScanFailures(
+  limit = 50,
+): Promise<AdminScanFailure[]> {
+  if (apiConfigurationError) {
+    throw new UserFacingError(apiConfigurationError);
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(
+      `${apiBaseUrl}/api/admin/scan-failures?limit=${limit}`,
+      { headers: authHeaders() },
+    );
+  } catch {
+    throw new UserFacingError(
+      "Δεν ήταν δυνατή η σύνδεση με την υπηρεσία.",
+    );
+  }
+
+  if (!response.ok) {
+    throw new UserFacingError(
+      await parseErrorMessage(response, "Η λίστα αποτυχιών δεν φορτώθηκε."),
+    );
+  }
+
+  const body: unknown = await response.json().catch(() => null);
+
+  return body &&
+    typeof body === "object" &&
+    Array.isArray((body as { failures?: unknown }).failures)
+    ? (body as { failures: AdminScanFailure[] }).failures
+    : [];
+}
+
 export async function listAdminProducts(options: {
   status?: string;
   search?: string;

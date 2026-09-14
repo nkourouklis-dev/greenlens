@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Camera, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  AlertTriangle,
+  Camera,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import AdminGate from "../components/AdminGate";
 import AdminPhotoThumbnail from "../components/AdminPhotoThumbnail";
 import { AssistantReportPanel } from "../components/AdminAssistantPanel";
@@ -116,6 +121,18 @@ function AdminProductsContent() {
             Λήψη
           </button>
         </div>
+
+        {/* The refusals log, kept beside the catalogue rather than buried:
+            a scan the app would not score is the one thing the catalogue
+            cannot show you, because it never became a product. */}
+        <button
+          type="button"
+          onClick={() => navigate("/admin/scan-failures")}
+          className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-line text-sm font-semibold text-ink-muted"
+        >
+          <AlertTriangle size={15} />
+          Αποτυχίες σάρωσης
+        </button>
 
         <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
           {STATUS_OPTIONS.map((option) => (
