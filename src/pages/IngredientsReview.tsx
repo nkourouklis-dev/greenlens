@@ -141,7 +141,20 @@ export default function IngredientsReview() {
 
   const [categoryOverride, setCategoryOverride] = useState<
     ContentCategory | undefined
-  >(() => draft?.categoryOverride);
+  >(() => {
+    if (draft?.categoryOverride) {
+      return draft.categoryOverride;
+    }
+
+    // A label carrying both a list and a table scores best as ingredients:
+    // that path reads the table too (worker/nutritionPanel.ts) and judges
+    // sugar and salt from the printed quantities, while still charging for
+    // palm oil, sweeteners, parabens and the rest. The nutrition path sees
+    // only the numbers, so letting a mixed label fall there silently throws
+    // away half the verdict. Preselected, not forced — the dropdown below
+    // still overrides it.
+    return draft?.result.labelType === "mixed" ? "ingredients" : undefined;
+  });
 
   function selectCategory(
     value: "auto" | Exclude<ContentCategory, "unknown">,
@@ -394,6 +407,19 @@ export default function IngredientsReview() {
               </option>
             ))}
           </select>
+          {/* Preselected above for a mixed label. Said out loud, because a
+              value the user did not choose should not look like one they
+              did — and because "why is Συστατικά picked when I photographed
+              a table?" has an answer worth giving. */}
+          {ocrDraft.result.labelType === "mixed" &&
+            categoryOverride === "ingredients" && (
+              <p className="mt-1 text-xs text-ink-faintest">
+                Η ετικέτα έχει και λίστα συστατικών και διατροφικό πίνακα.
+                Ως «Συστατικά» βαθμολογούνται και τα δύο — τα σάκχαρα και το
+                αλάτι από τις ποσότητες του πίνακα, τα υπόλοιπα από τη λίστα.
+              </p>
+            )}
+
           {!categoryOverride && detectedCategory !== "unknown" && (
             <p className="mt-1 text-xs text-ink-faintest">
               Εντοπίστηκε αυτόματα ως:{" "}

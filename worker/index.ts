@@ -67,6 +67,7 @@ import {
   type AdminProductDetail,
 } from "./adminProducts";
 import {
+  rescoreChemicalResult,
   rescoreIngredientsResult,
   rescoreNutritionResult,
   syncEnvelopeScoreMentions,
@@ -2105,6 +2106,33 @@ async function runAdminRescoreProduct(
         ...syncEnvelopeScoreMentions(stored, score),
         score,
         nutritionInsights: rescored.nutritionInsights,
+        executiveSummary: rescored.executiveSummary,
+      };
+    } else if (stored.contentCategory === "chemical_composition") {
+      const core = parseChemicalAnalysis(raw);
+
+      if (!core) {
+        return error(
+          "Η αποθηκευμένη ανάλυση δεν έχει έγκυρη μορφή.",
+          422,
+          origin,
+          requestId,
+        );
+      }
+
+      const rescored = await rescoreChemicalResult(
+        env.DB,
+        core,
+        sourceText,
+      );
+
+      score = rescored.score;
+
+      envelope = {
+        ...syncEnvelopeScoreMentions(stored, score),
+        sourceText: rescored.sourceText,
+        score,
+        chemicalInsights: rescored.chemicalInsights,
         executiveSummary: rescored.executiveSummary,
       };
     } else {

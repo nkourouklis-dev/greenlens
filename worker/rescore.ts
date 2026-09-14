@@ -36,6 +36,13 @@ import {
   type NutritionInsight,
 } from "./nutritionInsights";
 import type { WorkerNutritionResult } from "./nutritionAnalysis";
+import { scoreChemicalComposition } from "./chemicalScoring";
+import {
+  buildChemicalExecutiveSummary,
+  buildChemicalInsights,
+  type ChemicalInsight,
+} from "./chemicalInsights";
+import type { WorkerChemicalResult } from "./chemicalAnalysis";
 import type { ExecutiveSummary } from "./ingredientInsights";
 
 /**
@@ -282,5 +289,46 @@ export async function rescoreNutritionResult(
     // every card's scoreImpact is read out of score.deductions.
     nutritionInsights: buildNutritionInsights(result, score),
     executiveSummary: buildNutritionExecutiveSummary(result, score),
+  };
+}
+
+/**
+ * The chemical-composition counterpart. Same shape as the ingredients one —
+ * a chemical label is a list of substances and scores through the same
+ * curated rule table — so it needs D1 for the rules, and the text is cleaned
+ * first for the same reason: a scan cleans before scoring, and a recompute
+ * that did not would disagree with it.
+ */
+export async function rescoreChemicalResult(
+  db: D1Like,
+  result: WorkerChemicalResult,
+  sourceText: string,
+): Promise<{
+  score: WorkerScore;
+  chemicalInsights: ChemicalInsight[];
+  executiveSummary: ExecutiveSummary;
+  sourceText: string;
+}> {
+  const cleanedText = cleanIngredientText(sourceText);
+
+  const ruleSet = await loadScoringRules(db);
+
+  const ruleMatches = matchScoringRules(cleanedText, ruleSet);
+
+  const score = scoreChemicalComposition(
+    cleanedText,
+    HUMAN_VERIFIED_CONFIDENCE,
+    result,
+    {
+      extractionConfidence: HUMAN_VERIFIED_CONFIDENCE,
+      ruleMatches,
+    },
+  );
+
+  return {
+    score,
+    chemicalInsights: buildChemicalInsights(result, score),
+    executiveSummary: buildChemicalExecutiveSummary(result, score),
+    sourceText: cleanedText,
   };
 }

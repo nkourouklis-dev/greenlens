@@ -187,11 +187,37 @@ export async function prepareImageForOcr(
   );
 }
 
+/**
+ * A photo an iPhone saved in Apple's own format.
+ *
+ * Safari decodes these because iOS does, and picking a photo there usually
+ * hands over a JPEG anyway — so this only bites on the desktop path added
+ * for working at a computer: a .heic copied off a phone, opened in Chrome,
+ * which has no decoder for it and fails with nothing to act on.
+ *
+ * Checked by extension as well as type because the file picker often
+ * reports an empty type for HEIC.
+ */
+function isAppleImageFormat(file: File): boolean {
+  return (
+    /^image\/hei[cf]/i.test(file.type) ||
+    /\.hei[cf]$/i.test(file.name)
+  );
+}
+
 async function resizeImage(
   file: File,
   maximumSize: number,
   quality: number,
 ): Promise<string> {
+  // Caught before the decode rather than after, so the message can say what
+  // to do instead of only that something went wrong.
+  if (isAppleImageFormat(file)) {
+    throw new Error(
+      "Η φωτογραφία είναι σε μορφή HEIC, που δεν διαβάζεται σε αυτόν τον browser. Τράβηξέ την μέσα από την εφαρμογή, ή στο iPhone: Ρυθμίσεις → Κάμερα → Μορφές → «Μέγιστη συμβατότητα».",
+    );
+  }
+
   const sourceUrl =
     URL.createObjectURL(file);
 
