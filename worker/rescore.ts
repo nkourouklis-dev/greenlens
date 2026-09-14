@@ -29,6 +29,14 @@ import {
 import { scoreInterpretation, type WorkerScore } from "./scoring";
 import type { NutritionPanel } from "./nutritionPanel";
 import { cleanIngredientText } from "./ingredientText";
+import { scoreNutrition } from "./nutritionScoring";
+import {
+  buildNutritionExecutiveSummary,
+  buildNutritionInsights,
+  type NutritionInsight,
+} from "./nutritionInsights";
+import type { WorkerNutritionResult } from "./nutritionAnalysis";
+import type { ExecutiveSummary } from "./ingredientInsights";
 
 /**
  * A verified row's text was read and corrected by a human, so the OCR and
@@ -239,5 +247,40 @@ export function syncEnvelopeScoreMentions(
       highlights: syncList(summary.highlights),
       watchOutFor: syncList(summary.watchOutFor),
     },
+  };
+}
+
+/**
+ * The nutrition equivalent of rescoreIngredientsResult: a fresh score for an
+ * already-analyzed nutrition row, from the panel text it was scored from,
+ * with no OCR and no model call.
+ *
+ * This had no equivalent until the nutrition path started persisting
+ * `sourceText`, which is why a nutrition row whose numbers came back wrong
+ * could only be fixed by re-running the whole analysis. The quantities are
+ * read deterministically (nutritionPanel.ts, via scoreNutrition), so the
+ * recompute reproduces exactly what a scan of the same text produces.
+ */
+export async function rescoreNutritionResult(
+  result: WorkerNutritionResult,
+  sourceText: string,
+): Promise<{
+  score: WorkerScore;
+  nutritionInsights: NutritionInsight[];
+  executiveSummary: ExecutiveSummary;
+}> {
+  const score = scoreNutrition(
+    sourceText,
+    HUMAN_VERIFIED_CONFIDENCE,
+    result,
+    { extractionConfidence: HUMAN_VERIFIED_CONFIDENCE },
+  );
+
+  return {
+    score,
+    // Rebuilt beside the score for the same reason the ingredient cards are:
+    // every card's scoreImpact is read out of score.deductions.
+    nutritionInsights: buildNutritionInsights(result, score),
+    executiveSummary: buildNutritionExecutiveSummary(result, score),
   };
 }

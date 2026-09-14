@@ -233,6 +233,49 @@ export async function deleteAdminPhoto(
     : [];
 }
 
+/**
+ * Recomputes the stored score from the stored label text — no OCR, no model
+ * call. Distinct from analyzeAdminProduct, which re-reads the photograph.
+ */
+export async function rescoreAdminProduct(
+  barcode: string,
+): Promise<AdminProductDetail> {
+  if (apiConfigurationError) {
+    throw new UserFacingError(apiConfigurationError);
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(
+      `${apiBaseUrl}/api/admin/products/${encodeURIComponent(barcode)}/rescore`,
+      { method: "POST", headers: authHeaders() },
+    );
+  } catch {
+    throw new UserFacingError(
+      "Δεν ήταν δυνατή η σύνδεση με την υπηρεσία.",
+    );
+  }
+
+  if (!response.ok) {
+    throw new UserFacingError(
+      await parseErrorMessage(response, "Ο επανυπολογισμός απέτυχε."),
+    );
+  }
+
+  const body: unknown = await response.json();
+
+  if (
+    !body ||
+    typeof body !== "object" ||
+    !("product" in body)
+  ) {
+    throw new UserFacingError("Η απάντηση δεν ήταν έγκυρη.");
+  }
+
+  return (body as { product: AdminProductDetail }).product;
+}
+
 export async function deleteAdminProduct(
   barcode: string,
 ): Promise<void> {

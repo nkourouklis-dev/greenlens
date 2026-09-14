@@ -13,6 +13,7 @@ import {
   fetchAdminPhotoBlob,
   getAdminProduct,
   updateAdminProduct,
+  rescoreAdminProduct,
   updateAdminProductName,
   type AdminProductDetail as AdminProductDetailType,
 } from "../services/adminProductsClient";
@@ -252,6 +253,7 @@ function AdminProductDetailContent() {
   const [form, setForm] = useState<FormState | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState("");
+  const [isRescoring, setIsRescoring] = useState(false);
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -477,6 +479,28 @@ function AdminProductDetailContent() {
     );
   }
 
+  // Recompute from the stored text: no OCR, no model, so it is cheap enough
+  // to press freely and it cannot change anything but the arithmetic.
+  async function handleRescore() {
+    setIsRescoring(true);
+    setAnalyzeError("");
+
+    try {
+      const updated = await rescoreAdminProduct(barcode);
+
+      setProduct(updated);
+      setForm(buildFormState(updated.analysisResult));
+    } catch (caughtError) {
+      setAnalyzeError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Ο επανυπολογισμός απέτυχε.",
+      );
+    } finally {
+      setIsRescoring(false);
+    }
+  }
+
   const analysisCategory = isRecord(product.analysisResult)
     ? product.analysisResult.contentCategory
     : null;
@@ -677,6 +701,17 @@ function AdminProductDetailContent() {
                 {analyzeError}
               </p>
             )}
+
+            <button
+              type="button"
+              onClick={() => void handleRescore()}
+              disabled={isRescoring || isAnalyzing}
+              className="mt-3 h-12 w-full rounded-xl border border-line px-4 text-sm font-semibold text-ink transition active:scale-[0.98] disabled:cursor-not-allowed disabled:text-ink-faint"
+            >
+              {isRescoring
+                ? "Επανυπολογισμός..."
+                : "Επανυπολογισμός βαθμολογίας (χωρίς νέα ανάγνωση)"}
+            </button>
 
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
               <button

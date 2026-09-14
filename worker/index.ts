@@ -63,6 +63,7 @@ import {
 } from "./adminProducts";
 import {
   rescoreIngredientsResult,
+  rescoreNutritionResult,
   syncEnvelopeScoreMentions,
 } from "./rescore";
 import {
@@ -93,6 +94,7 @@ import {
   extractIngredientText,
 } from "./ingredientText";
 import {
+  parseNutritionPanel,
   readNutritionPanel,
   type NutritionPanel,
 } from "./nutritionPanel";
@@ -640,6 +642,36 @@ function matchAdminProductPath(
 }
 
 // Matches /api/admin/products/<barcode>/analyze.
+/**
+ * /api/admin/products/{barcode}/rescore — recompute the stored score from
+ * the stored label text, with no OCR and no model call. Distinct from
+ * .../analyze, which re-reads the photograph and replaces the analysis.
+ */
+function matchAdminProductRescorePath(
+  pathname: string,
+): string | null {
+  const segments = pathname.split("/");
+
+  const matches =
+    segments.length === 6 &&
+    segments[0] === "" &&
+    segments[1] === "api" &&
+    segments[2] === "admin" &&
+    segments[3] === "products" &&
+    segments[4].length > 0 &&
+    segments[5] === "rescore";
+
+  if (!matches) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(segments[4]);
+  } catch {
+    return null;
+  }
+}
+
 function matchAdminProductAnalyzePath(
   pathname: string,
 ): string | null {
@@ -1176,6 +1208,19 @@ async function runAdminRequest(
   ) {
     return runAdminListProducts(
       url,
+      env,
+      origin,
+      requestId,
+    );
+  }
+
+  const rescoreBarcode = matchAdminProductRescorePath(
+    url.pathname,
+  );
+
+  if (rescoreBarcode !== null && request.method === "POST") {
+    return runAdminRescoreProduct(
+      rescoreBarcode,
       env,
       origin,
       requestId,
@@ -1950,6 +1995,150 @@ async function runAdminDeleteProduct(
  * back to the ingredients photo, because many packs print the ingredient
  * list and the nutrition table in the one panel that got photographed.
  */
+/**
+ * Recomputes a stored score from the stored label text — no OCR, no model.
+ *
+ * The PIM's edit form covers ingredients only, so a nutrition row whose
+ * numbers came back wrong had no cheap way back: the only repair was a full
+ * re-analysis, which re-reads the photograph and replaces everything. Both
+ * categories now score deterministically from text, so both can simply be
+ * recomputed.
+ */
+async function runAdminRescoreProduct(
+  barcode: string,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const product = await getAdminProduct(env.DB, barcode);
+
+  if (!product || !isRecord(product.analysisResult)) {
+    return error(
+      "Το προϊόν δεν έχει ανάλυση για επανυπολογισμό.",
+      404,
+      origin,
+      requestId,
+    );
+  }
+
+  const stored = product.analysisResult;
+
+  const sourceText =
+    typeof stored.sourceText === "string" ? stored.sourceText : "";
+
+  if (sourceText.trim().length === 0) {
+    return error(
+      "Η γραμμή δεν έχει αποθηκευμένο κείμενο — χρειάζεται «Ανάλυση ξανά».",
+      422,
+      origin,
+      requestId,
+    );
+  }
+
+  const raw = JSON.stringify(stored);
+
+  try {
+    let envelope: Record<string, unknown>;
+    let score: WorkerScore;
+
+    if (stored.contentCategory === "nutrition") {
+      const core = parseNutritionAnalysis(raw);
+
+      if (!core) {
+        return error(
+          "Η αποθηκευμένη ανάλυση δεν έχει έγκυρη μορφή.",
+          422,
+          origin,
+          requestId,
+        );
+      }
+
+      const rescored = await rescoreNutritionResult(core, sourceText);
+
+      score = rescored.score;
+
+      envelope = {
+        ...syncEnvelopeScoreMentions(stored, score),
+        score,
+        nutritionInsights: rescored.nutritionInsights,
+        executiveSummary: rescored.executiveSummary,
+      };
+    } else {
+      const core = parseAnalysis(raw);
+
+      if (!core) {
+        return error(
+          "Η αποθηκευμένη ανάλυση δεν έχει έγκυρη μορφή.",
+          422,
+          origin,
+          requestId,
+        );
+      }
+
+      const rescored = await rescoreIngredientsResult(
+        env.DB,
+        core,
+        sourceText,
+        parseNutritionPanel(stored.nutritionPanel),
+      );
+
+      score = rescored.score;
+
+      envelope = {
+        ...syncEnvelopeScoreMentions(stored, score),
+        sourceText: rescored.sourceText,
+        score,
+        ingredientInsights: rescored.ingredientInsights,
+      };
+    }
+
+    console.log("admin_product_rescored_in_place", {
+      requestId,
+      barcode,
+      category: product.category,
+      score: score.score,
+      band: score.band,
+    });
+
+    await saveVerifiedProduct(env.DB, {
+      barcode,
+      category: product.category ?? undefined,
+      analysisResult: envelope,
+    });
+
+    const updated = await getAdminProduct(env.DB, barcode);
+
+    if (updated) {
+      await recordProductVersion(env.DB, {
+        barcode,
+        source: "admin_edit",
+        productName: updated.productName,
+        category: updated.category,
+        analysisResult: updated.analysisResult,
+        applied: true,
+      });
+    }
+
+    return json({ product: updated }, 200, origin, requestId);
+  } catch (caughtError) {
+    console.error("admin_product_rescore_failed", {
+      requestId,
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return error(
+      "Ο επανυπολογισμός απέτυχε.",
+      502,
+      origin,
+      requestId,
+    );
+  }
+}
+
 async function runAdminAnalyzeProduct(
   barcode: string,
   request: Request,
