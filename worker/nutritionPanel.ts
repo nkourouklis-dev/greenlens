@@ -160,6 +160,34 @@ interface PanelValue {
   declared: string;
 }
 
+/**
+ * A line holding nothing but a number — no unit, no percent sign.
+ *
+ * The per-100 column is the one printed first, and it is also the one whose
+ * unit OCR most often drops, because it sits hard against the column rule:
+ * "ΛΙΠΑΡΑ/FAT / 13,7 / 6,8g / 9,7%" is 13,7 g per 100 g and 6,8 g per
+ * 50 g bar. Skipping the unitless value and taking the next one that
+ * carries a "g" silently scored the *portion* as though it were per 100 g —
+ * halving sugars from 33,7 to 16,8 with nothing to show anything was wrong.
+ *
+ * A trailing asterisk is allowed because reference-intake columns carry one,
+ * and those are excluded anyway: they are only ever read as the value
+ * immediately preceding a run of real amounts.
+ */
+const BARE_NUMBER = /^(\d+(?:[.,]\d+)?)\s*\*?$/;
+
+function bareNumberOf(line: string): number | null {
+  const match = BARE_NUMBER.exec(line);
+
+  if (!match) {
+    return null;
+  }
+
+  const value = Number(match[1].replace(",", "."));
+
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
 function readPanelValues(rawText: string): {
   values: Map<PanelKey, PanelValue>;
   energyKcal: number | null;
@@ -170,6 +198,10 @@ function readPanelValues(rawText: string): {
   let kilojoules: number | null = null;
   let pending: string[] = [];
 
+  // The unitless value on the line immediately above a run of amounts —
+  // the per-100 column whose "g" the OCR dropped. See BARE_NUMBER.
+  let pendingBare: number | null = null;
+
   for (const rawLine of rawText.split(/\r?\n/)) {
     const line = rawLine.trim();
 
@@ -177,9 +209,18 @@ function readPanelValues(rawText: string): {
       continue;
     }
 
+    const bare = bareNumberOf(line);
+
+    if (bare !== null) {
+      pendingBare = bare;
+      continue;
+    }
+
     const { amounts, head } = parseAmounts(line);
 
     if (amounts.length === 0) {
+      pendingBare = null;
+
       if (/\p{L}/u.test(line)) {
         pending.push(line);
       }
@@ -210,6 +251,10 @@ function readPanelValues(rawText: string): {
 
     const key = keyForName(name);
 
+    const bareBefore = pendingBare;
+
+    pendingBare = null;
+
     if (key === null || values.has(key)) {
       continue;
     }
@@ -222,6 +267,16 @@ function readPanelValues(rawText: string): {
       continue;
     }
 
+    // ...unless an even earlier column was printed without its unit, in
+    // which case *that* is the per-100 value and this one is the portion.
+    // Only trusted when it is at least as large, since every per-portion
+    // column on a real label is a fraction of the per-100 one — that keeps
+    // a stray reference-intake percentage from being read as a quantity.
+    const perHundred =
+      bareBefore !== null && bareBefore >= mass.grams
+        ? { grams: bareBefore, declared: `${bareBefore} g` }
+        : { grams: mass.grams, declared: mass.declared };
+
     // Sodium is declared as an alternative to salt, never in addition;
     // EU labelling converts one to the other at this ratio.
     const isSodium = /(sodium|νάτριο|νατριο)/i.test(name);
@@ -229,9 +284,9 @@ function readPanelValues(rawText: string): {
     values.set(key, {
       grams:
         key === "salt" && isSodium
-          ? mass.grams * 2.5
-          : mass.grams,
-      declared: mass.declared,
+          ? perHundred.grams * 2.5
+          : perHundred.grams,
+      declared: perHundred.declared,
     });
   }
 

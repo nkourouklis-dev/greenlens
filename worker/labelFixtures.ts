@@ -33,3 +33,58 @@ export const OAT_DRINK_OCR =
   "Best before: see on top.\n" +
   "Once opened, keep refrigerated\n" +
   "(max. 7 °C) for up to 5 days.";
+
+/**
+ * Nutree date bar (barcode 5214001318704), nutrition panel only. Three
+ * columns — per 100 g, per 50 g bar, %RI — and the OCR dropped the unit off
+ * two of the per-100 g values (13,7, 33.7), which is exactly where a
+ * reader that waits for a g ends up scoring the portion column instead.
+ */
+export const NUTREE_BAR_PANEL_OCR =
+  "ΔΙΑΤΡΟΦΙΚΗ ΔΗΛΩΣΗ / NUTRITIONAL DECLARATION\n" +
+  "Avá / Per\n" +
+  "Avá / Per\n" +
+  "П.П.А./RI .*\n" +
+  "100g\n" +
+  "50g\n" +
+  "ανά μπάρα\n" +
+  "ΕΝΕΡΓΕΙΑΚΗ ΑΞΙΑ /\n" +
+  "1591KJ\n" +
+  "795KJ\n" +
+  "ENERGY\n" +
+  "379kcal\n" +
+  "189kcal\n" +
+  "9,5%\n" +
+  "ΛΙΠΑΡΑ/FAT\n" +
+  "13,7\n" +
+  "6,8g\n" +
+  "9,7%\n" +
+  "ΕΚ ΤΩΝ ΟΠΟΙΩΝ\n" +
+  "ΚΟΡΕΣΜΕΝΑ/\n" +
+  "9,0%\n" +
+  "OF WHICH SATURATED\n" +
+  "3,6g\n" +
+  "1,8g\n" +
+  "ΥΔΑΤΑΝΘΡΑΚΕΣ/\n" +
+  "CARBOHYDRATES\n" +
+  "41.4g\n" +
+  "20,7g\n" +
+  "9,0%\n" +
+  "ΕΚ ΤΩΝ ΟΠΟΙΩΝ ΣΑΚΧΑΡΑ\n" +
+  "OF WHICH SUGARS\n" +
+  "33.7\n" +
+  "16,8g\n" +
+  "18,7°\n" +
+  "ΕΔΩΔΙΜΕΣ ΙΝΕΣ/\n" +
+  "DIETARY FIBER\n" +
+  "9,1g\n" +
+  "4,6g\n" +
+  "19,2%\n" +
+  "ΠΡΩΤΕΪΝΕΣ/PROTEIN\n" +
+  "20,2g\n" +
+  "10,1g\n" +
+  "22,4°\n" +
+  "AMATI/SALT\n" +
+  "0,5g\n" +
+  "0,25g\n" +
+  "3,3%";

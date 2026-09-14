@@ -206,6 +206,18 @@ export function readNutrients(
   return [...readings.values()];
 }
 
+/**
+ * Drops a per-basis the declared amount already carries, so the explanation
+ * below does not read "8g ανά 100g ανά 100 g". Amounts copied from a model's
+ * output often include it; ones read off the table by nutritionPanel.ts
+ * never do.
+ */
+function withoutPerBasis(declared: string): string {
+  return declared
+    .replace(/\s*(αν[άα]|per)\s*\d+\s*(g|gr|γρ|ml)\b.*$/iu, "")
+    .trim();
+}
+
 export function penaltiesFor(
   readings: NutrientReading[],
   isBeverage: boolean,
@@ -239,7 +251,7 @@ export function penaltiesFor(
       key: reading.key,
       points: band.points,
       title: band.label,
-      explanation: `${reading.declared} ανά ${isBeverage ? "100 ml" : "100 g"}`,
+      explanation: `${withoutPerBasis(reading.declared)} ανά ${isBeverage ? "100 ml" : "100 g"}`,
     });
   }
 

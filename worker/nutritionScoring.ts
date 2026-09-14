@@ -13,6 +13,7 @@ import {
   isBeverageTable,
   readNutrients,
 } from "./nutritionThresholds";
+import { readNutritionPanel } from "./nutritionPanel";
 import type { WorkerNutritionResult } from "./nutritionAnalysis";
 
 const MIN_TEXT_LENGTH = 15;
@@ -72,8 +73,23 @@ export function scoreNutrition(
     (finding) => !isAllergenDeclarationOnly(finding, finding.nutrient),
   );
 
-  const readings = readNutrients(scorableFindings);
-  const isBeverage = isBeverageTable(text);
+  // Read the panel text directly first. The model is asked to copy each
+  // amount "exactly as printed" and does not: on a real date bar it
+  // returned 8g of sugar for a label reading 33,7g, 5g of salt for 0,5g and
+  // 2g of protein for 20,2g — every digit-dropping error in a different
+  // direction, and the score built on them was wrong in both directions at
+  // once. The deterministic reader (nutritionPanel.ts) parses the same text
+  // and cross-checks the result against the declared energy before a single
+  // point is charged.
+  //
+  // Its amounts fall back to the model's only when it cannot read the table
+  // at all, so nothing that scores today stops scoring.
+  const panel = readNutritionPanel(text);
+
+  const readings =
+    panel?.readings ?? readNutrients(scorableFindings);
+
+  const isBeverage = panel?.isBeverage ?? isBeverageTable(text);
 
   const thresholdDeductions = deductionsFromThresholds(
     readings,
