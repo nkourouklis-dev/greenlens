@@ -88,3 +88,24 @@ export const NUTREE_BAR_PANEL_OCR =
   "0,5g\n" +
   "0,25g\n" +
   "3,3%";
+
+/**
+ * Kaiser pilsner 500 ml can (barcode 5201309103033): ingredient list and a
+ * per-100 ml nutrition table on the same panel, with the strength printed
+ * as "ALC. 5,2%". Exactly as Azure returned it, including the misread
+ * protein ("40,5g" — the can says 0,5 g) and a stray "500mle".
+ *
+ * Scored 100 as ingredients (the table failed an energy check that did not
+ * count alcohol, so it was silently dropped) and 74 as nutrition (from the
+ * model's copy of the table, which read 0,5 g of sugar as 5 g).
+ */
+export const KAISER_PILSNER_OCR =
+  "ΠΟΙΚΙΛΙΕΣ\nΛΥΚΙΣΚΟΥ\nΕΙΔΗ\nΚΡΙΘΑΡΙΟΥ\nT\n3-6℃\nΚΥΡΙΑΡΧΟΣ\nΑΡΩΜΑΤΙΚΟΣ\nΙΔΑΝΙΚΗ\nΘΕΡΜΟΚΡΑΣΙΑ\nΛΥΚΙΣΚΟΣ\nTRADITION\nΜΠΥΡΑ PILSNER. ΠΑΡΑΓΕΤΑΙ ΚΑΙ ΣΥΣΚΕΥΑΖΕΤΑΙ ΑΠΟ ΤΗΝ\nΟΛΥΜΠΙΑΚΗ ΖΥΘΟΠΟΙΙΑ Α.Ε., 70° ΧΛΜ. Ν.Ε.Ο. ΑΘΗΝΩΝ-ΛΑΜΙΑΣ,\nΡΙΤΣΩΝΑ ΕΥΒΟΙΑΣ, Τ.Κ .: 32009, ΕΛΛΑΔΑ. ΣΥΣΤΑΤΙΚΑ: ΝΕΡΟ, ΒΥΝΗ\nΚΡΙΘΑΡΙΟΥ, ΛΥΚΙΣΚΟΣ, ΜΑΓΙΑ. ΠΡΟΣΤΑΤΕΨΤΕ ΤΟ ΠΕΡΙΒΑΛΛΟΝ.\nΜΗΝ ΠΕΤΑΤΕ ΤΑ ΑΔΕΙΑ ΚΟΥΤΙΑ ΟΠΟΥΔΗΠΟΤΕ. KEEP THE ENVIRON-\nMENT CLEAN. PLEASE DO NOT LITTER. ΓΡΑΜΜΗ ΚΑΤΑΝΑΛΩΤΩΝ:\nSCAN FOR ME\nΔΙΑΤΡΟΦΙΚΗ ΔΗΛΩΣΗ ΑΝΑ 100ml\nΑΠΟΛΑΥΣΤΕ ΥΠΕΡΙΝΑ\nΕΝΕΡΓΕΙΑ:\n172KJ/\n41kcal\nΛΙΠΑΡΑ:\n0g\nΕΚ ΤΩΝ ΟΠΟΙΩΝ ΚΟΡΕΣΜΕΝΑ:\n0g\nΥΔΑΤΑΝΘΡΑΚΕΣ:\n2,8g\n500mle\nΕΚ ΤΩΝ ΟΠΟΙΩΝ ΣΑΚΧΑΡΑ:\n0,5g\nΠΡΩΤΕΪΝΕΣ:\n40,5g\nΑΛΑΤΙ:\n0g\nALC. 5,2%\nΤΟ ΤΕΛΟΣ: ΒΛΕΠΕΤΕ ΒΑΣΗ ΚΟΥΤΙΟΥ.\n5 201309 103033 >";
+
+/**
+ * Kri Kri High Protein Super Spoon (barcode 5202234632322): Azure interleaved
+ * the bilingual ingredient list with the nutrition table, so the protein row
+ * name arrives at the end of a line of ingredients that also says "sugar".
+ */
+export const KRI_KRI_INTERLEAVED_OCR =
+  "nn!\nΕπιδόρπιο στραγγιστού γιαουρτιού με μπανάνα, κομμάτια μαύρης\nΔΙΑΤΡΟΦΙΚΗ ΕΠΙΣΗΜΑΝΣΗ / NUTRITION D\nΤΙ\nσοκολάτας και βρώμη. Συστατικά: Στραγγιστό γιαούρτι 0% λιπαρών\nης\n(86%) (Συμπυκνωμένο και φρέσκο αποβουτυρωμένο γάλα αγελάδος,\nανά/\nκαλλιέργεια γιαούρτης), νερό, ζάχαρη, πουρές μπανάνας (1.3%),\nper 100g\nκομμάτια μαύρης σοκολάτας (κακαόμαζα, βούτυρο κακάο, ζάχαρη) (1%),\nΕνέργεια/Energy\n340KJ/80kcal\nκομμάτια κέικ [αυγό, αλεύρι σίτου (γλουτένη), άμυλο σίτου (γλουτένη), Λιπαρά/Fat\n0.8g\nr\nάμυλο καλαμποκιού, αλάτι] (0.6%), πίτουρο βρώμης (0.2%), άμυλο\nαραβοσίτου, σταθεροποιητής (πηκτίνη), φυσικές αρωματικές ύλες,\nΕκτων οποίων κορεσμένα/\nεια,\nσυμπυκνωμένος χυμός καρότου, κολοκύθας και λεμονιού. Λιπαρά:\nOf which saturates\n0.4g\nα\n0.8%, Ολικά στερεά: 20% min. Προέλευση γάλακτος: Ε.Ε.\nΥδατάνθρακες/Carbohydrate\n9.4g\nStrained yogurt dessert with banana, dark chocolate splits and oat. Εκτων οποίων σάκχαρα/\nIngredients: Strained Yogurt 0% fat (86%) (Concentrated and fresh skimmed\ncow's milk, yogurt culture), water, sugar, banana puree (1.3%), dark chocolate\nOf which sugars\n7.9g\nsplits (cocoa mass, cocoa butter, sugar) (1%), cake (egg, wheat flour Πρωτεΐνες/Protein\n8.8g\n(gluten), wheat starch (gluten), maize starch, salt) (0.6%), oat bran (0.2%),\nΑλάτι/Salt\n0.13g\nmaize starch, stabilizer (pectin), natural flavourings, carrot, pumpkin and\nlemon juice concentrate. Fat: 0.8%, Total Solids: 20% min. Milk origin: E.U.\nιμή Επικοινωνίας\nGR\n45.883\n-ΧΩΡΙΣ ΧΡΕΩΣΗ-\nEC\n0 300 3233\nΠαράγεται και συσκευάζεται στην Ελλάδα/\nProduced and packed in Greece\n5\n202234\n632322";

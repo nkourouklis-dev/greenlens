@@ -1,3 +1,9 @@
+import {
+  alcoholDeduction,
+  alcoholNotice,
+  type AlcoholInfo,
+  type ScoreNotice,
+} from "./alcohol";
 import type { WorkerAnalysisResult } from "./analysis";
 import {
   isAllergenDeclarationOnly,
@@ -11,7 +17,9 @@ import {
   type NutrientReading,
 } from "./nutritionThresholds";
 
-export const scoringVersion = "2026.09.4";
+export const scoringVersion = "2026.09.5";
+
+export type { ScoreNotice } from "./alcohol";
 
 export interface WorkerScore {
   score: number | null;
@@ -49,6 +57,14 @@ export interface WorkerScore {
    */
   lowConfidenceReason: string | null;
   insufficientDataReasons: string[];
+  /**
+   * Context the number alone cannot carry, shown beside the score: that the
+   * product contains alcohol, or that a nutrition table / ingredient list on
+   * the label was not taken into account because it could not be read.
+   * Never changes the score by itself — anything that costs points is a
+   * deduction, where the user can see it.
+   */
+  notices: ScoreNotice[];
   scoringVersion: string;
 }
 
@@ -133,6 +149,7 @@ export function insufficientDataScore(params: {
   lowConfidenceReason: string | null;
   blockingReasons: string[];
   modelReasons: string[];
+  notices?: ScoreNotice[];
 }): WorkerScore {
   return {
     score: null,
@@ -144,6 +161,7 @@ export function insufficientDataScore(params: {
     insufficientDataReasons: Array.from(
       new Set([...params.blockingReasons, ...params.modelReasons]),
     ),
+    notices: params.notices ?? [],
     scoringVersion,
   };
 }
@@ -236,6 +254,44 @@ export function deductionsFromThresholds(
   }));
 }
 
+/**
+ * Adds what the product *is* on top of what it contains: today, the graded
+ * alcohol deduction (see alcohol.ts). Kept worst-first and within the
+ * deduction cap like every other list, and applied by every food path so an
+ * alcoholic drink costs the same whether its label was read as ingredients,
+ * nutrition, or both.
+ */
+export function withContextDeductions(
+  deductions: Deductions,
+  alcohol: AlcoholInfo | null | undefined,
+): Deductions {
+  const alcoholCharge = alcoholDeduction(alcohol ?? null);
+
+  if (!alcoholCharge) {
+    return deductions;
+  }
+
+  return [alcoholCharge, ...deductions]
+    .sort((left, right) => right.points - left.points)
+    .slice(0, MAX_DEDUCTIONS);
+}
+
+/** Caller-supplied notices plus the alcohol note, without duplicates. */
+export function noticesFor(
+  notices: ScoreNotice[] | undefined,
+  alcohol: AlcoholInfo | null | undefined,
+): ScoreNotice[] {
+  const all = [...(notices ?? [])];
+
+  const alcoholNote = alcoholNotice(alcohol ?? null);
+
+  if (alcoholNote && !all.some((notice) => notice.code === alcoholNote.code)) {
+    all.unshift(alcoholNote);
+  }
+
+  return all;
+}
+
 export function bandForScore(score: number): WorkerScore["band"] {
   return score >= 85
     ? "excellent"
@@ -272,6 +328,7 @@ export function finalizeScore(params: {
   noProblemsBonusLabel: string;
   confidence: number;
   lowConfidenceReason: string | null;
+  notices?: ScoreNotice[];
 }): WorkerScore {
   const { deductions } = params;
 
@@ -312,6 +369,7 @@ export function finalizeScore(params: {
     confidence: params.confidence,
     lowConfidenceReason: params.lowConfidenceReason,
     insufficientDataReasons: [],
+    notices: params.notices ?? [],
     scoringVersion,
   };
 }
@@ -428,10 +486,16 @@ export function scoreInterpretation(
      * it, or passing null, is exactly today's ingredients-only behaviour.
      */
     nutritionPanel?: NutritionPanel | null;
+    /** The drink's declared alcohol, if it is one (alcohol.ts). */
+    alcohol?: AlcoholInfo | null;
+    /** e.g. "the nutrition table was not taken into account". */
+    notices?: ScoreNotice[];
   },
 ): WorkerScore {
   const lowConfidenceReason =
     options?.lowConfidenceReason ?? null;
+
+  const notices = noticesFor(options?.notices, options?.alcohol);
 
   const confidence = Math.min(
     ocrConfidence,
@@ -454,6 +518,7 @@ export function scoreInterpretation(
       lowConfidenceReason,
       blockingReasons,
       modelReasons: analysis.insufficientDataReasons,
+      notices,
     });
   }
 
@@ -485,7 +550,7 @@ export function scoreInterpretation(
       ? deductionsFromRules(scoredRuleMatches)
       : deductionsFromFindings(analysis);
 
-  const deductions =
+  const listAndTableDeductions =
     panelReadings.length > 0
       ? [
           ...deductionsFromThresholds(
@@ -497,6 +562,11 @@ export function scoreInterpretation(
           .sort((left, right) => right.points - left.points)
           .slice(0, MAX_DEDUCTIONS)
       : ingredientDeductions;
+
+  const deductions = withContextDeductions(
+    listAndTableDeductions,
+    options?.alcohol,
+  );
 
   // Deliberately *not* keyed on potentialAllergens: rewarding the absence of
   // milk/wheat/egg is the same -5 penalty for containing them, just spelled
@@ -515,5 +585,6 @@ export function scoreInterpretation(
     noProblemsBonusLabel: "Δεν εντοπίστηκαν προβληματικά συστατικά",
     confidence,
     lowConfidenceReason,
+    notices,
   });
 }

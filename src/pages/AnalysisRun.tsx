@@ -110,9 +110,12 @@ export default function AnalysisRun() {
     // nutrition/chemical composition text it does not apply — the Worker's
     // own category-specific extraction is the real validator there, so we
     // only require non-empty text client-side.
+    // A merge photo is judged together with the stored analysis on the
+    // Worker, so checking it alone as an ingredient list would be wrong.
     const isAnalyzable =
       text.trim().length > 0 &&
-      (likelyCategory !== "ingredients" ||
+      (item.mergeWithStored === true ||
+        likelyCategory !== "ingredients" ||
         extractIngredientText(text, confidence).isValid);
 
     if (!isAnalyzable) {
@@ -181,6 +184,7 @@ export default function AnalysisRun() {
       ocrTextLength: text.trim().length,
       categoryOverride,
       productTitle: item.productName,
+      ...(item.mergeWithStored ? { mergeWithStored: true } : {}),
     })
       .then((result) => {
         // Guards against any unexpected shape in `result` (a malformed or
@@ -201,6 +205,7 @@ export default function AnalysisRun() {
             normalizedIngredients: ingredients,
             categoryOverride,
             analysis,
+            mergeWithStored: false,
           });
 
           if (!wasSaved) {

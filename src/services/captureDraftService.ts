@@ -12,6 +12,11 @@ export interface OcrDraft {
    * category on the review screen. Undefined means "let the Worker decide".
    */
   categoryOverride?: ContentCategory;
+  /**
+   * History id of the product this photo is being added to ("add the
+   * missing photo"). Its text is merged with that product's analysis.
+   */
+  mergeInto?: string;
 }
 
 export function saveIngredientsDraft(barcode: string, image: string): void {

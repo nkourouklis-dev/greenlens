@@ -2,12 +2,25 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   scoreNutrition,
+  UNREADABLE_TABLE_REASON,
 } from "./nutritionScoring";
 import { scoringVersion } from "./scoring";
 import type { WorkerNutritionResult } from "./nutritionAnalysis";
 
-const validText =
-  "Ενέργεια 450kcal, Πρωτεΐνες 12g, Λιπαρά 20g, Σάκχαρα 30g ανά 100g";
+/**
+ * A solid's table that passes every plausibility check: 4·12 + 4·60 + 9·20
+ * = 468 kcal against 470 declared. 30 g sugars is above the 22,5 g band.
+ */
+const validText = [
+  "Διατροφική δήλωση ανά 100g",
+  "Ενέργεια 1966kJ / 470kcal",
+  "Λιπαρά 20g",
+  "εκ των οποίων κορεσμένα 1g",
+  "Υδατάνθρακες 60g",
+  "εκ των οποίων σάκχαρα 30g",
+  "Πρωτεΐνες 12g",
+  "Αλάτι 0,2g",
+].join("\n");
 
 const base: WorkerNutritionResult = {
   subtype: "human_food",
@@ -32,6 +45,8 @@ const attentionFinding = {
   confidence: 0.9,
 };
 
+const withFinding = { ...base, nutritionFindings: [attentionFinding] };
+
 test("returns null score for empty text", () =>
   assert.equal(scoreNutrition("", 0.9, base).score, null));
 
@@ -42,80 +57,62 @@ test("returns null score without findings", () =>
   assert.equal(scoreNutrition(validText, 0.9, base).score, null));
 
 test("returns null score for very low confidence", () =>
-  assert.equal(
-    scoreNutrition(validText, 0.2, {
-      ...base,
-      nutritionFindings: [attentionFinding],
-    }).score,
-    null,
-  ));
+  assert.equal(scoreNutrition(validText, 0.2, withFinding).score, null));
 
 test("accepts plain text OCR confidence", () =>
-  assert.notEqual(
-    scoreNutrition(validText, 0.5, {
-      ...base,
-      nutritionFindings: [attentionFinding],
-    }).score,
-    null,
-  ));
+  assert.notEqual(scoreNutrition(validText, 0.5, withFinding).score, null));
 
-test("deduplicates identical findings", () =>
-  assert.equal(
-    scoreNutrition(validText, 0.9, {
-      ...base,
-      nutritionFindings: Array(8).fill(attentionFinding),
-    }).deductions.length,
-    1,
-  ));
-
-// A panel repeats the same nutrient across columns (per 100 g and per
-// portion). Scoring reads the per-100 column once, so ten sugar rows are one
-// sugar deduction rather than ten.
-test("collapses repeated rows for one nutrient into a single deduction", () => {
-  const findings = Array.from({ length: 10 }, (_, index) => ({
-    ...attentionFinding,
-    normalizedName: "nutrient" + index,
-  }));
-
-  const deductions = scoreNutrition(validText, 0.9, {
-    ...base,
-    nutritionFindings: findings,
-  }).deductions;
-
-  assert.equal(deductions.length, 1);
-  assert.equal(deductions[0].code, "threshold:sugars");
-});
-
-// The declared number is the same number whether or not the model attached a
-// source to the row, so the score must be too.
-test("scores from the declared amount regardless of evidence type", () => {
-  const withEvidence = scoreNutrition(validText, 0.9, {
-    ...base,
-    nutritionFindings: [attentionFinding],
-  });
-
-  const withoutEvidence = scoreNutrition(validText, 0.9, {
+test("scores from the printed table, not from the model's severities", () => {
+  const result = scoreNutrition(validText, 0.9, {
     ...base,
     nutritionFindings: [
-      { ...attentionFinding, evidenceType: "none" as const },
+      ...Array(8).fill(attentionFinding),
+      { ...attentionFinding, normalizedName: "e621" },
+      { ...attentionFinding, severity: "positive" as const },
     ],
   });
 
-  // 30 g sugars per 100 g is above the 22.5 g band for solids.
-  assert.equal(withEvidence.deductions[0].points, 30);
-  assert.equal(withoutEvidence.deductions[0].points, 30);
+  assert.deepEqual(
+    result.deductions.map((deduction) => [deduction.code, deduction.points]),
+    [["threshold:sugars", 30]],
+  );
+});
+
+// Decided 2026-09-16: a table the reader cannot vouch for yields no score.
+// The model's copy of it is exactly what put Kaiser pilsner's 0,5 g of sugar
+// into the score as 5 g.
+test("an unreadable table yields no score, whatever the model copied", () => {
+  const unreadable = [
+    "Διατροφική δήλωση ανά 100ml",
+    "Ενέργεια 1966kJ / 470kcal",
+    "Λιπαρά 2g",
+    "Υδατάνθρακες 3g",
+    "εκ των οποίων σάκχαρα 30g",
+    "Πρωτεΐνες 1g",
+  ].join("\n");
+
+  const result = scoreNutrition(unreadable, 0.9, {
+    ...base,
+    nutritionFindings: [{ ...attentionFinding, amount: "5g" }],
+  });
+
+  assert.equal(result.score, null);
+  assert.ok(result.insufficientDataReasons.includes(UNREADABLE_TABLE_REASON));
 });
 
 test("a full-sugar drink scores far below a solid with the same sugar band", () => {
   const drink = scoreNutrition(
-    "Ενέργεια 42kcal, Σάκχαρα 10.6g ανά 100 ml",
+    [
+      "Διατροφική δήλωση ανά 100ml",
+      "Ενέργεια 180kJ / 42kcal",
+      "Λιπαρά 0g",
+      "Υδατάνθρακες 10,6g",
+      "εκ των οποίων σάκχαρα 10,6g",
+      "Πρωτεΐνες 0g",
+      "Αλάτι 0g",
+    ].join("\n"),
     0.9,
-    {
-      ...base,
-      nutritionFindings: [
-        { ...attentionFinding, amount: "10.6g" },
-      ],
-    },
+    withFinding,
   );
 
   assert.equal(drink.deductions[0].points, 55);
@@ -123,65 +120,22 @@ test("a full-sugar drink scores far below a solid with the same sugar band", () 
   assert.equal(drink.band, "attention");
 });
 
-test("ignores positive and info findings", () =>
-  assert.equal(
-    scoreNutrition(validText, 0.9, {
-      ...base,
-      nutritionFindings: [
-        { ...attentionFinding, severity: "positive" as const },
-        {
-          ...attentionFinding,
-          normalizedName: "y",
-          severity: "info" as const,
-        },
-        attentionFinding,
-      ],
-    }).deductions.length,
-    1,
-  ));
-
 test("adds the no-problems bonus when there are no deductions", () => {
-  const result = scoreNutrition(validText, 0.9, {
-    ...base,
-    nutritionFindings: [
-      {
-        ...attentionFinding,
-        // Below every threshold band, so nothing is charged. The severity is
-        // irrelevant now: the amount decides.
-        amount: "2g",
-        severity: "positive" as const,
-      },
-    ],
-  });
+  const result = scoreNutrition(
+    validText.replace("σάκχαρα 30g", "σάκχαρα 2g"),
+    0.9,
+    withFinding,
+  );
 
+  assert.deepEqual(result.deductions, []);
   assert.ok(
     result.bonuses.some((bonus) => bonus.label.includes("προβληματικά")),
     "expected the no-problems bonus",
   );
 });
 
-test("does not add the no-problems bonus when an E-number is flagged", () => {
-  const result = scoreNutrition(validText, 0.9, {
-    ...base,
-    nutritionFindings: [
-      { ...attentionFinding, normalizedName: "e621" },
-    ],
-  });
-
-  assert.ok(
-    !result.bonuses.some((bonus) => bonus.label.includes("προβληματικά")),
-    "did not expect the no-problems bonus",
-  );
-});
-
-// Same reproduction as worker/scoring.test.ts: a real, non-additive
-// deduction (high sugar) must block the "no problems" bonus, not just
-// E-number-pattern matches.
 test("does not add the no-problems bonus alongside a real deduction", () => {
-  const result = scoreNutrition(validText, 0.9, {
-    ...base,
-    nutritionFindings: [attentionFinding],
-  });
+  const result = scoreNutrition(validText, 0.9, withFinding);
 
   assert.equal(result.deductions.length, 1);
   assert.ok(
@@ -190,46 +144,29 @@ test("does not add the no-problems bonus alongside a real deduction", () => {
   );
 });
 
-test("does not deduct for a declared allergen row", () => {
-  const result = scoreNutrition(validText, 0.9, {
-    ...base,
-    nutritionFindings: [
-      {
-        ...attentionFinding,
-        nutrient: "Γάλα",
-        normalizedName: "milk",
-        title: "Προσοχή σε γαλακτοκομικά",
-        explanation: "Μπορεί να προκαλέσει αλλεργία.",
-      },
-    ],
-  });
+test("a declared allergen row costs nothing", () => {
+  const result = scoreNutrition(
+    validText.replace("σάκχαρα 30g", "σάκχαρα 2g"),
+    0.9,
+    {
+      ...base,
+      nutritionFindings: [
+        {
+          ...attentionFinding,
+          nutrient: "Γάλα",
+          normalizedName: "milk",
+          title: "Προσοχή σε γαλακτοκομικά",
+          explanation: "Μπορεί να προκαλέσει αλλεργία.",
+        },
+      ],
+    },
+  );
 
   assert.equal(result.deductions.length, 0);
 });
 
-test("still deducts for high sugar next to an allergen row", () => {
-  const result = scoreNutrition(validText, 0.9, {
-    ...base,
-    nutritionFindings: [
-      {
-        ...attentionFinding,
-        nutrient: "Αυγό",
-        normalizedName: "egg",
-        explanation: "Μπορεί να προκαλέσει αλλεργία.",
-      },
-      attentionFinding,
-    ],
-  });
-
-  assert.equal(result.deductions.length, 1);
-  assert.equal(result.deductions[0].code, "threshold:sugars");
-});
-
 test("returns the scoring version", () =>
   assert.equal(
-    scoreNutrition(validText, 0.9, {
-      ...base,
-      nutritionFindings: [attentionFinding],
-    }).scoringVersion,
+    scoreNutrition(validText, 0.9, withFinding).scoringVersion,
     scoringVersion,
   ));

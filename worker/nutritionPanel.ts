@@ -29,8 +29,10 @@
  * g") are handled by the same walk.
  */
 
+import { alcoholKcalPer100ml, detectAlcohol } from "./alcohol";
 import {
   isBeverageTable,
+  parseDeclaredNumber,
   type NutrientKey,
   type NutrientReading,
 } from "./nutritionThresholds";
@@ -74,8 +76,14 @@ function keyForName(name: string): PanelKey | null {
   return null;
 }
 
+/**
+ * The number part tolerates the ways OCR mangles a decimal: a space either
+ * side of the separator ("0, 5g") and a letter O — Latin or Greek — standing
+ * in for a leading zero ("O,5g"). parseDeclaredNumber turns what it matched
+ * into a value and repairs a lost separator ("05g" is 0,5 g).
+ */
 const AMOUNT_PATTERN =
-  /(\d+(?:[.,]\d+)?)\s*(kj|kcal|mg|µg|μg|mcg|g|γρ)\b/gi;
+  /((?:\d+|[OoΟο](?=\s?[.,]\s?\d))(?:\s?[.,]\s?\d+)?)\s*(kj|kcal|mg|µg|μg|mcg|g|γρ)(?![\p{L}])/giu;
 
 const GRAMS_PER_UNIT: Record<string, number> = {
   g: 1,
@@ -113,13 +121,19 @@ function parseAmounts(line: string): {
       head = line.slice(0, match.index);
     }
 
-    const value = Number(match[1].replace(",", "."));
+    const unit = match[2].toLowerCase();
 
-    if (!Number.isFinite(value) || value < 0) {
+    // Energy is legitimately a whole number with no decimal ("172kJ"), so
+    // only masses get the lost-separator repair.
+    const parsed = parseDeclaredNumber(match[1], {
+      repairLeadingZero: unit !== "kj" && unit !== "kcal",
+    });
+
+    if (parsed === null) {
       continue;
     }
 
-    const unit = match[2].toLowerCase();
+    const value = parsed.value;
     const perGram = GRAMS_PER_UNIT[unit];
 
     amounts.push({
@@ -174,7 +188,7 @@ interface PanelValue {
  * and those are excluded anyway: they are only ever read as the value
  * immediately preceding a run of real amounts.
  */
-const BARE_NUMBER = /^(\d+(?:[.,]\d+)?)\s*\*?$/;
+const BARE_NUMBER = /^((?:\d+|[OoΟο](?=\s?[.,]\s?\d))(?:\s?[.,]\s?\d+)?)\s*\*?$/u;
 
 function bareNumberOf(line: string): number | null {
   const match = BARE_NUMBER.exec(line);
@@ -183,9 +197,7 @@ function bareNumberOf(line: string): number | null {
     return null;
   }
 
-  const value = Number(match[1].replace(",", "."));
-
-  return Number.isFinite(value) && value >= 0 ? value : null;
+  return parseDeclaredNumber(match[1])?.value ?? null;
 }
 
 function readPanelValues(rawText: string): {
@@ -228,9 +240,29 @@ function readPanelValues(rawText: string): {
       continue;
     }
 
-    const name = isNameFragment(head)
+    const printedName = isNameFragment(head)
       ? head
       : pending.slice(-MAX_NAME_LINES).join(" ");
+
+    // When OCR interleaves the ingredient list with the table, the row name
+    // arrives glued to the end of a line of ingredients: "cake (egg, wheat
+    // flour Πρωτεΐνες/Protein". Read whole, that line matches "sugar" from
+    // earlier in the list and the protein row is lost (Kri Kri High Protein,
+    // 5202234632322). Only then is the name retried from what follows the
+    // last separator — never in place of a name that already worked.
+    const printedKey = keyForName(printedName);
+
+    const tailName = (head || pending[pending.length - 1] || "")
+      .split(/[,;()[\]]/)
+      .pop()
+      ?.trim() ?? "";
+
+    const name =
+      (printedKey === null || values.has(printedKey)) &&
+      isNameFragment(tailName) &&
+      keyForName(tailName) !== null
+        ? tailName
+        : printedName;
 
     pending = [];
 
@@ -316,6 +348,13 @@ const ENERGY_TOLERANCE_RATIO = 0.2;
 function isPlausible(
   values: Map<PanelKey, PanelValue>,
   energyKcal: number | null,
+  /**
+   * Energy from ethanol, which a declared kcal figure includes and the
+   * macronutrients below cannot account for. Without it every beer and wine
+   * failed this check — Kaiser pilsner declares 41 kcal against 13 kcal of
+   * carbohydrate and protein — and its table was silently thrown away.
+   */
+  alcoholKcal = 0,
 ): boolean {
   const fat = values.get("fat");
   const carbohydrate = values.get("carbohydrate");
@@ -367,7 +406,8 @@ function isPlausible(
       4 * protein.grams +
       4 * carbohydrate.grams +
       9 * fat.grams +
-      2 * (fibre?.grams ?? 0);
+      2 * (fibre?.grams ?? 0) +
+      alcoholKcal;
 
     const tolerance = Math.max(
       ENERGY_TOLERANCE_KCAL,
@@ -396,13 +436,142 @@ const SCORED_KEYS: NutrientKey[] = [
  * quantities goes through, so a number from Open Food Facts is trusted
  * exactly as far as one read off a photo — no further.
  */
+/**
+ * Nutrients that only ever earn a bonus. One of these being misread cannot
+ * make a product look better than it is by more than its bonus, so it is
+ * the one kind of reading a failed table may shed and still be scored.
+ */
+const BONUS_ONLY_KEYS: PanelKey[] = ["protein", "fibre"];
+
+/**
+ * The value a misread of `grams` most plausibly came from: a lost decimal
+ * separator (÷10, ÷100) or a stray leading digit ("40,5" for "0,5", which is
+ * what Azure returned for Kaiser's protein).
+ */
+function misreadCandidates(grams: number): number[] {
+  const text = String(grams);
+
+  const withoutLeadingDigit =
+    text.length > 1 ? Number(text.slice(1)) : NaN;
+
+  return [grams / 10, grams / 100, withoutLeadingDigit].filter(
+    (value) => Number.isFinite(value) && value >= 0,
+  );
+}
+
+/**
+ * When a table fails its checks, finds the single bonus-only reading whose
+ * misread explains the failure. Returns that key only if exactly one such
+ * nutrient does — two candidates means the failure is not understood, and a
+ * table that is not understood is not scored.
+ */
+function bonusReadingToDiscard(
+  values: Map<PanelKey, PanelValue>,
+  energyKcal: number | null,
+  alcoholKcal: number,
+): PanelKey | null {
+  const explaining = BONUS_ONLY_KEYS.filter((key) => {
+    const value = values.get(key);
+
+    if (!value) {
+      return false;
+    }
+
+    return misreadCandidates(value.grams).some((grams) => {
+      const trial = new Map(values);
+
+      trial.set(key, { grams, declared: value.declared });
+
+      return isPlausible(trial, energyKcal, alcoholKcal);
+    });
+  });
+
+  return explaining.length === 1 ? explaining[0] : null;
+}
+
+/**
+ * Per-100 values no real label of that kind declares. Not rejected on their
+ * own — a stock cube really is half salt — but logged, so a pattern of
+ * misreads shows up in the worker logs instead of hiding inside scores.
+ */
+function suspiciousValues(
+  values: Map<PanelKey, PanelValue>,
+  isBeverage: boolean,
+): string[] {
+  const limits: Partial<Record<PanelKey, number>> = isBeverage
+    ? { sugars: 15, protein: 10, salt: 1, saturates: 5, fat: 10 }
+    : { salt: 10 };
+
+  const warnings: string[] = [];
+
+  for (const [key, limit] of Object.entries(limits) as Array<
+    [PanelKey, number]
+  >) {
+    const value = values.get(key);
+
+    if (value && value.grams > limit) {
+      warnings.push(
+        `${key} ${value.declared} exceeds ${limit} g per 100 ${isBeverage ? "ml" : "g"}`,
+      );
+    }
+  }
+
+  return warnings;
+}
+
+export interface NutritionPanelRead {
+  /** The scoreable panel, or null when none passed the checks. */
+  panel: NutritionPanel | null;
+  /**
+   * True when the text carries a nutrition table at all, whether or not it
+   * could be trusted. `tableDetected && panel === null` is exactly the case
+   * the user must be told about: a table was there and was not used.
+   */
+  tableDetected: boolean;
+  /** Readings dropped as misreads so that the rest could be scored. */
+  discarded: PanelKey[];
+  /** Implausible-looking values, for the logs. */
+  warnings: string[];
+  /** Every per-100 value read, in grams, before any check — for the logs. */
+  values: Partial<Record<PanelKey, number>>;
+  energyKcal: number | null;
+}
+
+/**
+ * Turns a set of per-100 quantities into a scoreable panel. The single gate
+ * every source of quantities goes through, so a number from Open Food Facts
+ * is trusted exactly as far as one read off a photo — no further.
+ */
 function buildPanel(
   values: Map<PanelKey, PanelValue>,
   energyKcal: number | null,
   isBeverage: boolean,
-): NutritionPanel | null {
-  if (!isPlausible(values, energyKcal)) {
-    return null;
+  alcoholKcal = 0,
+): NutritionPanelRead {
+  const warnings = suspiciousValues(values, isBeverage);
+
+  const read = {
+    values: Object.fromEntries(
+      [...values].map(([key, value]) => [key, value.grams]),
+    ) as Partial<Record<PanelKey, number>>,
+    energyKcal,
+  };
+
+  // Three of the rows every EU table carries, or two beside an energy
+  // figure, is a table — however badly it was read.
+  const tableDetected =
+    values.size >= 3 || (values.size >= 2 && energyKcal !== null);
+
+  const discarded: PanelKey[] = [];
+
+  if (!isPlausible(values, energyKcal, alcoholKcal)) {
+    const misread = bonusReadingToDiscard(values, energyKcal, alcoholKcal);
+
+    if (misread === null) {
+      return { panel: null, tableDetected, discarded, warnings, ...read };
+    }
+
+    discarded.push(misread);
   }
 
   const readings: NutrientReading[] = [];
@@ -410,7 +579,7 @@ function buildPanel(
   for (const key of SCORED_KEYS) {
     const value = values.get(key);
 
-    if (value) {
+    if (value && !discarded.includes(key)) {
       readings.push({
         key,
         gramsPer100: value.grams,
@@ -419,20 +588,51 @@ function buildPanel(
     }
   }
 
-  return readings.length > 0 ? { readings, isBeverage } : null;
+  return {
+    panel: readings.length > 0 ? { readings, isBeverage } : null,
+    tableDetected,
+    discarded,
+    warnings,
+    ...read,
+  };
 }
 
 /**
- * The declared per-100 quantities of a nutrition table printed on the same
- * label as an ingredient list, or null when no table could be read from the
- * text or the numbers read from it are not believable.
+ * Everything known about the nutrition table in a piece of label text: the
+ * scoreable panel if there is one, and whether a table was there at all.
+ *
+ * `abv` is the product's declared alcohol strength when it was read from a
+ * different photo; by default it is looked for in the same text.
+ */
+export function inspectNutritionPanel(
+  rawText: string,
+  options?: { abv?: number | null },
+): NutritionPanelRead {
+  const { values, energyKcal } = readPanelValues(rawText);
+
+  const abv =
+    options?.abv !== undefined
+      ? options.abv
+      : (detectAlcohol([rawText])?.abv ?? null);
+
+  return buildPanel(
+    values,
+    energyKcal,
+    isBeverageTable(rawText),
+    abv === null ? 0 : alcoholKcalPer100ml(abv),
+  );
+}
+
+/**
+ * The declared per-100 quantities of a nutrition table, or null when no
+ * table could be read from the text or the numbers read from it are not
+ * believable.
  */
 export function readNutritionPanel(
   rawText: string,
+  options?: { abv?: number | null },
 ): NutritionPanel | null {
-  const { values, energyKcal } = readPanelValues(rawText);
-
-  return buildPanel(values, energyKcal, isBeverageTable(rawText));
+  return inspectNutritionPanel(rawText, options).panel;
 }
 
 /** The Open Food Facts `nutriments` keys for each quantity we score. */
@@ -501,7 +701,15 @@ export function panelFromOpenFoodFacts(
 
   const energyKcal = numberAt(source, "energy-kcal_100g");
 
-  return buildPanel(values, energyKcal, isBeverage);
+  // OFF stores alcohol as % vol under this key.
+  const abv = numberAt(source, "alcohol_100g");
+
+  return buildPanel(
+    values,
+    energyKcal,
+    isBeverage,
+    abv === null ? 0 : alcoholKcalPer100ml(abv),
+  ).panel;
 }
 
 const SCORED_KEY_SET = new Set<string>(SCORED_KEYS);

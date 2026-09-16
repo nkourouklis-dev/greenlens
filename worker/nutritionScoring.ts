@@ -1,22 +1,26 @@
 import {
   blockingReasonsFor,
-  deductionsFromModelSeverities,
   deductionsFromThresholds,
   finalizeScore,
   insufficientDataScore,
   MAX_DEDUCTION_COUNT,
+  noticesFor,
+  withContextDeductions,
+  type ScoreNotice,
   type WorkerScore,
 } from "./scoring";
-import { isAllergenDeclarationOnly } from "./allergens";
-import {
-  bonusesFor,
-  isBeverageTable,
-  readNutrients,
-} from "./nutritionThresholds";
-import { readNutritionPanel } from "./nutritionPanel";
+import type { AlcoholInfo } from "./alcohol";
+import { bonusesFor } from "./nutritionThresholds";
+import { inspectNutritionPanel } from "./nutritionPanel";
 import type { WorkerNutritionResult } from "./nutritionAnalysis";
 
 const MIN_TEXT_LENGTH = 15;
+
+export const UNREADABLE_TABLE_REASON =
+  "Ο διατροφικός πίνακας δεν διαβάστηκε καθαρά — ξαναφωτογράφισέ τον.";
+
+const NO_TABLE_REASON =
+  "Δεν εντοπίστηκε αναγνώσιμος διατροφικός πίνακας.";
 
 /**
  * Scores the declared quantities against published thresholds rather than
@@ -24,13 +28,17 @@ const MIN_TEXT_LENGTH = 15;
  * of the rule table the ingredients path moved to. See
  * nutritionThresholds.ts for the bands and why beverages get their own.
  *
- * Rows the panel declares without a readable amount still fall back to the
- * model's severity, so a table the parser only partly understands is scored
- * on what it did understand instead of coming back blank.
+ * The quantities come only from the deterministic reader
+ * (nutritionPanel.ts), which cross-checks them against the declared energy.
+ * When it cannot vouch for a table, there is no score — decided 2026-09-16.
+ * The model is asked to copy each amount "exactly as printed" and does not:
+ * on a date bar it returned 8g of sugar for 33,7g and 5g of salt for 0,5g,
+ * and on the Kaiser pilsner 5g of sugar for 0,5g, which put a beer into a
+ * high-sugar band. Scoring those numbers was a wrong answer delivered with
+ * confidence; asking for a clearer photo is the honest one.
  *
  * The steps shared with the other content categories (insufficient-data
- * result, model-severity fallback, bonuses, clamp and band) live in
- * scoring.ts.
+ * result, bonuses, clamp and band) live in scoring.ts.
  */
 export function scoreNutrition(
   text: string,
@@ -39,9 +47,18 @@ export function scoreNutrition(
   options?: {
     extractionConfidence?: number;
     lowConfidenceReason?: string | null;
+    /**
+     * The drink's alcohol when it was read from another photo. Omitted, it
+     * is looked for in `text` (for the energy check) but charged only when
+     * passed — the caller decides what the product is.
+     */
+    alcohol?: AlcoholInfo | null;
+    notices?: ScoreNotice[];
   },
 ): WorkerScore {
   const lowConfidenceReason = options?.lowConfidenceReason ?? null;
+
+  const notices = noticesFor(options?.notices, options?.alcohol);
 
   const confidence = Math.min(
     ocrConfidence,
@@ -58,68 +75,46 @@ export function scoreNutrition(
     noFindingsReason: "Δεν εντοπίστηκαν αξιολογήσιμα διατροφικά στοιχεία.",
   });
 
-  if (blockingReasons.length > 0) {
+  const read = inspectNutritionPanel(
+    text,
+    options?.alcohol ? { abv: options.alcohol.abv } : undefined,
+  );
+
+  if (blockingReasons.length === 0 && read.panel === null) {
+    blockingReasons.push(
+      read.tableDetected ? UNREADABLE_TABLE_REASON : NO_TABLE_REASON,
+    );
+  }
+
+  if (blockingReasons.length > 0 || read.panel === null) {
     return insufficientDataScore({
       confidence,
       lowConfidenceReason,
       blockingReasons,
       modelReasons: analysis.insufficientDataReasons,
+      notices,
     });
   }
 
-  // Same rule as the ingredients path (worker/scoring.ts): a declared EU
-  // allergen is information, never a deduction.
-  const scorableFindings = analysis.nutritionFindings.filter(
-    (finding) => !isAllergenDeclarationOnly(finding, finding.nutrient),
-  );
+  const { readings, isBeverage } = read.panel;
 
-  // Read the panel text directly first. The model is asked to copy each
-  // amount "exactly as printed" and does not: on a real date bar it
-  // returned 8g of sugar for a label reading 33,7g, 5g of salt for 0,5g and
-  // 2g of protein for 20,2g — every digit-dropping error in a different
-  // direction, and the score built on them was wrong in both directions at
-  // once. The deterministic reader (nutritionPanel.ts) parses the same text
-  // and cross-checks the result against the declared energy before a single
-  // point is charged.
-  //
-  // Its amounts fall back to the model's only when it cannot read the table
-  // at all, so nothing that scores today stops scoring.
-  const panel = readNutritionPanel(text);
-
-  const readings =
-    panel?.readings ?? readNutrients(scorableFindings);
-
-  const isBeverage = panel?.isBeverage ?? isBeverageTable(text);
-
-  const thresholdDeductions = deductionsFromThresholds(
-    readings,
-    isBeverage,
-  );
-
-  // All-or-nothing rather than per-row: once any quantity was read, the
-  // thresholds own the score. Mixing the two would charge a nutrient twice
-  // — once for its number and again for the model's opinion of that same
-  // row — which is how the ingredients path used to double-count.
-  const fallbackDeductions =
-    readings.length > 0
-      ? []
-      : deductionsFromModelSeverities(scorableFindings);
-
-  const deductions = [
-    ...thresholdDeductions,
-    ...fallbackDeductions,
-  ].slice(0, MAX_DEDUCTION_COUNT);
+  const deductions = withContextDeductions(
+    deductionsFromThresholds(readings, isBeverage),
+    options?.alcohol,
+  ).slice(0, MAX_DEDUCTION_COUNT);
 
   return finalizeScore({
     deductions,
     // Earned from declared fibre and protein, not from the model's prose.
     earnedBonuses: bonusesFor(readings),
     positivesCount: analysis.positives.length,
-    // The model's prose only counts when there were no numbers to judge.
-    positivesBonusAllowed: readings.length === 0,
+    // There are always numbers to judge by now, and the model's prose does
+    // not get to add points on top of them.
+    positivesBonusAllowed: false,
     positivesBonusLabel: "Πολλαπλά θετικά διατροφικά χαρακτηριστικά",
     noProblemsBonusLabel: "Δεν εντοπίστηκαν προβληματικά διατροφικά στοιχεία",
     confidence,
     lowConfidenceReason,
+    notices,
   });
 }

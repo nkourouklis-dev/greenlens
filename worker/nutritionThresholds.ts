@@ -53,7 +53,10 @@ const SUGARS_DRINK: Band[] = [
   { above: 9, points: 55, label: "Πολύ υψηλά σάκχαρα για ρόφημα" },
   { above: 6, points: 40, label: "Υψηλά σάκχαρα για ρόφημα" },
   { above: 3, points: 28, label: "Αυξημένα σάκχαρα για ρόφημα" },
-  { above: 0, points: 15, label: "Περιέχει ελεύθερα σάκχαρα" },
+  { above: 1, points: 15, label: "Περιέχει σάκχαρα" },
+  // A trace — Kaiser pilsner's 0,5 g of residual malt sugar — used to cost
+  // the same 15 points as 3 g. Agreed 2026-09-16: up to 1 g costs 5.
+  { above: 0, points: 5, label: "Ίχνη σακχάρων" },
   { above: -1, points: 0, label: "Χωρίς σάκχαρα" },
 ];
 
@@ -126,23 +129,75 @@ function keyForNutrient(name: string): NutrientKey | null {
 export function parseAmountGrams(
   amount: string,
 ): number | null {
-  const match = /(-?\d+(?:[.,]\d+)?)\s*(mg|g|γρ|mγ)?/i.exec(
-    amount,
-  );
+  const match =
+    /(-?(?:\d+|[OoΟο](?=\s?[.,]\s?\d))(?:\s?[.,]\s?\d+)?)\s*(mg|g|γρ|mγ)?/iu.exec(
+      amount,
+    );
 
   if (!match) {
     return null;
   }
 
-  const value = Number(match[1].replace(",", "."));
+  const value = parseDeclaredNumber(match[1])?.value ?? null;
 
-  if (!Number.isFinite(value) || value < 0) {
+  if (value === null) {
     return null;
   }
 
   return /^mg$/i.test(match[2] ?? "")
     ? value / 1000
     : value;
+}
+
+/**
+ * A number as printed on a label, repaired for the ways OCR breaks decimals:
+ *
+ * - "0,5" and "0.5" are the same value (Greek and English labels).
+ * - "0, 5" / "0 ,5": a space read either side of the separator.
+ * - "O,5" / "Ο,5": a Latin or Greek capital O read for the leading zero.
+ * - "05": the separator dropped altogether. No label prints a leading zero
+ *   in front of a whole number, so a leading zero followed by digits is
+ *   read as "0," plus those digits — 0,5 rather than 5, which is the
+ *   10x error that put a beer into a high-sugar band.
+ *
+ * `repaired` is true when any repair was needed, for logging.
+ */
+export function parseDeclaredNumber(
+  raw: string,
+  options?: { repairLeadingZero?: boolean },
+): { value: number; repaired: boolean } | null {
+  let text = raw.trim();
+  let repaired = false;
+
+  if (/^-/.test(text)) {
+    return null;
+  }
+
+  if (/^[OoΟο]/u.test(text)) {
+    text = "0" + text.slice(1);
+    repaired = true;
+  }
+
+  const spaced = text.replace(/\s*([.,])\s*/, "$1");
+
+  if (spaced !== text) {
+    text = spaced;
+    repaired = true;
+  }
+
+  if (
+    (options?.repairLeadingZero ?? true) &&
+    /^0\d+$/.test(text)
+  ) {
+    text = "0." + text.slice(1);
+    repaired = true;
+  }
+
+  const value = Number(text.replace(",", "."));
+
+  return Number.isFinite(value) && value >= 0
+    ? { value, repaired }
+    : null;
 }
 
 /**

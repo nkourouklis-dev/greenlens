@@ -26,8 +26,21 @@ import {
   matchScoringRules,
   type RuleMatch,
 } from "./ingredientRules";
-import { scoreInterpretation, type WorkerScore } from "./scoring";
-import type { NutritionPanel } from "./nutritionPanel";
+import {
+  scoreInterpretation,
+  type ScoreNotice,
+  type WorkerScore,
+} from "./scoring";
+import {
+  inspectNutritionPanel,
+  parseNutritionPanel,
+  type NutritionPanel,
+} from "./nutritionPanel";
+import {
+  detectAlcohol,
+  parseAlcoholInfo,
+  type AlcoholInfo,
+} from "./alcohol";
 import { cleanIngredientText } from "./ingredientText";
 import { scoreNutrition } from "./nutritionScoring";
 import {
@@ -53,6 +66,87 @@ import type { ExecutiveSummary } from "./ingredientInsights";
  */
 const HUMAN_VERIFIED_CONFIDENCE = 1;
 
+export interface StoredLabelContext {
+  /** The quantities to score, re-read from the stored table text if any. */
+  nutritionPanel: NutritionPanel | null;
+  alcohol: AlcoholInfo | null;
+  notices: ScoreNotice[];
+}
+
+export const NUTRITION_NOT_CONSIDERED_NOTICE: ScoreNotice = {
+  code: "nutrition_not_considered",
+  title: "Ο διατροφικός πίνακας δεν λήφθηκε υπόψη",
+  body: "Υπάρχει διατροφικός πίνακας στην ετικέτα, αλλά δεν διαβάστηκε καθαρά. Η βαθμολογία βασίζεται μόνο στη λίστα συστατικών.",
+};
+
+export const INGREDIENTS_NOT_CONSIDERED_NOTICE: ScoreNotice = {
+  code: "ingredients_not_considered",
+  title: "Η λίστα συστατικών δεν λήφθηκε υπόψη",
+  body: "Η λίστα συστατικών δεν διαβάστηκε καθαρά. Η βαθμολογία βασίζεται μόνο στον διατροφικό πίνακα.",
+};
+
+function textsOf(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : typeof value === "string"
+      ? [value]
+      : [];
+}
+
+/**
+ * What a recompute needs beyond the ingredient text, rebuilt from a stored
+ * analysis envelope.
+ *
+ * The table is *re-read* from the raw text it came from whenever that text
+ * was stored, rather than replaying the numbers saved with the row: a
+ * recompute is how a parser fix (like the 2026-09-16 alcohol-aware energy
+ * check) reaches products already in the catalogue. Rows analysed before
+ * that text was kept fall back to their saved quantities.
+ *
+ * Alcohol is taken as stored, else detected in whatever label text the row
+ * kept, which for a nutrition row is the whole panel.
+ */
+export function storedLabelContext(
+  stored: Record<string, unknown>,
+): StoredLabelContext {
+  const labelTexts = [
+    ...textsOf(stored.labelTexts),
+    ...textsOf(stored.nutritionSourceText),
+    ...textsOf(stored.sourceText),
+  ];
+
+  const alcohol =
+    stored.alcohol !== undefined
+      ? parseAlcoholInfo(stored.alcohol)
+      : detectAlcohol(labelTexts);
+
+  const tableText =
+    typeof stored.nutritionSourceText === "string"
+      ? stored.nutritionSourceText
+      : null;
+
+  if (tableText === null) {
+    return {
+      nutritionPanel: parseNutritionPanel(stored.nutritionPanel),
+      alcohol,
+      notices: [],
+    };
+  }
+
+  const read = inspectNutritionPanel(tableText, {
+    abv: alcohol?.abv ?? null,
+  });
+
+  return {
+    nutritionPanel: read.panel,
+    alcohol,
+    notices:
+      read.panel === null && read.tableDetected
+        ? [NUTRITION_NOT_CONSIDERED_NOTICE]
+        : [],
+  };
+}
+
 export interface RescoreOutcome {
   score: WorkerScore;
   ingredientInsights: IngredientInsight[];
@@ -77,6 +171,7 @@ export async function rescoreIngredientsResult(
    * dropping it would rescore a mixed label as an ingredients-only one.
    */
   nutritionPanel: NutritionPanel | null = null,
+  context: StoredLabelContext | null = null,
 ): Promise<RescoreOutcome> {
   const ruleSet = await loadScoringRules(db);
 
@@ -99,6 +194,8 @@ export async function rescoreIngredientsResult(
       lowConfidenceReason: null,
       ruleMatches,
       nutritionPanel,
+      alcohol: context?.alcohol ?? null,
+      notices: context?.notices ?? [],
     },
   );
 
@@ -271,6 +368,7 @@ export function syncEnvelopeScoreMentions(
 export async function rescoreNutritionResult(
   result: WorkerNutritionResult,
   sourceText: string,
+  context: StoredLabelContext | null = null,
 ): Promise<{
   score: WorkerScore;
   nutritionInsights: NutritionInsight[];
@@ -280,7 +378,11 @@ export async function rescoreNutritionResult(
     sourceText,
     HUMAN_VERIFIED_CONFIDENCE,
     result,
-    { extractionConfidence: HUMAN_VERIFIED_CONFIDENCE },
+    {
+      extractionConfidence: HUMAN_VERIFIED_CONFIDENCE,
+      alcohol: context?.alcohol ?? null,
+      notices: context?.notices ?? [],
+    },
   );
 
   return {

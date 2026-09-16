@@ -54,6 +54,9 @@ type AnalysisRequest = Omit<
    * chemical block when OCR captures it there too.
    */
   productTitle?: string;
+
+  /** Merge this photo's text with the product's stored analysis. */
+  mergeWithStored?: boolean;
 };
 
 const defaultScore: ScoreBreakdown = {

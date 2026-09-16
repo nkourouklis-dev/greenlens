@@ -25,6 +25,7 @@ import IngredientCard from "../components/IngredientCard";
 import NutritionCard from "../components/NutritionCard";
 import ChemicalCard from "../components/ChemicalCard";
 import ScoreBreakdownPanel from "../components/ScoreBreakdownPanel";
+import ScoreNoticesCard from "../components/ScoreNoticesCard";
 
 // Records saved before contentCategory existed predate every path except
 // ingredients, so a missing field always means "ingredients".
@@ -218,6 +219,11 @@ export default function Product() {
                 `/ingredients-photo?barcode=${encodeURIComponent(item.barcode)}`,
               )
             }
+            onAddMissingPhoto={() =>
+              navigate(
+                `/ingredients-photo?barcode=${encodeURIComponent(item.barcode)}&mergeInto=${encodeURIComponent(id)}`,
+              )
+            }
           />
         )}
 
@@ -269,6 +275,7 @@ function Result(props: {
   score: ScoreBreakdown;
   onReanalyze: () => void;
   onRetakePhoto: () => void;
+  onAddMissingPhoto: () => void;
 }) {
   const category = readContentCategory(props.record);
 
@@ -438,6 +445,11 @@ function Result(props: {
           </div>
         </div>
       </section>
+
+      <ScoreNoticesCard
+        notices={props.score.notices}
+        onAddPhoto={props.onAddMissingPhoto}
+      />
 
       <AllergenNoticeCard notice={allergenNotice} />
 

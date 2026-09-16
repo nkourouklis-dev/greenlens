@@ -417,21 +417,21 @@ export async function deleteAdminProduct(
 }
 
 /**
- * `category` forces which analysis runs ("analyze again as ingredients /
- * as nutrition"); omitted, the Worker picks from the stored photos.
+ * Reads every label photo of the product and scores it once from all of
+ * them; the Worker decides which photo is the list and which the table.
  */
 export async function analyzeAdminProduct(
   barcode: string,
-  category?: "ingredients" | "nutrition",
 ): Promise<AdminProductDetail> {
   if (apiConfigurationError) {
     throw new UserFacingError(apiConfigurationError);
   }
 
   const controller = new AbortController();
+  // Up to three photos are read, each its own OCR pass.
   const timeout = setTimeout(
     () => controller.abort(),
-    60_000,
+    120_000,
   );
 
   let response: Response;
@@ -441,10 +441,7 @@ export async function analyzeAdminProduct(
       `${apiBaseUrl}/api/admin/products/${encodeURIComponent(barcode)}/analyze`,
       {
         method: "POST",
-        headers: category
-          ? { ...authHeaders(), "content-type": "application/json" }
-          : authHeaders(),
-        body: category ? JSON.stringify({ category }) : undefined,
+        headers: authHeaders(),
         signal: controller.signal,
       },
     );

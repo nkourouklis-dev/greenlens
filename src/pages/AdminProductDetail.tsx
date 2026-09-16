@@ -6,6 +6,7 @@ import AdminProductPhotos from "../components/AdminProductPhotos";
 import EditableStringList from "../components/EditableStringList";
 import ProductVersionsPanel from "../components/ProductVersionsPanel";
 import ScoreBreakdownPanel from "../components/ScoreBreakdownPanel";
+import ScoreNoticesCard from "../components/ScoreNoticesCard";
 import { AssistantDraftPanel } from "../components/AdminAssistantPanel";
 import {
   analyzeAdminProduct,
@@ -309,7 +310,7 @@ function AdminProductDetailContent() {
     }
   }
 
-  async function handleAnalyze(category?: "ingredients" | "nutrition") {
+  async function handleAnalyze() {
     if (isAnalyzing || !product) {
       return;
     }
@@ -317,7 +318,6 @@ function AdminProductDetailContent() {
     // Re-analyzing replaces what is on file — worth a confirmation when a
     // human already verified it, since the row goes back to unreviewed.
     if (
-      category &&
       product.status === "verified" &&
       !window.confirm(
         "Το προϊόν είναι Verified. Η νέα ανάλυση θα αντικαταστήσει την τρέχουσα και θα χρειαστεί ξανά έλεγχο. Συνέχεια;",
@@ -330,7 +330,7 @@ function AdminProductDetailContent() {
     setAnalyzeError("");
 
     try {
-      const updated = await analyzeAdminProduct(barcode, category);
+      const updated = await analyzeAdminProduct(barcode);
       setProduct(updated);
       setForm(buildFormState(updated.analysisResult));
     } catch (caughtError) {
@@ -512,6 +512,13 @@ function AdminProductDetailContent() {
 
   const readOnlyAnalysis = readOnlyAnalysisOf(product.analysisResult);
 
+  const scoreNotices =
+    isRecord(product.analysisResult) &&
+    isRecord(product.analysisResult.score) &&
+    Array.isArray(product.analysisResult.score.notices)
+      ? (product.analysisResult.score.notices as ScoreBreakdown["notices"])
+      : undefined;
+
   return (
     <main className="min-h-screen bg-canvas px-4 pb-28 pt-5 text-ink">
       <section className="mx-auto max-w-2xl">
@@ -675,9 +682,9 @@ function AdminProductDetailContent() {
           <p className="mt-3 rounded-xl border border-line-subtle bg-surface/70 p-3 text-sm leading-6 text-ink-muted">
             Κατηγορία: {String(analysisCategory)}. Η ανάλυση έγινε
             κανονικά· η επεξεργασία των πεδίων με το χέρι υποστηρίζεται
-            προς το παρόν μόνο για αναλύσεις συστατικών. Αν η
-            φωτογραφία έχει λίστα συστατικών, ανάλυσέ την ξανά ως
-            συστατικά παρακάτω.
+            προς το παρόν μόνο για αναλύσεις συστατικών. Αν λείπει η
+            φωτογραφία της λίστας συστατικών, πρόσθεσέ την και πάτα
+            «Ανάλυση» παρακάτω.
           </p>
         )}
 
@@ -687,10 +694,16 @@ function AdminProductDetailContent() {
               Ανάλυση ξανά
             </p>
 
-            <p className="mt-2 text-sm leading-6 text-ink-muted">
-              Διαβάζει ξανά τη φωτογραφία και αντικαθιστά την τρέχουσα
-              ανάλυση. Η τωρινή μένει στο ιστορικό εκδόσεων και μπορεί
-              να επανέλθει.
+            <div className="mt-3">
+              <ScoreNoticesCard notices={scoreNotices} />
+            </div>
+
+            <p className="mt-3 text-sm leading-6 text-ink-muted">
+              «Ανάλυση» διαβάζει ξανά όλες τις φωτογραφίες ετικέτας
+              (συστατικά, διατροφικός πίνακας, άλλη) και βγάζει μία
+              βαθμολογία από όλες μαζί. «Επανυπολογισμός» ξαναβγάζει τη
+              βαθμολογία από το αποθηκευμένο κείμενο, χωρίς νέα ανάγνωση.
+              Η τωρινή ανάλυση μένει στο ιστορικό εκδόσεων.
             </p>
 
             {analyzeError && (
@@ -713,25 +726,14 @@ function AdminProductDetailContent() {
                 : "Επανυπολογισμός βαθμολογίας (χωρίς νέα ανάγνωση)"}
             </button>
 
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <button
-                type="button"
-                onClick={() => handleAnalyze("ingredients")}
-                disabled={isAnalyzing}
-                className="h-12 flex-1 rounded-xl border border-line px-4 text-sm font-semibold text-ink transition active:scale-[0.98] disabled:cursor-not-allowed disabled:text-ink-faint"
-              >
-                {isAnalyzing ? "Ανάλυση..." : "Ως συστατικά"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleAnalyze("nutrition")}
-                disabled={isAnalyzing}
-                className="h-12 flex-1 rounded-xl border border-line px-4 text-sm font-semibold text-ink transition active:scale-[0.98] disabled:cursor-not-allowed disabled:text-ink-faint"
-              >
-                {isAnalyzing ? "Ανάλυση..." : "Ως διατροφικός πίνακας"}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => void handleAnalyze()}
+              disabled={isAnalyzing || isRescoring}
+              className="mt-3 h-12 w-full rounded-xl bg-accent px-4 text-sm font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+            >
+              {isAnalyzing ? "Ανάλυση..." : "Ανάλυση (όλες οι φωτογραφίες)"}
+            </button>
           </div>
         )}
 

@@ -91,6 +91,13 @@ export interface ScoreBonus {
   points: number;
 }
 
+/** Context shown beside a score: alcohol, or a label part left out. */
+export interface ScoreNotice {
+  code: string;
+  title: string;
+  body: string;
+}
+
 export interface ScoreBreakdown {
   score: number | null;
   band:
@@ -110,6 +117,8 @@ export interface ScoreBreakdown {
    */
   lowConfidenceReason: string | null;
   insufficientDataReasons: string[];
+  /** Absent on records analysed before 2026-09-16. */
+  notices?: ScoreNotice[];
   scoringVersion: string;
 }
 
@@ -344,4 +353,10 @@ export interface ScanHistoryItem {
   categoryOverride?: ContentCategory;
   normalizedIngredients?: NormalizedIngredient[];
   analysis?: ProductAnalysisRecord;
+  /**
+   * The text on this item is an extra photo of a product that already has
+   * an analysis (the "add the missing photo" button), to be merged with the
+   * stored analysis rather than scored on its own.
+   */
+  mergeWithStored?: boolean;
 }

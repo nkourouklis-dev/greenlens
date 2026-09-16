@@ -23,23 +23,41 @@ export default function ScoreBreakdownPanel(props: {
   // Prefer the enriched insights (they carry the ingredient's display name),
   // but fall back to the raw deductions so older/legacy records without
   // ingredientInsights still render a correct breakdown.
+  const deductionRow = (deduction: ScoreBreakdown["deductions"][number]) => ({
+    key: deduction.code,
+    label: deduction.title,
+    impact: -deduction.points,
+    reason: deduction.explanation,
+  });
+
+  // Deductions for what the product *is* or *declares* rather than for an
+  // ingredient in its list — the alcohol strength and the nutrition-table
+  // thresholds — never belong to an ingredient card, so they are listed
+  // from the score itself. Without this a mixed label's sugar deduction,
+  // and a beer's alcohol, were missing from the breakdown while still being
+  // subtracted from the total.
+  const nonIngredientRows = score.deductions
+    .filter(
+      (deduction) =>
+        deduction.code.startsWith("alcohol:") ||
+        deduction.code.startsWith("threshold:"),
+    )
+    .map(deductionRow);
+
   const rows =
     insights.length > 0
-      ? insights
-          .filter((insight) => insight.scoreImpact < 0)
-          .sort((a, b) => a.scoreImpact - b.scoreImpact)
-          .map((insight) => ({
-            key: insight.normalizedName,
-            label: insight.name,
-            impact: insight.scoreImpact,
-            reason: insight.whyRated || insight.shortDescription,
-          }))
-      : score.deductions.map((deduction) => ({
-          key: deduction.code,
-          label: deduction.title,
-          impact: -deduction.points,
-          reason: deduction.explanation,
-        }));
+      ? [
+          ...nonIngredientRows,
+          ...insights
+            .filter((insight) => insight.scoreImpact < 0)
+            .map((insight) => ({
+              key: insight.normalizedName,
+              label: insight.name,
+              impact: insight.scoreImpact,
+              reason: insight.whyRated || insight.shortDescription,
+            })),
+        ].sort((a, b) => a.impact - b.impact)
+      : score.deductions.map(deductionRow);
 
   const totalPenalty = rows.reduce(
     (total, row) => total + Math.abs(row.impact),

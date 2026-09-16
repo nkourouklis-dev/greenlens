@@ -24,6 +24,10 @@ export default function IngredientsPhoto() {
   const barcode =
     searchParams.get("barcode") ?? "";
 
+  // Set when this photo is the missing half of an existing analysis.
+  const mergeInto =
+    searchParams.get("mergeInto") ?? undefined;
+
   const [error, setError] =
     useState("");
 
@@ -80,12 +84,17 @@ export default function IngredientsPhoto() {
         image: storageImage,
         result: {
           ...result,
+          // A merge photo is kept whole: it is usually the nutrition table,
+          // and cutting it down to an ingredient list would drop exactly
+          // the part it was taken for.
           rawText:
+            !mergeInto &&
             extracted.ingredientText &&
             extracted.isValid
               ? extracted.ingredientText
               : result.rawText,
         },
+        ...(mergeInto ? { mergeInto } : {}),
       });
 
       navigate(

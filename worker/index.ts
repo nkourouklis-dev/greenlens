@@ -77,7 +77,10 @@ import {
   rescoreChemicalResult,
   rescoreIngredientsResult,
   rescoreNutritionResult,
+  storedLabelContext,
   syncEnvelopeScoreMentions,
+  INGREDIENTS_NOT_CONSIDERED_NOTICE,
+  NUTRITION_NOT_CONSIDERED_NOTICE,
 } from "./rescore";
 import {
   buildDraftPrompt,
@@ -107,10 +110,15 @@ import {
   extractIngredientText,
 } from "./ingredientText";
 import {
-  parseNutritionPanel,
-  readNutritionPanel,
+  inspectNutritionPanel,
   type NutritionPanel,
+  type NutritionPanelRead,
 } from "./nutritionPanel";
+import {
+  detectAlcohol,
+  type AlcoholInfo,
+  type ScoreNotice,
+} from "./alcohol";
 import {
   evaluateContentGate,
 } from "./contentGate";
@@ -1888,11 +1896,18 @@ async function runAdminUpdateProduct(
     // the confirmed ingredient text with the same rules the live scan uses,
     // so an edited findings list can't leave a stale score (and stale
     // deductions) behind it — see rescore.ts.
+    const context = storedLabelContext(validated.envelope);
+
     const rescored = await rescoreIngredientsResult(
       env.DB,
       validated.core,
       validated.sourceText,
-      validated.nutritionPanel,
+      // A re-read table wins; the one the form posted back is the fallback
+      // for rows analysed before the table text was kept.
+      typeof validated.envelope.nutritionSourceText === "string"
+        ? context.nutritionPanel
+        : validated.nutritionPanel,
+      context,
     );
 
     console.log("admin_product_rescored", {
@@ -2029,15 +2044,11 @@ async function runAdminDeleteProduct(
  */
 /**
  * POST /api/admin/products/<barcode>/analyze — runs OCR + analysis on the
- * stored photos. First used only for drafts; now also the PIM's "analyze
- * again", for any status.
+ * stored photos, for drafts and as the PIM's "analyze again".
  *
- * Optional JSON body `{ category: "ingredients" | "nutrition" }` decides
- * which analysis to run, for when the automatic choice was wrong. Without
- * it the old rule applies: the ingredients photo if there is one, else the
- * nutrition photo. A nutrition run prefers the nutrition photo but falls
- * back to the ingredients photo, because many packs print the ingredient
- * list and the nutrition table in the one panel that got photographed.
+ * Reads every label photo (ingredients, nutrition, other) and scores the
+ * product once from all of them — see analyzeFoodLabels. Which slot a photo
+ * was uploaded into no longer decides how it is read.
  */
 async function runAdminListScanFailures(
   url: URL,
@@ -2166,12 +2177,19 @@ async function runAdminRescoreProduct(
         );
       }
 
-      const rescored = await rescoreNutritionResult(core, sourceText);
+      const context = storedLabelContext(stored);
+
+      const rescored = await rescoreNutritionResult(
+        core,
+        sourceText,
+        context,
+      );
 
       score = rescored.score;
 
       envelope = {
         ...syncEnvelopeScoreMentions(stored, score),
+        alcohol: context.alcohol,
         score,
         nutritionInsights: rescored.nutritionInsights,
         executiveSummary: rescored.executiveSummary,
@@ -2215,21 +2233,38 @@ async function runAdminRescoreProduct(
         );
       }
 
+      const context = storedLabelContext(stored);
+
       const rescored = await rescoreIngredientsResult(
         env.DB,
         core,
         sourceText,
-        parseNutritionPanel(stored.nutritionPanel),
+        context.nutritionPanel,
+        context,
       );
 
       score = rescored.score;
 
       envelope = {
         ...syncEnvelopeScoreMentions(stored, score),
+        nutritionPanel: context.nutritionPanel,
+        alcohol: context.alcohol,
         sourceText: rescored.sourceText,
         score,
         ingredientInsights: rescored.ingredientInsights,
       };
+    }
+
+    // A recompute that can no longer score the row — e.g. a nutrition table
+    // the stricter reader now rejects — must not overwrite a score with
+    // nothing. The admin sees why, and the stored row is left as it was.
+    if (score.score === null) {
+      return error(
+        `Ο επανυπολογισμός δεν έβγαλε βαθμολογία, οπότε δεν αποθηκεύτηκε: ${score.insufficientDataReasons.join(" ")}`,
+        422,
+        origin,
+        requestId,
+      );
     }
 
     console.log("admin_product_rescored_in_place", {
@@ -2279,6 +2314,9 @@ async function runAdminRescoreProduct(
   }
 }
 
+/** The photo slots that carry label text worth reading. */
+const LABEL_PHOTO_TYPES: PhotoType[] = ["ingredients", "nutrition", "other"];
+
 async function runAdminAnalyzeProduct(
   barcode: string,
   request: Request,
@@ -2286,13 +2324,9 @@ async function runAdminAnalyzeProduct(
   origin: string | null,
   requestId: string,
 ): Promise<Response> {
-  const body = await readJson(request);
-
-  const requestedCategory =
-    isRecord(body) &&
-    (body.category === "ingredients" || body.category === "nutrition")
-      ? body.category
-      : null;
+  // The request body used to pick "as ingredients" or "as nutrition".
+  // There is one Analyze now: it reads every label photo and decides.
+  await readJson(request);
 
   let photos: ProductPhotoRow[];
 
@@ -2316,36 +2350,17 @@ async function runAdminAnalyzeProduct(
     );
   }
 
-  const ingredientsPhoto = photos.find(
-    (photo) => photo.photoType === "ingredients",
-  );
+  // The newest photo of each label slot. Photos arrive newest-first, and the
+  // front of the pack is left out: it is a picture of the product, not of
+  // its label text, and reading it would spend an OCR call on marketing.
+  const labelPhotos = LABEL_PHOTO_TYPES.flatMap((type) => {
+    const photo = photos.find((candidate) => candidate.photoType === type);
 
-  const nutritionPhoto = photos.find(
-    (photo) => photo.photoType === "nutrition",
-  );
+    return photo ? [photo] : [];
+  });
 
-  const nutritionSource = nutritionPhoto ?? ingredientsPhoto;
-
-  const chosen =
-    requestedCategory === "ingredients"
-      ? ingredientsPhoto
-        ? { category: "ingredients" as const, photo: ingredientsPhoto }
-        : null
-      : requestedCategory === "nutrition"
-        ? nutritionSource
-          ? { category: "nutrition" as const, photo: nutritionSource }
-          : null
-        : ingredientsPhoto
-          ? { category: "ingredients" as const, photo: ingredientsPhoto }
-          : nutritionPhoto
-            ? { category: "nutrition" as const, photo: nutritionPhoto }
-            : null;
-
-  if (!chosen) {
+  if (labelPhotos.length === 0) {
     return error(
-      requestedCategory === "ingredients"
-        ? "Δεν υπάρχει φωτογραφία συστατικών για αυτό το barcode."
-        :
       "Δεν υπάρχει φωτογραφία συστατικών ή διατροφικού πίνακα για αυτό το barcode.",
       400,
       origin,
@@ -2367,72 +2382,92 @@ async function runAdminAnalyzeProduct(
     );
   }
 
-  let object: R2ObjectBody | null;
+  const labels: LabelText[] = [];
 
-  try {
-    object = await env.PHOTOS.get(chosen.photo.r2Key);
-  } catch (caughtError) {
-    console.error("admin_analyze_photo_fetch_failed", {
-      requestId,
-      barcode,
-      r2Key: chosen.photo.r2Key,
-      message:
+  for (const photo of labelPhotos) {
+    let object: R2ObjectBody | null;
+
+    try {
+      object = await env.PHOTOS.get(photo.r2Key);
+    } catch (caughtError) {
+      console.error("admin_analyze_photo_fetch_failed", {
+        requestId,
+        barcode,
+        r2Key: photo.r2Key,
+        message:
+          caughtError instanceof Error
+            ? caughtError.message
+            : String(caughtError).slice(0, 300),
+      });
+
+      return error(
+        "Η ανάκτηση της φωτογραφίας απέτυχε.",
+        502,
+        origin,
+        requestId,
+      );
+    }
+
+    if (!object) {
+      return error(
+        "Η φωτογραφία δεν βρέθηκε στο αποθηκευτικό χώρο.",
+        404,
+        origin,
+        requestId,
+      );
+    }
+
+    const imageFile = new File(
+      [await object.arrayBuffer()],
+      "capture.jpg",
+      {
+        type: object.httpMetadata?.contentType || "image/jpeg",
+      },
+    );
+
+    try {
+      const ocrResult = await extractWithAzureOcr(
+        imageFile,
+        azureEnv.AZURE_VISION_ENDPOINT,
+        azureEnv.AZURE_VISION_KEY,
+        azureEnv.AZURE_VISION_LANGUAGE,
+      );
+
+      await recordUsage(env.DB, "azure_ocr");
+
+      if (ocrResult.rawText.trim().length > 0) {
+        labels.push({
+          text: ocrResult.rawText,
+          ocrConfidence: ocrResult.confidence,
+          labelType: ocrResult.labelType,
+        });
+      }
+    } catch (caughtError) {
+      console.error("admin_analyze_ocr_failed", {
+        requestId,
+        barcode,
+        photoType: photo.photoType,
+        message:
+          caughtError instanceof Error
+            ? caughtError.message
+            : String(caughtError).slice(0, 300),
+      });
+
+      return error(
         caughtError instanceof Error
           ? caughtError.message
-          : String(caughtError).slice(0, 300),
-    });
-
-    return error(
-      "Η ανάκτηση της φωτογραφίας απέτυχε.",
-      502,
-      origin,
-      requestId,
-    );
+          : "Το OCR απέτυχε.",
+        502,
+        origin,
+        requestId,
+      );
+    }
   }
 
-  if (!object) {
+  if (labels.length === 0) {
     return error(
-      "Η φωτογραφία δεν βρέθηκε στο αποθηκευτικό χώρο.",
-      404,
-      origin,
-      requestId,
-    );
-  }
-
-  const imageFile = new File(
-    [await object.arrayBuffer()],
-    "capture.jpg",
-    {
-      type: object.httpMetadata?.contentType || "image/jpeg",
-    },
-  );
-
-  let ocrResult: OcrResponse;
-
-  try {
-    ocrResult = await extractWithAzureOcr(
-      imageFile,
-      azureEnv.AZURE_VISION_ENDPOINT,
-      azureEnv.AZURE_VISION_KEY,
-      azureEnv.AZURE_VISION_LANGUAGE,
-    );
-
-    await recordUsage(env.DB, "azure_ocr");
-  } catch (caughtError) {
-    console.error("admin_analyze_ocr_failed", {
-      requestId,
-      barcode,
-      message:
-        caughtError instanceof Error
-          ? caughtError.message
-          : String(caughtError).slice(0, 300),
-    });
-
-    return error(
-      caughtError instanceof Error
-        ? caughtError.message
-        : "Το OCR απέτυχε.",
-      502,
+      "Δεν διαβάστηκε κείμενο από τις φωτογραφίες.",
+      422,
       origin,
       requestId,
     );
@@ -2443,27 +2478,16 @@ async function runAdminAnalyzeProduct(
   const cachedForTitle = await lookupCachedProduct(env.DB, barcode);
   const productTitle = cachedForTitle?.productName ?? undefined;
 
-  const outcome =
-    chosen.category === "ingredients"
-      ? await analyzeIngredientsCore(
-          barcode,
-          ocrResult.rawText,
-          ocrResult.confidence,
-          ocrResult.labelType,
-          env,
-          requestId,
-          productTitle,
-          "admin_analyze",
-        )
-      : await analyzeNutritionCore(
-          barcode,
-          ocrResult.rawText,
-          ocrResult.confidence,
-          env,
-          requestId,
-          productTitle,
-          "admin_analyze",
-        );
+  const food = await analyzeFoodLabels(
+    barcode,
+    labels,
+    env,
+    requestId,
+    productTitle,
+    "admin_analyze",
+  );
+
+  const outcome = food.outcome;
 
   if (!outcome.ok) {
     if (outcome.kind === "insufficient") {
@@ -2486,14 +2510,26 @@ async function runAdminAnalyzeProduct(
     );
   }
 
+  // A scored-null result is not saved (see analyzeNutritionCore), so the
+  // product would look unchanged; say why instead.
+  if (outcome.responseBody.score.score === null) {
+    return error(
+      outcome.responseBody.score.insufficientDataReasons.join(" ") ||
+        "Δεν υπήρχαν αρκετά στοιχεία στις φωτογραφίες για βαθμολογία.",
+      422,
+      origin,
+      requestId,
+    );
+  }
+
   const product = await getAdminProduct(env.DB, barcode);
 
   console.log("admin_product_analyzed", {
     requestId,
     barcode,
-    category: chosen.category,
-    requestedCategory,
-    photoType: chosen.photo.photoType,
+    category: food.category,
+    photoTypes: labelPhotos.map((photo) => photo.photoType),
+    score: outcome.responseBody.score.score,
   });
 
   return json({ product }, 200, origin, requestId);
@@ -3004,6 +3040,10 @@ interface AnalysisRequestBody {
   // there too. Never treated as authoritative; a missing value just means
   // that particular filter has nothing to compare against.
   productTitle?: string;
+  // "Add the missing photo": this text is another photo of a product that
+  // already has an analysis, and must be merged with it rather than be
+  // answered from the cache or replace it.
+  mergeWithStored?: boolean;
 }
 
 function isAnalysisRequest(
@@ -3039,7 +3079,9 @@ function isAnalysisRequest(
       value.categoryOverride === "unknown") &&
     (value.productTitle === undefined ||
       (typeof value.productTitle === "string" &&
-        value.productTitle.length <= 200))
+        value.productTitle.length <= 200)) &&
+    (value.mergeWithStored === undefined ||
+      typeof value.mergeWithStored === "boolean")
   );
 }
 
@@ -3093,6 +3135,7 @@ function insufficientScore(
     confidence: ocrConfidence,
     lowConfidenceReason: null,
     insufficientDataReasons: reasons,
+    notices: [],
     scoringVersion,
   };
 }
@@ -3316,6 +3359,16 @@ async function runAnalysis(
     requestBody.barcode,
   );
 
+  if (cached && requestBody.mergeWithStored === true) {
+    return runMergeWithStored(
+      requestBody,
+      cached.analysisResult,
+      env,
+      origin,
+      requestId,
+    );
+  }
+
   if (cached) {
     await incrementProductScanCount(
       env.DB,
@@ -3418,6 +3471,115 @@ async function runAnalysis(
 // cheap deterministic heuristic; only when that is inconclusive does one AI
 // classification call run. Keeps the common case (heuristic decides) free of
 // extra latency/cost.
+/**
+ * The label texts a stored analysis was built from: every photo's OCR text
+ * when the row kept them, otherwise whatever text it did keep.
+ */
+function storedLabelTexts(stored: unknown): string[] {
+  if (!isRecord(stored)) {
+    return [];
+  }
+
+  const texts = Array.isArray(stored.labelTexts)
+    ? stored.labelTexts.filter(
+        (text): text is string => typeof text === "string",
+      )
+    : [stored.nutritionSourceText, stored.sourceText].filter(
+        (text): text is string =>
+          typeof text === "string" && text.trim().length > 0,
+      );
+
+  return Array.from(new Set(texts));
+}
+
+/**
+ * A user adding the photo a stored analysis was missing — typically the
+ * nutrition table on the other side of a pack whose ingredient list was
+ * scored alone. The new text and the stored ones are analysed together as
+ * one product, exactly as the PIM's Analyze does, and the merged result
+ * replaces the stored one.
+ */
+async function runMergeWithStored(
+  requestBody: AnalysisRequestBody,
+  stored: unknown,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const confirmedText = requestBody.confirmedIngredientText.trim();
+
+  if (!confirmedText) {
+    return insufficientResponse(
+      undefined,
+      requestBody.ocrConfidence,
+      env.DB,
+      origin,
+      requestId,
+    );
+  }
+
+  const previousTexts = storedLabelTexts(stored).filter(
+    (text) => text !== confirmedText,
+  );
+
+  console.log("merge_with_stored", {
+    requestId,
+    barcode: requestBody.barcode,
+    storedTextCount: previousTexts.length,
+  });
+
+  const food = await analyzeFoodLabels(
+    requestBody.barcode,
+    [
+      {
+        text: confirmedText,
+        ocrConfidence: requestBody.ocrConfidence,
+        labelType: requestBody.ocrLabelType ?? "unknown",
+      },
+      ...previousTexts.map((text) => ({
+        text,
+        // Already accepted once; its own confidence was not kept.
+        ocrConfidence: requestBody.ocrConfidence,
+        labelType: "unknown" as LabelType,
+      })),
+    ],
+    env,
+    requestId,
+    requestBody.productTitle,
+    "user_scan",
+  );
+
+  if (food.outcome.ok) {
+    return json(food.outcome.responseBody, 200, origin, requestId);
+  }
+
+  if (food.outcome.kind === "insufficient") {
+    return food.category === "ingredients"
+      ? insufficientResponse(
+          food.outcome.reasons,
+          requestBody.ocrConfidence,
+          env.DB,
+          origin,
+          requestId,
+        )
+      : nutritionInsufficientResponse(
+          food.outcome.reasons,
+          requestBody.ocrConfidence,
+          origin,
+          requestId,
+        );
+  }
+
+  return error(
+    food.outcome.kind === "model_failed"
+      ? "Η ανάλυση δεν ολοκληρώθηκε αξιόπιστα. Δοκιμάστε ξανά."
+      : "Η ανάλυση δεν ολοκληρώθηκε. Δοκιμάστε ξανά.",
+    502,
+    origin,
+    requestId,
+  );
+}
+
 async function resolveContentCategory(
   confirmedText: string,
   categoryOverride: ContentCategory | undefined,
@@ -3553,6 +3715,163 @@ async function nutritionPanelFromBarcode(
   }
 }
 
+/**
+ * Which of a product's label texts to read the nutrition table from: the
+ * first one whose table passes its checks, else the first one that carries
+ * a table at all (so the caller can say it was there and not used), else
+ * none. Alcohol is passed in because the strength may be printed on a
+ * different photo from the table whose energy it explains.
+ */
+function choosePanelText(
+  texts: string[],
+  alcohol: AlcoholInfo | null,
+): { text: string; read: NutritionPanelRead } | null {
+  const reads = texts.map((text) => ({
+    text,
+    read: inspectNutritionPanel(text, { abv: alcohol?.abv ?? null }),
+  }));
+
+  return (
+    reads.find((candidate) => candidate.read.panel !== null) ??
+    reads.find((candidate) => candidate.read.tableDetected) ??
+    null
+  );
+}
+
+interface LabelText {
+  text: string;
+  ocrConfidence: number;
+  labelType: LabelType;
+}
+
+type FoodAnalysisOutcome =
+  | { category: "ingredients"; outcome: IngredientsAnalysisOutcome }
+  | { category: "nutrition"; outcome: NutritionAnalysisOutcome };
+
+/** How strongly a text reads as an ingredient list rather than a table. */
+function ingredientEvidence(text: string): number {
+  const evaluation = evaluateLabelText(text);
+
+  return (
+    (evaluation.hasIngredientHeading ? 2 : 0) +
+    (evaluation.looksLikeIngredients ? 1 : 0) -
+    (evaluation.isNutritionTable && !evaluation.hasIngredientHeading ? 1 : 0)
+  );
+}
+
+/**
+ * One product, one verdict, from however many label photos it has.
+ *
+ * The photo that reads most like an ingredient list is analysed as one, and
+ * the nutrition table and alcohol strength are looked for across all of
+ * them — whether both sit on one panel or on two photos, and whichever PIM
+ * slot a photo was put in. When no ingredient list can be used, the product
+ * is scored from its table alone, with a notice saying so; it never gets two
+ * scores side by side.
+ *
+ * `primaryIndex` pins which text is the ingredient list, for the live scan,
+ * whose content category was already decided before this runs.
+ */
+async function analyzeFoodLabels(
+  barcode: string,
+  labels: LabelText[],
+  env: Env,
+  requestId: string,
+  productTitle: string | undefined,
+  versionSource: ProductVersionSource,
+  primaryIndex?: number,
+): Promise<FoodAnalysisOutcome> {
+  const ranked = labels
+    .map((label, index) => ({
+      label,
+      index,
+      evidence: index === primaryIndex ? Infinity : ingredientEvidence(label.text),
+    }))
+    .sort((left, right) => right.evidence - left.evidence);
+
+  const alcohol = detectAlcohol(labels.map((label) => label.text));
+
+  const panelChoice = choosePanelText(
+    labels.map((label) => label.text),
+    alcohol,
+  );
+
+  const panelLabel =
+    labels.find((label) => label.text === panelChoice?.text) ?? null;
+
+  const othersThan = (text: string) =>
+    labels.filter((label) => label.text !== text).map((label) => label.text);
+
+  const primary = ranked[0]?.evidence > 0 ? ranked[0].label : null;
+
+  console.log("food_labels_resolved", {
+    requestId,
+    barcode,
+    labelCount: labels.length,
+    ingredientEvidence: ranked.map((entry) => entry.evidence),
+    hasIngredientLabel: primary !== null,
+    tableReadable: panelChoice?.read.panel != null,
+    tableDetected: panelChoice?.read.tableDetected ?? false,
+    alcohol,
+  });
+
+  if (primary) {
+    const outcome = await analyzeIngredientsCore(
+      barcode,
+      primary.text,
+      primary.ocrConfidence,
+      primary.labelType,
+      env,
+      requestId,
+      productTitle,
+      versionSource,
+      othersThan(primary.text),
+    );
+
+    if (outcome.ok || outcome.kind !== "insufficient") {
+      return { category: "ingredients", outcome };
+    }
+
+    // The list was there but unusable. A readable table still answers
+    // most of the question, so score from it and say what was left out.
+    if (panelLabel && panelChoice?.read.panel) {
+      const fallback = await analyzeNutritionCore(
+        barcode,
+        panelLabel.text,
+        panelLabel.ocrConfidence,
+        env,
+        requestId,
+        productTitle,
+        versionSource,
+        othersThan(panelLabel.text),
+        [INGREDIENTS_NOT_CONSIDERED_NOTICE],
+      );
+
+      if (fallback.ok && fallback.responseBody.score.score !== null) {
+        return { category: "nutrition", outcome: fallback };
+      }
+    }
+
+    return { category: "ingredients", outcome };
+  }
+
+  const tableLabel = panelLabel ?? labels[0];
+
+  return {
+    category: "nutrition",
+    outcome: await analyzeNutritionCore(
+      barcode,
+      tableLabel.text,
+      tableLabel.ocrConfidence,
+      env,
+      requestId,
+      productTitle,
+      versionSource,
+      othersThan(tableLabel.text),
+    ),
+  };
+}
+
 async function analyzeIngredientsCore(
   barcode: string,
   confirmedText: string,
@@ -3565,6 +3884,10 @@ async function analyzeIngredientsCore(
   // callers run the identical pipeline, so this is the only thing that
   // distinguishes an admin re-analysis from a user's scan afterwards.
   versionSource: ProductVersionSource = "user_scan",
+  // The OCR text of the product's *other* photos (see analyzeFoodLabels).
+  // The nutrition table and the alcohol strength are looked for across all
+  // of them; the ingredient list is read from `confirmedText` alone.
+  otherTexts: string[] = [],
 ): Promise<IngredientsAnalysisOutcome> {
   // Single shared evaluation of the label text, identical to the OCR gate.
   const evaluation =
@@ -3613,7 +3936,13 @@ async function analyzeIngredientsCore(
   // see nutritionPanel.ts. Read off the full confirmed text (the table
   // sits outside the isolated ingredient block) and null whenever no
   // trustworthy table is there, which is every ingredients-only label.
-  const photoPanel = readNutritionPanel(confirmedText);
+  const labelTexts = [confirmedText, ...otherTexts];
+
+  const alcohol = detectAlcohol(labelTexts);
+
+  const panelChoice = choosePanelText(labelTexts, alcohol);
+
+  const photoPanel = panelChoice?.read.panel ?? null;
 
   // Failing that, the quantities Open Food Facts holds for this barcode —
   // it stores them per 100 g already, and a photo of an ingredient list
@@ -3702,6 +4031,11 @@ async function analyzeIngredientsCore(
         : photoPanel
           ? "photo"
           : "openfoodfacts",
+    nutritionTableDetected: panelChoice?.read.tableDetected ?? false,
+    nutritionPanelDiscarded: panelChoice?.read.discarded ?? [],
+    nutritionPanelWarnings: panelChoice?.read.warnings ?? [],
+    labelTextCount: labelTexts.length,
+    alcohol,
     sectionWasSliced: evaluation.sectionWasSliced,
     nutritionMarkerCount:
       evaluation.nutritionMarkerCount,
@@ -3990,6 +4324,15 @@ async function analyzeIngredientsCore(
       })),
     });
 
+    // A table that was on the label but could not be trusted is said so,
+    // next to the score, instead of silently scoring the list alone — the
+    // way Kaiser pilsner came out at 100. Open Food Facts standing in for
+    // it means the table *was* taken into account, so no notice then.
+    const notices: ScoreNotice[] =
+      nutritionPanel === null && panelChoice?.read.tableDetected
+        ? [NUTRITION_NOT_CONSIDERED_NOTICE]
+        : [];
+
     const score = scoreInterpretation(
       scoredText,
       ocrConfidence,
@@ -3999,6 +4342,8 @@ async function analyzeIngredientsCore(
         lowConfidenceReason: null,
         ruleMatches,
         nutritionPanel,
+        alcohol,
+        notices,
       },
     );
 
@@ -4034,6 +4379,13 @@ async function analyzeIngredientsCore(
       // with it or an admin save would silently rescore the product as if
       // the label had carried no nutrition table at all.
       nutritionPanel,
+      // The raw text the table was read from, so a recompute can read it
+      // again with a fixed parser rather than replaying old numbers.
+      nutritionSourceText: panelChoice?.text ?? null,
+      alcohol,
+      // Every photo's OCR text, so a later "add the missing photo" can merge
+      // with this analysis instead of replacing it.
+      labelTexts,
     };
 
     // Only cache a genuinely complete, scored result — score.score can
@@ -4077,15 +4429,30 @@ async function runIngredientsAnalysis(
   origin: string | null,
   requestId: string,
 ): Promise<Response> {
-  const outcome = await analyzeIngredientsCore(
+  const food = await analyzeFoodLabels(
     requestBody.barcode,
-    confirmedText,
-    requestBody.ocrConfidence,
-    requestBody.ocrLabelType ?? "unknown",
+    [
+      {
+        text: confirmedText,
+        ocrConfidence: requestBody.ocrConfidence,
+        labelType: requestBody.ocrLabelType ?? "unknown",
+      },
+    ],
     env,
     requestId,
     requestBody.productTitle,
+    "user_scan",
+    0,
   );
+
+  if (food.category === "nutrition" && food.outcome.ok) {
+    return json(food.outcome.responseBody, 200, origin, requestId);
+  }
+
+  const outcome =
+    food.category === "ingredients"
+      ? food.outcome
+      : ({ ok: false, kind: "exception" } as const);
 
   if (!outcome.ok) {
     if (outcome.kind === "insufficient") {
@@ -4144,7 +4511,15 @@ async function analyzeNutritionCore(
   requestId: string,
   productTitle?: string,
   versionSource: ProductVersionSource = "user_scan",
+  otherTexts: string[] = [],
+  // e.g. "the ingredient list was not taken into account", when this runs
+  // because the ingredients path could not use its photo.
+  extraNotices: ScoreNotice[] = [],
 ): Promise<NutritionAnalysisOutcome> {
+  const labelTexts = [confirmedText, ...otherTexts];
+
+  const alcohol = detectAlcohol(labelTexts);
+
   const extraction = extractNutritionData(
     confirmedText,
     ocrConfidence,
@@ -4319,7 +4694,11 @@ async function analyzeNutritionCore(
       modelInputText,
       ocrConfidence,
       result,
-      { extractionConfidence: extraction.confidence },
+      {
+        extractionConfidence: extraction.confidence,
+        alcohol,
+        notices: extraNotices,
+      },
     );
 
     const nutritionInsights = buildNutritionInsights(
@@ -4345,6 +4724,8 @@ async function analyzeNutritionCore(
       // it did not, and there was no way to tell a bad read from a bad
       // product.
       sourceText: modelInputText,
+      alcohol,
+      labelTexts,
     };
 
     // See the matching comment in runIngredientsAnalysis: score.score can

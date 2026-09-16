@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { updateHistoryItem } from "../services/historyService";
 import {
   clearOcrDraft,
   getOcrDraft,
@@ -193,8 +194,13 @@ export default function IngredientsReview() {
   const nutritionOnly =
     ocrDraft.result.labelType === "nutrition";
 
+  // A photo added to an existing analysis may be either half of the label;
+  // the Worker decides which, so the ingredient-list checks do not apply.
+  const isMerge = ocrDraft.mergeInto !== undefined;
+
   const isIngredientsIntent =
-    !categoryOverride || categoryOverride === "ingredients";
+    !isMerge &&
+    (!categoryOverride || categoryOverride === "ingredients");
 
   // For an ingredient list, continuing with text the validator rejects was
   // a dead end: the user was sent on to take the front photo, and only then
@@ -245,6 +251,27 @@ export default function IngredientsReview() {
     if (!canContinue) return;
 
     updateOcrDraftText(id, text.trim());
+
+    if (ocrDraft.mergeInto) {
+      // No front photo to take: the product already has one. Straight to a
+      // merged analysis of the existing product.
+      const mergeInto = ocrDraft.mergeInto;
+
+      updateHistoryItem(mergeInto, {
+        ocrRawText: ocrDraft.result.rawText,
+        userCorrectedText: text.trim(),
+        ocrConfidence: ocrDraft.result.confidence,
+        ocrLabelType: ocrDraft.result.labelType,
+        categoryOverride: undefined,
+        mergeWithStored: true,
+      });
+
+      clearOcrDraft(id);
+
+      navigate(`/product/${encodeURIComponent(mergeInto)}/analysis`);
+
+      return;
+    }
 
     navigate(
       `/product-photo?barcode=${encodeURIComponent(
