@@ -4728,6 +4728,21 @@ async function analyzeNutritionCore(
       labelTexts,
     };
 
+    // A table the reader could not vouch for is exactly the case worth a
+    // regression fixture, and without its OCR text there is nothing to
+    // debug from (Kaiser 330 ml left no trace at all).
+    if (score.score === null) {
+      await recordScanFailure(env.DB, {
+        barcode: barcode || null,
+        contentCategory: "nutrition",
+        labelType: null,
+        reasons: score.insufficientDataReasons,
+        sourceText: labelTexts.join("\n\n"),
+        ocrConfidence,
+        requestId,
+      });
+    }
+
     // See the matching comment in runIngredientsAnalysis: score.score can
     // be null (insufficient_data) on a valid parse with shaky evidence,
     // and that's a fact about this scan, not the product.

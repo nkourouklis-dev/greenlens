@@ -7,7 +7,11 @@ import {
 } from "./alcohol";
 import type { WorkerAnalysisResult } from "./analysis";
 import { cleanIngredientText, extractIngredientText } from "./ingredientText";
-import { KAISER_PILSNER_OCR, KRI_KRI_INTERLEAVED_OCR } from "./labelFixtures";
+import {
+  KAISER_330_OFFSET_OCR,
+  KAISER_PILSNER_OCR,
+  KRI_KRI_INTERLEAVED_OCR,
+} from "./labelFixtures";
 import {
   inspectNutritionPanel,
   readNutritionPanel,
@@ -346,4 +350,62 @@ test("a row name at the end of an interleaved ingredient line is still read", ()
       ["protein", 8.8],
     ],
   );
+});
+
+// ---------------------------------------------------------------------------
+// Values emitted one row late
+// ---------------------------------------------------------------------------
+
+test("a table whose values arrive one row late is paired by position", () => {
+  const read = inspectNutritionPanel(KAISER_330_OFFSET_OCR);
+
+  assert.deepEqual(read.values, {
+    fat: 0,
+    saturates: 0,
+    carbohydrate: 2.8,
+    sugars: 0.5,
+    protein: 0.5,
+    salt: 0,
+  });
+  assert.equal(read.energyKcal, 41);
+  assert.deepEqual(
+    read.panel?.readings.map((reading) => [reading.key, reading.gramsPer100]),
+    [
+      ["sugars", 0.5],
+      ["saturates", 0],
+      ["salt", 0],
+      ["protein", 0.5],
+    ],
+  );
+});
+
+test("the 330 ml can scores the same 70 as the 500 ml one", async () => {
+  const { score } = await rescoreNutritionResult(
+    {
+      subtype: "human_food",
+      summary: "Μπύρα.",
+      positives: [],
+      attentionItems: [],
+      nutritionFindings: [
+        {
+          nutrient: "Ζάχαρη",
+          normalizedName: "sugar",
+          amount: "0,5g",
+          severity: "info",
+          title: "Ζάχαρη",
+          explanation: "",
+          evidenceType: "none",
+          sourceName: null,
+          sourceUrl: null,
+          confidence: 0.5,
+        },
+      ],
+      insufficientDataReasons: [],
+      confidence: 0.9,
+    },
+    KAISER_330_OFFSET_OCR,
+    storedLabelContext({ sourceText: KAISER_330_OFFSET_OCR }),
+  );
+
+  assert.equal(score.score, 70);
 });

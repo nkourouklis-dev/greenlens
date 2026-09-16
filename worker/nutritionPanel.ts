@@ -608,19 +608,159 @@ export function inspectNutritionPanel(
   rawText: string,
   options?: { abv?: number | null },
 ): NutritionPanelRead {
-  const { values, energyKcal } = readPanelValues(rawText);
-
   const abv =
     options?.abv !== undefined
       ? options.abv
       : (detectAlcohol([rawText])?.abv ?? null);
 
-  return buildPanel(
-    values,
-    energyKcal,
-    isBeverageTable(rawText),
-    abv === null ? 0 : alcoholKcalPer100ml(abv),
+  const alcoholKcal = abv === null ? 0 : alcoholKcalPer100ml(abv);
+
+  const isBeverage = isBeverageTable(rawText);
+
+  const walked = readPanelValues(rawText);
+
+  const read = buildPanel(
+    walked.values,
+    walked.energyKcal,
+    isBeverage,
+    alcoholKcal,
   );
+
+  if (read.panel !== null) {
+    return read;
+  }
+
+  // Second reading, only for a table the walk could not make sense of. It
+  // still has to pass every plausibility check, so a wrong pairing is
+  // rejected exactly as a wrong walk is.
+  const ordered = readPanelValuesInOrder(rawText);
+
+  if (ordered === null) {
+    return read;
+  }
+
+  const reread = buildPanel(
+    ordered.values,
+    ordered.energyKcal,
+    isBeverage,
+    alcoholKcal,
+  );
+
+  return reread.panel !== null
+    ? reread
+    : { ...read, tableDetected: read.tableDetected || reread.tableDetected };
+}
+
+const ENERGY_NAME = /(ενεργει|ενέργει|energy)/iu;
+
+/**
+ * Pairs a table's row names with its values *by position* rather than by
+ * adjacency.
+ *
+ * On a curved can the value column sits half a line below the names, and
+ * Azure then emits every value one row late (Kaiser pilsner 330 ml,
+ * 5201309103040):
+ *
+ *     ΛΙΠΑΡΑ:                 <- followed by the energy
+ *     172kJ/41kcal
+ *     ΕΚ ΤΩΝ ΟΠΟΙΩΝ ΚΟΡΕΣΜΕΝΑ:  <- followed by the fat
+ *     0g
+ *
+ * The walk above pairs each value with the name just before it, reads
+ * "sugars 2,8 g in 0 g of carbohydrate", and the plausibility check rightly
+ * rejects the table. But the *order* of names and of values is intact, so
+ * when there are exactly as many values as names they can be zipped.
+ *
+ * Returns null when the counts differ — a multi-column table (per 100 g,
+ * per portion) has more values than names and is the walk's job.
+ */
+function readPanelValuesInOrder(rawText: string): {
+  values: Map<PanelKey, PanelValue>;
+  energyKcal: number | null;
+} | null {
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const start = lines.findIndex(
+    (line) => ENERGY_NAME.test(line) && parseAmounts(line).amounts.length === 0,
+  );
+
+  if (start === -1) {
+    return null;
+  }
+
+  const names: Array<PanelKey | "energy"> = [];
+
+  const amountsInOrder: Amount[][] = [];
+
+  for (const line of lines.slice(start)) {
+    const { amounts, head } = parseAmounts(line);
+
+    if (amounts.length === 0) {
+      if (!isNameFragment(line)) {
+        continue;
+      }
+
+      const key = ENERGY_NAME.test(line) ? "energy" : keyForName(line);
+
+      if (key !== null) {
+        names.push(key);
+      }
+
+      continue;
+    }
+
+    // A value line carries nothing but amounts (and perhaps a "<").
+    if (/\p{L}{2,}/u.test(head)) {
+      return null;
+    }
+
+    const previous = amountsInOrder[amountsInOrder.length - 1];
+
+    // "172kJ" and "41kcal" on two lines are one energy value.
+    const continuesEnergy =
+      previous !== undefined &&
+      previous.every((amount) => amount.kilojoules !== null) &&
+      amounts.every((amount) => amount.kcal !== null);
+
+    if (continuesEnergy) {
+      previous.push(...amounts);
+    } else {
+      amountsInOrder.push(amounts);
+    }
+  }
+
+  if (names.length < 4 || names.length !== amountsInOrder.length) {
+    return null;
+  }
+
+  const values = new Map<PanelKey, PanelValue>();
+
+  let energyKcal: number | null = null;
+
+  names.forEach((key, index) => {
+    const amounts = amountsInOrder[index];
+
+    if (key === "energy") {
+      const kcal = amounts.find((amount) => amount.kcal !== null)?.kcal;
+      const kj = amounts.find((amount) => amount.kilojoules !== null)
+        ?.kilojoules;
+
+      energyKcal = kcal ?? (kj == null ? null : kj / 4.184);
+
+      return;
+    }
+
+    const mass = amounts.find((amount) => amount.grams !== null);
+
+    if (mass && mass.grams !== null && !values.has(key)) {
+      values.set(key, { grams: mass.grams, declared: mass.declared });
+    }
+  });
+
+  return { values, energyKcal };
 }
 
 /**
