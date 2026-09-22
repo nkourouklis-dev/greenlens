@@ -241,8 +241,9 @@ export function deductionsFromModelSeverities<F extends SeverityFinding>(
 export function deductionsFromThresholds(
   readings: NutrientReading[],
   isBeverage: boolean,
+  options?: { naturalSugarOnly?: boolean },
 ): Deductions {
-  return penaltiesFor(readings, isBeverage).map((penalty) => ({
+  return penaltiesFor(readings, isBeverage, options).map((penalty) => ({
     code: "threshold:" + penalty.key,
     points: penalty.points,
     title: penalty.title,
@@ -550,12 +551,22 @@ export function scoreInterpretation(
       ? deductionsFromRules(scoredRuleMatches)
       : deductionsFromFindings(analysis);
 
+  // Whether the ingredient list itself names an added sweetener (sugar,
+  // glucose-fructose syrup, added fructose, ...). When it doesn't, the
+  // table's "sugars" figure can only be coming from a whole-food ingredient
+  // (dates, honey, fruit) — that is still sugar, but not the same claim as
+  // added sugar, so it is banded more gently (see naturalSugarOnly).
+  const hasAddedSugarIngredient = ruleMatches.some(
+    (match) => match.rule.ruleGroup === "added_sugar",
+  );
+
   const listAndTableDeductions =
     panelReadings.length > 0
       ? [
           ...deductionsFromThresholds(
             panelReadings,
             panel?.isBeverage ?? false,
+            { naturalSugarOnly: !hasAddedSugarIngredient },
           ),
           ...ingredientDeductions,
         ]

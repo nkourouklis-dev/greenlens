@@ -242,7 +242,7 @@ const beerAnalysis: WorkerAnalysisResult = {
   confidence: 0.9,
 };
 
-test("Kaiser pilsner scores 70 from its list, its table and its alcohol together", () => {
+test("Kaiser pilsner scores 72 from its list, its table and its alcohol together", () => {
   const scoredText = cleanIngredientText(
     extractIngredientText(KAISER_PILSNER_OCR, 0.95).ingredientText ??
       KAISER_PILSNER_OCR,
@@ -260,10 +260,14 @@ test("Kaiser pilsner scores 70 from its list, its table and its alcohol together
     score.deductions.map((deduction) => [deduction.code, deduction.points]),
     [
       ["alcohol:abv", 25],
-      ["threshold:sugars", 5],
+      // Barley malt is not a curated "added_sugar" ingredient, so this
+      // trace of residual malt sugar is banded as natural (see
+      // naturalSugarOnly in nutritionThresholds.ts) rather than as if
+      // sugar had been added — 3 points instead of 5.
+      ["threshold:sugars", 3],
     ],
   );
-  assert.equal(score.score, 70);
+  assert.equal(score.score, 72);
   assert.equal(score.deductions[0].title, "Αλκοόλ 5,2% vol");
   assert.deepEqual(
     score.notices.map((notice) => notice.code),

@@ -4189,6 +4189,7 @@ async function analyzeIngredientsCore(
     '- For such an ingredient use severity "info" and describe what it is, not that it can cause an allergy — the app shows the allergen list separately.',
     "- Reserve attention/high_attention for a real problem: artificial additives, excessive sugar/salt/fat, a substance with a documented safety concern, or an undeclared quantity.",
     '- Naturally occurring sugar from an ingredient like dates, honey, fruit or fruit concentrate is not the same claim as added/refined sugar: phrase it as \"υψηλά φυσικά σάκχαρα (από [ingredient])\", never as a bare \"ζάχαρη\"/\"sugar\" claim that would read as contradicting a \"χωρίς ζάχαρη\"/\"no added sugar\" label.',
+    "- Standard food-safety processing named on the label — pasteurization, UHT/high heat treatment, sterilization, homogenization — is not itself a problem: use severity \"info\" for it, never attention/high_attention. These make a product safer to consume, not more concerning.",
     "- Do not calculate a score.",
     "- Do not claim unconditional product safety.",
     "- Do not provide medical advice.",

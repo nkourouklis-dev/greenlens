@@ -68,6 +68,32 @@ const SUGARS_SOLID: Band[] = [
   { above: -1, points: 0, label: "Χαμηλά σάκχαρα" },
 ];
 
+// Roughly half of SUGARS_DRINK/SUGARS_SOLID, for when the sugar is coming
+// from a whole-food ingredient (dates, honey, fruit) rather than an added
+// sweetener — see naturalSugarOnly on penaltiesFor. Confirmed 2026-09-22:
+// "σάκχαρα" (the sugars nutrient) is not the same claim as "ζάχαρη" (added
+// sugar), and a date bar that is 51% dates will always read high on the
+// nutrient regardless of how little it deserves the same penalty as a can
+// of soda — but it is still sugar, so this softens the deduction rather
+// than dropping it.
+const SUGARS_DRINK_NATURAL: Band[] = [
+  { above: 12, points: 30, label: "Πολύ υψηλά φυσικά σάκχαρα για ρόφημα" },
+  { above: 9, points: 27, label: "Πολύ υψηλά φυσικά σάκχαρα για ρόφημα" },
+  { above: 6, points: 20, label: "Υψηλά φυσικά σάκχαρα για ρόφημα" },
+  { above: 3, points: 14, label: "Αυξημένα φυσικά σάκχαρα για ρόφημα" },
+  { above: 1, points: 8, label: "Περιέχει φυσικά σάκχαρα" },
+  { above: 0, points: 3, label: "Ίχνη φυσικών σακχάρων" },
+  { above: -1, points: 0, label: "Χωρίς σάκχαρα" },
+];
+
+const SUGARS_SOLID_NATURAL: Band[] = [
+  { above: 22.5, points: 15, label: "Υψηλά φυσικά σάκχαρα" },
+  { above: 15, points: 10, label: "Αυξημένα φυσικά σάκχαρα" },
+  { above: 10, points: 6, label: "Μέτρια φυσικά σάκχαρα" },
+  { above: 5, points: 3, label: "Ελαφρώς αυξημένα φυσικά σάκχαρα" },
+  { above: -1, points: 0, label: "Χαμηλά σάκχαρα" },
+];
+
 const SATURATES_DRINK: Band[] = [
   { above: 2.5, points: 25, label: "Υψηλά κορεσμένα λιπαρά" },
   { above: 1.5, points: 15, label: "Αυξημένα κορεσμένα λιπαρά" },
@@ -276,6 +302,16 @@ function withoutPerBasis(declared: string): string {
 export function penaltiesFor(
   readings: NutrientReading[],
   isBeverage: boolean,
+  options?: {
+    /**
+     * True when nothing in the ingredient list matched the curated
+     * "added_sugar" rule group (sugar, glucose-fructose syrup, added
+     * fructose, ...) — meaning whatever sugar the table declares is coming
+     * from a whole-food ingredient instead. Only meaningful when there is
+     * an ingredient list to check; omit/false keeps today's full penalty.
+     */
+    naturalSugarOnly?: boolean;
+  },
 ): NutritionPenalty[] {
   const penalties: NutritionPenalty[] = [];
 
@@ -283,7 +319,13 @@ export function penaltiesFor(
     let bands: Band[] | null = null;
 
     if (reading.key === "sugars") {
-      bands = isBeverage ? SUGARS_DRINK : SUGARS_SOLID;
+      bands = options?.naturalSugarOnly
+        ? isBeverage
+          ? SUGARS_DRINK_NATURAL
+          : SUGARS_SOLID_NATURAL
+        : isBeverage
+          ? SUGARS_DRINK
+          : SUGARS_SOLID;
     } else if (reading.key === "saturates") {
       bands = isBeverage
         ? SATURATES_DRINK
