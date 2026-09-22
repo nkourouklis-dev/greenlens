@@ -69,6 +69,7 @@ import {
   normalizeProductName,
   updateProductName,
   fillMissingProductName,
+  applyAssistantDraftCopy,
   PRODUCT_NAME_MAX_LENGTH,
   type AdminProductListItem,
   type AdminProductDetail,
@@ -87,6 +88,7 @@ import {
   buildReportPrompt,
   collectCatalogueFacts,
   parseAssistantDraft,
+  type AssistantDraft,
   type AssistantReply,
 } from "./adminAssistant";
 import {
@@ -985,33 +987,22 @@ async function runAdminAssist(
   }
 }
 
-async function runAssistDraft(
-  body: Record<string, unknown>,
+/**
+ * The actual draft-writing work, shared by the admin's manual "Πρόταση
+ * κειμένου" button (runAssistDraft below) and the automatic first-scan
+ * trigger (autoApplyAssistantDraft). Throws on a missing/un-analyzed
+ * product or an unusable model reply — callers decide what that means for
+ * their response (an HTTP error for the manual button, a swallowed no-op
+ * for the automatic trigger).
+ */
+async function generateAssistantDraftForProduct(
+  barcode: string,
   env: Env,
-  origin: string | null,
-  requestId: string,
-): Promise<Response> {
-  const barcode =
-    typeof body.barcode === "string" ? body.barcode.trim() : "";
-
-  if (!barcode) {
-    return error(
-      "Λείπει το barcode.",
-      400,
-      origin,
-      requestId,
-    );
-  }
-
+): Promise<AssistantDraft> {
   const product = await getAdminProduct(env.DB, barcode);
 
   if (!product || !isRecord(product.analysisResult)) {
-    return error(
-      "Το προϊόν δεν έχει ανάλυση για να γράψει ο βοηθός.",
-      404,
-      origin,
-      requestId,
-    );
+    throw new Error("no_analysis");
   }
 
   const analysisResult = product.analysisResult;
@@ -1069,9 +1060,44 @@ async function runAssistDraft(
     : null;
 
   if (!draft) {
+    throw new Error("unusable_draft");
+  }
+
+  return draft;
+}
+
+async function runAssistDraft(
+  body: Record<string, unknown>,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const barcode =
+    typeof body.barcode === "string" ? body.barcode.trim() : "";
+
+  if (!barcode) {
     return error(
-      "Ο βοηθός δεν επέστρεψε αξιοποιήσιμο κείμενο. Δοκιμάστε ξανά.",
-      502,
+      "Λείπει το barcode.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  let draft: AssistantDraft;
+
+  try {
+    draft = await generateAssistantDraftForProduct(barcode, env);
+  } catch (caughtError) {
+    const isNoAnalysis =
+      caughtError instanceof Error &&
+      caughtError.message === "no_analysis";
+
+    return error(
+      isNoAnalysis
+        ? "Το προϊόν δεν έχει ανάλυση για να γράψει ο βοηθός."
+        : "Ο βοηθός δεν επέστρεψε αξιοποιήσιμο κείμενο. Δοκιμάστε ξανά.",
+      isNoAnalysis ? 404 : 502,
       origin,
       requestId,
     );
@@ -1089,6 +1115,82 @@ async function runAssistDraft(
     origin,
     requestId,
   );
+}
+
+/**
+ * Writes a brand-new product's first catalogue copy automatically, right
+ * after its very first scan is cached (see the isNewProduct callers below)
+ * — the same draft the admin's "Πρόταση κειμένου" button would produce,
+ * applied immediately instead of waiting for someone to click through to
+ * every new barcode by hand.
+ *
+ * Deliberately does not mark the row 'verified': this is an unreviewed AI
+ * draft standing in for empty copy, not a human sign-off, so it must stay
+ * exactly as easy to override as the AI-generated fields already are. Only
+ * `summary` and the three executiveSummary fields are touched — everything
+ * else on the row (score, findings, sourceText, status) is left alone.
+ *
+ * Best-effort and silent: this runs after the scan response that matters
+ * has already been decided, so a failure here (model hiccup, D1 hiccup)
+ * must never surface as a scan failure to the person who just took the
+ * photo.
+ */
+async function autoApplyAssistantDraft(
+  env: Env,
+  barcode: string,
+): Promise<void> {
+  try {
+    const draft = await generateAssistantDraftForProduct(barcode, env);
+
+    const product = await getAdminProduct(env.DB, barcode);
+
+    if (!product || !isRecord(product.analysisResult)) {
+      return;
+    }
+
+    const analysisResult = product.analysisResult;
+
+    const executiveSummary = isRecord(analysisResult.executiveSummary)
+      ? analysisResult.executiveSummary
+      : {};
+
+    const updatedAnalysisResult = {
+      ...analysisResult,
+      summary: draft.summary || analysisResult.summary,
+      executiveSummary: {
+        ...executiveSummary,
+        overallVerdict:
+          draft.overallVerdict || executiveSummary.overallVerdict,
+        highlights:
+          draft.highlights.length > 0
+            ? draft.highlights
+            : executiveSummary.highlights,
+        watchOutFor:
+          draft.watchOutFor.length > 0
+            ? draft.watchOutFor
+            : executiveSummary.watchOutFor,
+      },
+    };
+
+    await applyAssistantDraftCopy(
+      env.DB,
+      barcode,
+      updatedAnalysisResult,
+    );
+
+    console.log("admin_assist_auto_draft_applied", {
+      barcode,
+      highlights: draft.highlights.length,
+    });
+  } catch (caughtError) {
+    console.error("admin_assist_auto_draft_failed", {
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+  }
 }
 
 async function runAssistReport(
@@ -4397,13 +4499,17 @@ async function analyzeIngredientsCore(
     // future, much clearer scan of the same barcode into the same
     // "insufficient data" answer forever.
     if (score.score !== null) {
-      await saveProductResult(env.DB, {
+      const { isNewProduct } = await saveProductResult(env.DB, {
         barcode,
         productName: productTitle ?? null,
         category: "ingredients",
         analysisResult: responseBody,
         versionSource,
       });
+
+      if (isNewProduct) {
+        await autoApplyAssistantDraft(env, barcode);
+      }
     }
 
     return { ok: true, responseBody };
@@ -4750,13 +4856,17 @@ async function analyzeNutritionCore(
     // be null (insufficient_data) on a valid parse with shaky evidence,
     // and that's a fact about this scan, not the product.
     if (score.score !== null) {
-      await saveProductResult(env.DB, {
+      const { isNewProduct } = await saveProductResult(env.DB, {
         barcode,
         productName: productTitle ?? null,
         category: "nutrition",
         analysisResult: responseBody,
         versionSource,
       });
+
+      if (isNewProduct) {
+        await autoApplyAssistantDraft(env, barcode);
+      }
     }
 
     return { ok: true, responseBody };
@@ -5032,11 +5142,15 @@ async function runChemicalAnalysisPath(
     // be null (insufficient_data) on a valid parse with shaky evidence,
     // and that's a fact about this scan, not the product.
     if (score.score !== null) {
-      await saveProductResult(env.DB, {
+      const { isNewProduct } = await saveProductResult(env.DB, {
         barcode: requestBody.barcode,
         category: "chemical_composition",
         analysisResult: responseBody,
       });
+
+      if (isNewProduct) {
+        await autoApplyAssistantDraft(env, requestBody.barcode);
+      }
     }
 
     return json(

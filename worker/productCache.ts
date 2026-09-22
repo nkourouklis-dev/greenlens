@@ -209,6 +209,10 @@ export async function incrementProductScanCount(
  *
  * Never throws — a failure to cache must not fail the request that already
  * has a perfectly good, freshly computed result to return.
+ *
+ * Returns whether this barcode had never been saved before, so a caller can
+ * decide to do something only once per product's life (e.g. writing its
+ * first catalogue copy) without a second read of its own.
  */
 export async function saveProductResult(
   db: D1Like,
@@ -220,10 +224,11 @@ export async function saveProductResult(
     /** Which route produced this result, for the version log. */
     versionSource?: ProductVersionSource;
   },
-): Promise<void> {
+): Promise<{ isNewProduct: boolean }> {
   // Read before writing: once the upsert has run there is no way to tell
-  // whether the verified guard skipped it.
+  // whether the verified guard skipped it, or whether the row existed at all.
   const existing = await readProductStatus(db, params.barcode);
+  const isNewProduct = existing === null;
 
   const overwriteVerified = params.versionSource === "admin_analyze";
 
@@ -271,6 +276,8 @@ export async function saveProductResult(
     analysisResult: params.analysisResult,
     applied,
   });
+
+  return { isNewProduct };
 }
 
 /**

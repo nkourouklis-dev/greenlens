@@ -376,6 +376,30 @@ export function validateVerifiedAnalysisResult(
   };
 }
 
+/**
+ * Writes only the copy fields (summary + the three executiveSummary
+ * fields) from an auto-generated assistant draft — see
+ * autoApplyAssistantDraft in index.ts. Guarded by `status != 'verified'`
+ * for the same reason saveProductResult is: an admin's sign-off must never
+ * be silently overwritten, whether by a routine rescan or by this. Status
+ * itself is left untouched either way — this is not a verification.
+ */
+export async function applyAssistantDraftCopy(
+  db: D1Like,
+  barcode: string,
+  analysisResult: Record<string, unknown>,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE products
+       SET analysis_result = ?,
+           updated_at = datetime('now')
+       WHERE barcode = ? AND status != 'verified'`,
+    )
+    .bind(JSON.stringify(analysisResult), barcode)
+    .run();
+}
+
 export async function saveVerifiedProduct(
   db: D1Like,
   params: {
