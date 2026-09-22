@@ -6,25 +6,67 @@
  * Tailwind palette classes, so the whole flow stays visually consistent.
  */
 @theme {
+	/* Light, airy palette. The hardcoded slate/status classes used across the
+	   pages are remapped here (instead of rewritten one by one), so 900 is a
+	   white card, 950 the page canvas, and the status "950/100/300" pairs read
+	   as pale tint + dark text. */
+	--color-slate-950: #f4f6f3;
+	--color-slate-900: #ffffff;
+	--color-slate-800: #e8ece8;
+	--color-slate-700: #d3d9d4;
+	--color-slate-600: #b4bcb6;
+	--color-slate-500: #8a948d;
+	--color-slate-400: #66706a;
+	--color-slate-300: #454f49;
+	--color-slate-200: #2a322d;
+	--color-slate-100: #161c18;
+	--color-slate-50: #0b0f0d;
+
+	--color-red-950: #fef2f2;
+	--color-red-50: #450a0a;
+	--color-red-100: #7f1d1d;
+	--color-red-200: #991b1b;
+	--color-red-300: #b91c1c;
+	--color-red-400: #dc2626;
+	--color-amber-950: #fffbeb;
+	--color-amber-50: #451a03;
+	--color-amber-100: #78350f;
+	--color-amber-200: #92400e;
+	--color-amber-300: #b45309;
+	--color-amber-400: #d97706;
+	--color-orange-300: #c2410c;
+	--color-yellow-200: #a16207;
+	--color-emerald-950: #ecfdf5;
+	--color-emerald-100: #064e3b;
+	--color-emerald-200: #065f46;
+	--color-emerald-300: #047857;
+	--color-emerald-400: #059669;
+	--color-sky-50: #0c4a6e;
+	--color-sky-100: #075985;
+	--color-sky-200: #0369a1;
+	--color-sky-300: #0284c7;
+
 	--color-canvas: var(--color-slate-950);
 	--color-surface: var(--color-slate-900);
 	--color-surface-muted: var(--color-slate-800);
 	--color-line: var(--color-slate-700);
 	--color-line-subtle: var(--color-slate-800);
-	--color-ink: var(--color-white);
+	--color-ink: var(--color-slate-50);
 	--color-ink-muted: var(--color-slate-300);
 	--color-ink-faint: var(--color-slate-400);
 	--color-ink-faintest: var(--color-slate-500);
 	--color-accent: var(--color-emerald-500);
 	--color-accent-strong: var(--color-emerald-400);
 	--color-accent-soft: var(--color-emerald-300);
-	--color-on-accent: var(--color-slate-950);
+	--color-on-accent: #06251a;
 }
 
 :root {
 	color: var(--color-ink);
 	background: var(--color-canvas);
-	font-family: ui-sans-serif, system-ui, sans-serif;
+	font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+	color-scheme: light;
+	-webkit-font-smoothing: antialiased;
 }
 
 body {

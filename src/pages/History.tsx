@@ -1,4 +1,3 @@
-import React from "react";
 import { Search, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -8,6 +7,7 @@ import {
   getHistory,
   getStorageUsage,
 } from "../services/historyService";
+import { formatRelativeDate, scoreBandMeta } from "../utils/scoreBand";
 import type { ScanHistoryItem } from "../types";
 
 function HistoryThumbnail(props: {
@@ -19,17 +19,19 @@ function HistoryThumbnail(props: {
     "";
 
   const classes =
-    "h-16 w-16 shrink-0 rounded-lg bg-slate-800 object-cover";
+    "h-20 w-20 shrink-0 rounded-2xl bg-slate-800 object-cover";
 
   if (!source) {
     return <span className={classes} />;
   }
 
-  return React.createElement("img", {
-    src: source,
-    alt: "Φωτογραφία προϊόντος",
-    className: classes,
-  });
+  return (
+    <img
+      src={source}
+      alt="Φωτογραφία προϊόντος"
+      className={classes}
+    />
+  );
 }
 
 export default function History() {
@@ -84,7 +86,7 @@ export default function History() {
   );
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-5 text-white">
+    <main className="min-h-screen bg-canvas px-4 py-5 text-ink">
       <section className="mx-auto max-w-md">
         <div className="flex items-baseline justify-between">
           <h1 className="text-2xl font-bold">
@@ -118,7 +120,7 @@ export default function History() {
         </label>
 
         {visible.length === 0 ? (
-          <div className="mt-8 rounded-xl border border-slate-800 bg-slate-900 p-5">
+          <div className="mt-8 rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-5">
             <p className="text-slate-300">
               Δεν υπάρχουν σαρώσεις που ταιριάζουν.
             </p>
@@ -126,17 +128,22 @@ export default function History() {
             <button
               type="button"
               onClick={() => navigate("/scan")}
-              className="mt-4 h-12 rounded-xl bg-emerald-500 px-4 font-bold text-slate-950"
+              className="mt-4 h-12 rounded-xl bg-emerald-500 px-4 font-bold text-on-accent"
             >
               Σάρωση πρώτου προϊόντος
             </button>
           </div>
         ) : (
           <div className="mt-5 space-y-3">
-            {visible.map((item) => (
+            {visible.map((item) => {
+              const band = item.analysis?.score?.band;
+              const meta = band ? scoreBandMeta[band] : null;
+              const numericScore = item.analysis?.score?.score;
+
+              return (
               <div
                 key={item.id}
-                className="rounded-xl border border-slate-800 bg-slate-900"
+                className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm transition active:scale-[0.99]"
               >
                 <div className="flex gap-3 p-3">
                   <button
@@ -152,42 +159,49 @@ export default function History() {
                       item={item}
                     />
 
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-semibold">
+                    <span className="min-w-0 flex-1 py-0.5">
+                      <span className="block truncate text-[15px] font-bold">
                         {item.productName ||
                           "Νέο προϊόν"}
                       </span>
 
-                      <span className="mt-1 block text-xs text-slate-400">
+                      <span className="mt-0.5 block truncate text-xs text-slate-400">
                         {item.barcode}
                       </span>
 
-                      <span className="mt-1 block text-xs text-slate-500">
-                        {new Date(
-                          item.scannedAt,
-                        ).toLocaleString("el-GR")}
+                      <span className="mt-2 flex items-center gap-2">
+                        {meta ? (
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-full bg-slate-800 px-2 py-1 text-[11px] font-semibold ${meta.textClass}`}
+                          >
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`}
+                            />
+                            {meta.label}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-500">
+                            {item.analysis
+                              ? "Ανεπαρκή στοιχεία"
+                              : "Εκκρεμεί ανάλυση"}
+                          </span>
+                        )}
+
+                        <span className="text-[11px] text-slate-500">
+                          {formatRelativeDate(item.scannedAt)}
+                        </span>
                       </span>
                     </span>
                   </button>
 
-                  <div className="flex flex-col items-end justify-between">
-                    <span className="text-xs">
-                      {item.analysis?.score?.score !=
-                      null ? (
-                        <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-emerald-200">
-                          {
-                            item.analysis?.score
-                              ?.score
-                          }
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">
-                          {item.analysis
-                            ? "Ανεπαρκή"
-                            : "Ετικέτα"}
-                        </span>
-                      )}
-                    </span>
+                  <div className="flex flex-col items-center justify-between">
+                    {numericScore != null && meta && (
+                      <span
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-800 text-sm font-extrabold ${meta.vividTextClass}`}
+                      >
+                        {numericScore}
+                      </span>
+                    )}
 
                     <button
                       type="button"
@@ -232,14 +246,15 @@ export default function History() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
         <button
           type="button"
           onClick={() => navigate("/scan")}
-          className="mt-6 h-14 w-full rounded-xl bg-emerald-500 font-bold text-slate-950"
+          className="mt-6 h-14 w-full rounded-xl bg-emerald-500 font-bold text-on-accent"
         >
           Νέα σάρωση
         </button>

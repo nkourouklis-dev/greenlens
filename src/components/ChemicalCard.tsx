@@ -1,5 +1,6 @@
 import { CheckCircle2, AlertTriangle, ChevronDown, Minus } from "lucide-react";
 import { useState } from "react";
+import { ratingDotClass } from "../utils/scoreBand";
 import type {
   ChemicalInsight,
   EvidenceLevel,
@@ -42,7 +43,7 @@ export default function ChemicalCard(props: {
   const [open, setOpen] = useState(false);
 
   return (
-    <article className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <article className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -50,11 +51,14 @@ export default function ChemicalCard(props: {
         className="flex w-full items-start justify-between gap-2 text-left"
       >
         <div className="min-w-0">
-          <h3 className="break-words text-sm font-semibold leading-tight text-slate-100">
+          <h3 className="flex items-center gap-2 break-words text-sm font-semibold leading-tight text-slate-100">
+            <span
+              className={`h-2 w-2 shrink-0 rounded-full ${ratingDotClass[insight.rating]}`}
+            />
             {insight.substance}
           </h3>
 
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 pl-4 text-xs text-slate-500">
             {insight.concentration ?? "Χωρίς μετρημένη τιμή"}
             {insight.referenceLimit && (
               <span> · Όριο αναφοράς: {insight.referenceLimit}</span>

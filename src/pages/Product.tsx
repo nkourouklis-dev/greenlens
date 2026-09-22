@@ -1,4 +1,3 @@
-import React from "react";
 import {
   Camera,
   RefreshCw,
@@ -13,6 +12,7 @@ import {
   deriveExecutiveSummary,
   deriveIngredientInsights,
 } from "../utils/ingredientInsights";
+import { scoreBandMeta } from "../utils/scoreBand";
 import type {
   ContentCategory,
   ProductAnalysisRecord,
@@ -42,59 +42,6 @@ const sectionTitleByCategory: Record<ContentCategory, string> = {
   unknown: "",
 };
 
-const bands: Record<
-  ScoreBreakdown["band"],
-  [string, string, string]
-> = {
-  excellent: [
-    "Εξαιρετική επιλογή",
-    "text-emerald-300",
-    "border-emerald-400/40",
-  ],
-  good: [
-    "Καλή επιλογή",
-    "text-green-300",
-    "border-green-400/40",
-  ],
-  moderate: [
-    "Μέτρια επιλογή",
-    "text-yellow-200",
-    "border-yellow-400/40",
-  ],
-  attention: [
-    "Χρειάζεται προσοχή",
-    "text-orange-300",
-    "border-orange-400/40",
-  ],
-  high_attention: [
-    "Πολλές επισημάνσεις",
-    "text-red-300",
-    "border-red-400/40",
-  ],
-  insufficient_data: [
-    "Ανεπαρκή στοιχεία",
-    "text-slate-300",
-    "border-slate-700",
-  ],
-};
-
-function ProductImage(props: {
-  source: string;
-}) {
-  const classes =
-    "h-24 w-20 shrink-0 rounded-xl bg-slate-800 object-cover";
-
-  if (!props.source) {
-    return <span className={classes} />;
-  }
-
-  return React.createElement("img", {
-    src: props.source,
-    alt: "Φωτογραφία προϊόντος",
-    className: classes,
-  });
-}
-
 export default function Product() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -103,7 +50,7 @@ export default function Product() {
 
   if (!item) {
     return (
-      <main className="min-h-screen bg-slate-950 px-4 py-6 text-white">
+      <main className="min-h-screen bg-canvas px-4 py-6 text-ink">
         <section className="mx-auto max-w-md">
           <h1 className="text-2xl font-bold">
             Το προϊόν δεν βρέθηκε
@@ -112,7 +59,7 @@ export default function Product() {
           <button
             type="button"
             onClick={() => navigate("/scan")}
-            className="mt-5 h-12 rounded-xl bg-emerald-500 px-4 font-bold text-slate-950"
+            className="mt-5 h-12 rounded-xl bg-emerald-500 px-4 font-bold text-on-accent"
           >
             Νέα σάρωση
           </button>
@@ -136,54 +83,73 @@ export default function Product() {
     scoringVersion: "unknown",
   };
 
-  return (
-    <main className="min-h-screen bg-slate-950 px-4 py-5 text-white">
-      <section className="mx-auto max-w-md space-y-4">
-        <article className="flex gap-4 rounded-2xl border border-slate-800 bg-slate-900 p-4">
-          <ProductImage
-            source={
-              item.productPhoto ??
-              item.ingredientsPhoto ??
-              ""
-            }
-          />
+  const photoSource =
+    item.productPhoto ?? item.ingredientsPhoto ?? "";
 
-          <div className="min-w-0">
-            <h1 className="truncate text-xl font-bold">
+  const categoryChip = record
+    ? readContentCategory(record) === "ingredients"
+      ? record.productType === "food"
+        ? "Τρόφιμο"
+        : record.productType === "cosmetic"
+          ? "Καλλυντικό"
+          : "Άγνωστη κατηγορία"
+      : sectionTitleByCategory[readContentCategory(record)] ||
+        "Άγνωστο περιεχόμενο"
+    : null;
+
+  const meta = scoreBandMeta[score.band];
+
+  return (
+    <main className="min-h-screen bg-canvas pb-5 text-ink">
+      <section className="mx-auto max-w-md">
+        <div className="relative h-64 w-full overflow-hidden bg-slate-800">
+          {photoSource ? (
+            <img
+              src={photoSource}
+              alt="Φωτογραφία προϊόντος"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="h-full w-full bg-gradient-to-br from-emerald-800 via-slate-800 to-slate-900" />
+          )}
+
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
+
+          {record && score.score != null && (
+            <div className="absolute right-4 top-4 flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-lg">
+              <strong className={`text-lg font-extrabold ${meta.vividTextClass}`}>
+                {score.score}
+              </strong>
+            </div>
+          )}
+
+          <div className="absolute inset-x-4 bottom-4">
+            {categoryChip && (
+              <span className="mb-2 inline-block rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur-sm">
+                {categoryChip}
+              </span>
+            )}
+
+            <h1 className="text-2xl font-bold leading-tight text-white drop-shadow-sm">
               {item.productName || "Νέο προϊόν"}
             </h1>
 
-            <p className="mt-1 text-sm text-slate-400">
+            <p className="mt-1 text-sm text-white/75">
               {item.barcode}
             </p>
 
-            <p className="mt-2 text-xs text-slate-500">
-              {new Date(
-                item.scannedAt,
-              ).toLocaleString("el-GR")}
-            </p>
-
-            {record && readContentCategory(record) === "ingredients" && (
-              <p className="mt-2 inline-block rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">
-                {record.productType === "food"
-                  ? "Τρόφιμο"
-                  : record.productType ===
-                      "cosmetic"
-                    ? "Καλλυντικό"
-                    : "Άγνωστη κατηγορία"}
-              </p>
-            )}
-            {record && readContentCategory(record) !== "ingredients" && (
-              <p className="mt-2 inline-block rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">
-                {sectionTitleByCategory[readContentCategory(record)] ||
-                  "Άγνωστο περιεχόμενο"}
-              </p>
+            {record && (
+              <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-black/35 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur-sm">
+                <span className={`h-2 w-2 rounded-full ${meta.dotClass}`} />
+                {meta.label}
+              </span>
             )}
           </div>
-        </article>
+        </div>
 
+        <div className="space-y-4 px-4 pt-4">
         {!record ? (
-          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
             <p className="font-semibold">
               Η ετικέτα αναγνώστηκε
             </p>
@@ -199,7 +165,7 @@ export default function Product() {
                   `/product/${id}/analysis`,
                 )
               }
-              className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 font-bold text-slate-950"
+              className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 font-bold text-on-accent"
             >
               <RefreshCw size={18} />
               Ανάλυση συστατικών
@@ -265,6 +231,7 @@ export default function Product() {
           συχνότητα χρήσης, αλλεργίες και ατομικές
           ανάγκες.
         </p>
+        </div>
       </section>
     </main>
   );
@@ -290,7 +257,7 @@ function Result(props: {
         <button
           type="button"
           onClick={props.onRetakePhoto}
-          className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 font-bold text-slate-950"
+          className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 font-bold text-on-accent"
         >
           <Camera size={18} />
           Ξαναπροσπάθησε
@@ -317,7 +284,7 @@ function Result(props: {
         <button
           type="button"
           onClick={props.onRetakePhoto}
-          className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 font-bold text-slate-950"
+          className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 font-bold text-on-accent"
         >
           <Camera size={18} />
           Ξαναπροσπάθησε
@@ -326,8 +293,8 @@ function Result(props: {
     );
   }
 
-  const [label, color, borderColor] =
-    bands[props.score.band];
+  const { label, textClass: color, borderClass: borderColor } =
+    scoreBandMeta[props.score.band];
 
   const ingredientInsights =
     category === "ingredients"
@@ -402,48 +369,27 @@ function Result(props: {
   return (
     <>
       <section
-        className={`rounded-2xl border bg-slate-900 p-5 ${borderColor}`}
+        className={`flex items-center justify-between gap-3 rounded-2xl border bg-slate-900 p-4 shadow-sm ${borderColor}`}
       >
-        <div className="flex items-center gap-5">
-          <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-slate-800">
-            <div className="text-center">
-              <strong
-                className={`text-3xl ${color}`}
-              >
-                {props.score.score ?? "-"}
-              </strong>
+        <div className="min-w-0">
+          <p className={`text-base font-bold ${color}`}>
+            {label}
+          </p>
 
-              <span className="block text-xs text-slate-400">
-                στα 100
-              </span>
-            </div>
-          </div>
-
-          <div className="min-w-0">
-            <p
-              className={`text-lg font-bold ${color}`}
-            >
-              {label}
-            </p>
-
-            <p className="mt-1 text-sm text-slate-400">
-              Εμπιστοσύνη{" "}
-              {Math.round(
-                props.score.confidence * 100,
-              )}
-              %
-            </p>
-
-            <button
-              type="button"
-              onClick={props.onReanalyze}
-              className="mt-2 flex items-center gap-1 text-xs text-emerald-300"
-            >
-              <RefreshCw size={14} />
-              Νέα ανάλυση
-            </button>
-          </div>
+          <p className="mt-0.5 text-xs text-slate-400">
+            Εμπιστοσύνη{" "}
+            {Math.round(props.score.confidence * 100)}%
+          </p>
         </div>
+
+        <button
+          type="button"
+          onClick={props.onReanalyze}
+          className="flex shrink-0 items-center gap-1.5 rounded-full border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 transition active:scale-95"
+        >
+          <RefreshCw size={14} />
+          Νέα ανάλυση
+        </button>
       </section>
 
       <ScoreNoticesCard
@@ -453,13 +399,10 @@ function Result(props: {
 
       <AllergenNoticeCard notice={allergenNotice} />
 
-      <ExecutiveSummaryCard
-        summary={executiveSummary}
-        finalScore={props.score.score}
-      />
+      <ExecutiveSummaryCard summary={executiveSummary} />
 
       {summary && (
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
           <h2 className="font-bold">Περίληψη</h2>
 
           <p className="mt-2 text-sm leading-6 text-slate-300">
@@ -511,7 +454,7 @@ function Result(props: {
         insights={category === "ingredients" ? ingredientInsights : []}
       />
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
         <h2 className="font-bold">Σύγκριση</h2>
 
         <p className="mt-2 text-sm text-slate-400">

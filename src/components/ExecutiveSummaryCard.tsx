@@ -3,12 +3,11 @@ import type { ExecutiveSummary } from "../types";
 
 export default function ExecutiveSummaryCard(props: {
   summary: ExecutiveSummary;
-  finalScore: number | null;
 }) {
-  const { summary, finalScore } = props;
+  const { summary } = props;
 
   return (
-    <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
       <div className="flex items-baseline justify-between">
         <h2 className="font-bold">Με μια ματιά</h2>
         <span className="text-sm font-semibold text-emerald-300">
@@ -65,12 +64,6 @@ export default function ExecutiveSummaryCard(props: {
             </li>
           ))}
         </ul>
-      )}
-
-      {finalScore !== null && (
-        <p className="mt-4 border-t border-slate-800 pt-3 text-sm font-semibold text-slate-200">
-          Τελική βαθμολογία: {finalScore}/100
-        </p>
       )}
     </section>
   );

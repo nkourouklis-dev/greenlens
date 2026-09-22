@@ -9,26 +9,6 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { useLocation } from "react-router-dom";
-
-// Routes that make up the barcode -> ingredients -> product-photo capture
-// flow. The camera stream is allowed to stay alive while navigating between
-// these; leaving all of them (Home, History, Product, analysis...) is what
-// "exiting the flow" means, and is the only time we release the hardware.
-const SCAN_FLOW_PATHS = [
-  "/scan",
-  "/add-product",
-  "/ingredients-photo",
-  "/ingredients-review",
-  "/product-photo",
-  "/admin/capture",
-];
-
-function isScanFlowPath(pathname: string): boolean {
-  return SCAN_FLOW_PATHS.some(
-    (path) => pathname === path || pathname.startsWith(`${path}/`),
-  );
-}
 
 export interface CapturedPhoto {
   file: File;
@@ -437,22 +417,16 @@ export function CameraProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // Release the camera if the whole app unmounts (teardown/hot reload).
+  // Release the camera only when the whole app unmounts (teardown/hot
+  // reload) — never on ordinary navigation. Once granted, the permission
+  // and the live stream both stay warm for the rest of the session, so
+  // bouncing between Scan and other pages never re-triggers the browser's
+  // camera prompt.
   useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, []);
-
-  // The one and only place the stream gets torn down between navigations:
-  // once the route is no longer part of the scan flow, the flow is over.
-  const location = useLocation();
-
-  useEffect(() => {
-    if (!isScanFlowPath(location.pathname)) {
-      stop();
-    }
-  }, [location.pathname, stop]);
 
   const portalTarget = viewport ?? fallbackNode;
 
