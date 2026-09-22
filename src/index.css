@@ -61,6 +61,15 @@
 	--color-on-accent: #06251a;
 }
 
+/* Vertical space the floating pill nav (MobileNav.tsx) + its bottom margin
+   actually occupies. Single source of truth so every fixed bottom bar
+   clears it — a bar that hardcodes its own offset silently drifts out of
+   sync whenever the nav's own size changes, which is exactly what left the
+   "Αποθήκευση" CTA overlapping the nav after the nav was redesigned. */
+:root {
+	--nav-clearance: calc(5rem + env(safe-area-inset-bottom));
+}
+
 :root {
 	color: var(--color-ink);
 	background: var(--color-canvas);
@@ -81,6 +90,6 @@ label {
 	font: inherit;
 }
 
-main { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+main { padding-bottom: var(--nav-clearance); }
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--color-accent-strong); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }

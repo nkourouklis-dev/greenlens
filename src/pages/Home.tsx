@@ -49,14 +49,19 @@ export default function Home() {
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
+        {/* auto-fit instead of a fixed grid-cols-3: at normal text size
+            three ~6.5rem cards fit a side by side, but iOS "Larger Text"
+            (Dynamic Type/zoom) can grow the card content past that width —
+            auto-fit lets a card wrap to its own row instead of being
+            squeezed and clipped inside a column that no longer fits it. */}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] gap-3">
           {features.map(({ icon: Icon, title, text }) => (
-            <div key={title} className="rounded-3xl border border-line-subtle bg-surface p-3 shadow-sm">
-              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/15 text-accent-strong">
+            <div key={title} className="min-w-0 rounded-3xl border border-line-subtle bg-surface p-3 shadow-sm">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-accent-strong">
                 <Icon size={18} />
               </span>
-              <p className="mt-3 text-xs text-ink-faint">{title}</p>
-              <p className="text-sm font-bold leading-tight">{text}</p>
+              <p className="mt-3 break-words text-xs text-ink-faint">{title}</p>
+              <p className="break-words text-sm font-bold leading-tight">{text}</p>
             </div>
           ))}
         </div>

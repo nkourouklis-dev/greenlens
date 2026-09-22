@@ -114,15 +114,6 @@ export default function IngredientsPhoto() {
   return (
     <main className="bg-canvas px-4 py-4 pb-20 text-ink">
       <section className="mx-auto flex max-w-md flex-col gap-3">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          disabled={isSaving}
-          className="inline-flex h-9 items-center text-xs font-semibold text-accent-strong disabled:opacity-50"
-        >
-          ← Πίσω
-        </button>
-
         <div className="flex gap-1.5">
           <div className="h-1.5 flex-1 rounded-full bg-accent" />
           <div className="h-1.5 flex-1 rounded-full bg-surface-muted" />

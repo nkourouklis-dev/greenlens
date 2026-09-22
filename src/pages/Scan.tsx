@@ -340,19 +340,6 @@ export default function Scan() {
     return (
       <main className="min-h-screen bg-canvas px-4 pb-28 pt-5 text-ink">
         <section className="mx-auto max-w-md">
-          <button
-            type="button"
-            onClick={() => {
-              setExistingItem(null);
-              setBarcode("");
-              setManualBarcode("");
-              startDecoding();
-            }}
-            className="mb-4 inline-flex min-h-10 items-center text-sm font-semibold text-accent-strong"
-          >
-            ← Πίσω στη σάρωση
-          </button>
-
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-accent-strong">
             Υπάρχουσα καταχώρηση
           </p>
@@ -461,15 +448,7 @@ export default function Scan() {
     <main className="min-h-screen bg-canvas px-4 pb-28 pt-4 text-ink">
       <section className="mx-auto max-w-md">
         <header className="mb-4">
-          <button
-            type="button"
-            onClick={() => navigate("/")}
-            className="inline-flex min-h-10 items-center text-sm font-semibold text-accent-strong"
-          >
-            ← Επιστροφή
-          </button>
-
-          <div className="mt-1">
+          <div>
             <h1 className="text-2xl font-bold">
               Σάρωση προϊόντος
             </h1>

@@ -1064,7 +1064,7 @@ function AdminProductDetailContent() {
       </section>
 
       {canEdit && (
-        <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10">
+        <div className="fixed inset-x-0 z-10" style={{ bottom: "var(--nav-clearance)" }}>
           <div
             aria-hidden
             className="h-6 bg-gradient-to-t from-transparent to-canvas"

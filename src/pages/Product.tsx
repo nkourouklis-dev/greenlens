@@ -86,15 +86,16 @@ export default function Product() {
   const photoSource =
     item.productPhoto ?? item.ingredientsPhoto ?? "";
 
+  const category = record ? readContentCategory(record) : null;
+
   const categoryChip = record
-    ? readContentCategory(record) === "ingredients"
+    ? category === "ingredients"
       ? record.productType === "food"
         ? "Τρόφιμο"
         : record.productType === "cosmetic"
           ? "Καλλυντικό"
           : "Άγνωστη κατηγορία"
-      : sectionTitleByCategory[readContentCategory(record)] ||
-        "Άγνωστο περιεχόμενο"
+      : sectionTitleByCategory[category!] || "Άγνωστο περιεχόμενο"
     : null;
 
   const meta = scoreBandMeta[score.band];
@@ -197,12 +198,32 @@ export default function Product() {
           productName={item.productName}
           barcode={item.barcode}
           score={item.analysis?.score?.score}
-          summary={item.analysis?.structured?.summary}
-          positives={item.analysis?.structured?.positives}
-          attentionItems={item.analysis?.structured?.attentionItems}
+          summary={
+            category === "nutrition"
+              ? record?.nutritionAnalysis?.structured.summary
+              : category === "chemical_composition"
+                ? record?.chemicalAnalysis?.structured.summary
+                : record?.structured?.summary
+          }
+          positives={
+            category === "nutrition"
+              ? record?.nutritionAnalysis?.structured.positives
+              : category === "chemical_composition"
+                ? record?.chemicalAnalysis?.structured.positives
+                : record?.structured?.positives
+          }
+          attentionItems={
+            category === "nutrition"
+              ? record?.nutritionAnalysis?.structured.attentionItems
+              : category === "chemical_composition"
+                ? record?.chemicalAnalysis?.structured.attentionItems
+                : record?.structured?.attentionItems
+          }
           allergens={
-            item.analysis?.allergenNotice?.labels ??
-            item.analysis?.structured?.potentialAllergens
+            record?.allergenNotice?.labels ??
+            (category === "ingredients"
+              ? record?.structured?.potentialAllergens
+              : undefined)
           }
         />
 

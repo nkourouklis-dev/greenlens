@@ -364,8 +364,11 @@ export default function PhotoCapture({
 
       {/* Sticky CTA: always fixed just above the bottom nav so the primary
           action is never lost to scroll. The gradient strip signals that
-          content can continue above it even when nothing is currently cut off. */}
-      <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10">
+          content can continue above it even when nothing is currently cut off.
+          Offset from --nav-clearance (index.css) rather than a hardcoded
+          value, so it always clears the floating pill nav even if the nav's
+          own size changes later. */}
+      <div className="fixed inset-x-0 z-10" style={{ bottom: "var(--nav-clearance)" }}>
         <div aria-hidden className="h-6 bg-gradient-to-b from-transparent to-canvas" />
         <div className="border-t border-line-subtle bg-canvas px-4 pb-3 pt-2">
           <div className="mx-auto flex max-w-md flex-col gap-2">

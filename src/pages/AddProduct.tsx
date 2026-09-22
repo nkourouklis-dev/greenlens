@@ -10,15 +10,7 @@ export default function AddProduct() {
     <main className="min-h-screen bg-canvas px-4 py-8 pb-20 text-ink">
       <section className="mx-auto max-w-md rounded-3xl border border-line bg-surface p-6">
 
-        <button
-          type="button"
-          onClick={() => navigate("/scan")}
-          className="text-sm font-medium text-accent-strong"
-        >
-          ← Πίσω στη σάρωση
-        </button>
-
-        <p className="mt-8 text-sm font-semibold uppercase tracking-wide text-accent-strong">
+        <p className="text-sm font-semibold uppercase tracking-wide text-accent-strong">
           Βήμα 1 ολοκληρώθηκε
         </p>
 
