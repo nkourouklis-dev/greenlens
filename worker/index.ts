@@ -1,4 +1,5 @@
-﻿import {
+﻿import { timedStage } from "./stageTiming";
+import {
   validateOcrRequest,
   type OcrResponse,
 } from "./ocr";
@@ -2900,12 +2901,12 @@ async function runOcr(
     const startedAt = Date.now();
 
     const result =
-      await extractWithAzureOcr(
+      await timedStage(requestId, "ocr_azure", () => extractWithAzureOcr(
         image,
         azureEnv.AZURE_VISION_ENDPOINT,
         azureEnv.AZURE_VISION_KEY,
         azureEnv.AZURE_VISION_LANGUAGE,
-      );
+      ));
 
     // Counted only once the transaction actually happened: a call that
     // threw before Azure answered was never billed, and a counter that
@@ -2975,7 +2976,7 @@ async function runOcr(
     // at a picture for this barcode, so it is kept — never at the cost of
     // the response, which is why this is awaited but can only log on
     // failure. See storeScanPhoto for what is (and isn't) retained.
-    await storeScanPhoto(env, {
+    await timedStage(requestId, "store_photo", () => storeScanPhoto(env, {
       barcode: barcode ?? "",
       image,
       photoType:
@@ -2983,7 +2984,7 @@ async function runOcr(
           ? "nutrition"
           : "ingredients",
       requestId,
-    });
+    }));
 
     return json(
       result,
@@ -3456,10 +3457,10 @@ async function runAnalysis(
   // cache miss (including any D1 failure — lookupCachedProduct degrades to
   // null rather than throwing) falls straight through to the normal flow
   // below, unchanged.
-  const cached = await lookupCachedProduct(
+  const cached = await timedStage(requestId, "cache_lookup", () => lookupCachedProduct(
     env.DB,
     requestBody.barcode,
-  );
+  ));
 
   if (cached && requestBody.mergeWithStored === true) {
     return runMergeWithStored(
@@ -3512,12 +3513,12 @@ async function runAnalysis(
     );
   }
 
-  const category = await resolveContentCategory(
+  const category = await timedStage(requestId, "category_resolve", () => resolveContentCategory(
     confirmedText,
     requestBody.categoryOverride,
     env,
     requestId,
-  );
+  ));
 
   console.log("content_category_resolved", {
     requestId,
@@ -3703,7 +3704,7 @@ async function resolveContentCategory(
   }
 
   try {
-    const modelOutput = await env.AI.run(textModel, {
+    const modelOutput = await timedStage(requestId, "model_category", () => env.AI.run(textModel, {
       messages: [
         {
           role: "system",
@@ -3717,7 +3718,7 @@ async function resolveContentCategory(
       ],
       max_tokens: 64,
       temperature: 0,
-    });
+    }));
 
     await recordUsage(env.DB, "workers_ai_text");
 
@@ -4315,7 +4316,7 @@ async function analyzeIngredientsCore(
   try {
     const startedAt = Date.now();
 
-    const modelOutput = await env.AI.run(
+    const modelOutput = await timedStage(requestId, "model_ingredients", () => env.AI.run(
       textModel,
       {
         messages: [
@@ -4332,7 +4333,7 @@ async function analyzeIngredientsCore(
         max_tokens: 2048,
         temperature: 0.2,
       },
-    );
+    ));
 
     await recordUsage(env.DB, "workers_ai_text");
 
@@ -4499,16 +4500,16 @@ async function analyzeIngredientsCore(
     // future, much clearer scan of the same barcode into the same
     // "insufficient data" answer forever.
     if (score.score !== null) {
-      const { isNewProduct } = await saveProductResult(env.DB, {
+      const { isNewProduct } = await timedStage(requestId, "save_result", () => saveProductResult(env.DB, {
         barcode,
         productName: productTitle ?? null,
         category: "ingredients",
         analysisResult: responseBody,
         versionSource,
-      });
+      }));
 
       if (isNewProduct) {
-        await autoApplyAssistantDraft(env, barcode);
+        await timedStage(requestId, "auto_copy_draft", () => autoApplyAssistantDraft(env, barcode));
       }
     }
 
@@ -4748,7 +4749,7 @@ async function analyzeNutritionCore(
   try {
     const startedAt = Date.now();
 
-    const modelOutput = await env.AI.run(textModel, {
+    const modelOutput = await timedStage(requestId, "model_nutrition", () => env.AI.run(textModel, {
       messages: [
         {
           role: "system",
@@ -4762,7 +4763,7 @@ async function analyzeNutritionCore(
       ],
       max_tokens: 2048,
       temperature: 0.2,
-    });
+    }));
 
     await recordUsage(env.DB, "workers_ai_text");
 
@@ -4856,16 +4857,16 @@ async function analyzeNutritionCore(
     // be null (insufficient_data) on a valid parse with shaky evidence,
     // and that's a fact about this scan, not the product.
     if (score.score !== null) {
-      const { isNewProduct } = await saveProductResult(env.DB, {
+      const { isNewProduct } = await timedStage(requestId, "save_result", () => saveProductResult(env.DB, {
         barcode,
         productName: productTitle ?? null,
         category: "nutrition",
         analysisResult: responseBody,
         versionSource,
-      });
+      }));
 
       if (isNewProduct) {
-        await autoApplyAssistantDraft(env, barcode);
+        await timedStage(requestId, "auto_copy_draft", () => autoApplyAssistantDraft(env, barcode));
       }
     }
 
@@ -5060,7 +5061,7 @@ async function runChemicalAnalysisPath(
   try {
     const startedAt = Date.now();
 
-    const modelOutput = await env.AI.run(textModel, {
+    const modelOutput = await timedStage(requestId, "model_chemical", () => env.AI.run(textModel, {
       messages: [
         {
           role: "system",
@@ -5074,7 +5075,7 @@ async function runChemicalAnalysisPath(
       ],
       max_tokens: 2048,
       temperature: 0.2,
-    });
+    }));
 
     await recordUsage(env.DB, "workers_ai_text");
 
@@ -5142,14 +5143,14 @@ async function runChemicalAnalysisPath(
     // be null (insufficient_data) on a valid parse with shaky evidence,
     // and that's a fact about this scan, not the product.
     if (score.score !== null) {
-      const { isNewProduct } = await saveProductResult(env.DB, {
+      const { isNewProduct } = await timedStage(requestId, "save_result", () => saveProductResult(env.DB, {
         barcode: requestBody.barcode,
         category: "chemical_composition",
         analysisResult: responseBody,
-      });
+      }));
 
       if (isNewProduct) {
-        await autoApplyAssistantDraft(env, requestBody.barcode);
+        await timedStage(requestId, "auto_copy_draft", () => autoApplyAssistantDraft(env, requestBody.barcode));
       }
     }
 
@@ -5333,7 +5334,7 @@ async function runIdentify(
 
       const startedAt = Date.now();
 
-      const modelOutput = await env.AI.run(
+      const modelOutput = await timedStage(requestId, "model_identify", () => env.AI.run(
         visionModel,
         {
           task: "query",
@@ -5344,7 +5345,7 @@ async function runIdentify(
           max_tokens: 256,
           stream: false,
         },
-      );
+      ));
 
       await recordUsage(env.DB, "workers_ai_vision");
 
