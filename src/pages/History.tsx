@@ -9,6 +9,7 @@ import {
 } from "../services/historyService";
 import { formatRelativeDate, scoreBandMeta } from "../utils/scoreBand";
 import type { ScanHistoryItem } from "../types";
+import { useAnalysisJobs } from "../services/analysisJobs";
 
 function HistoryThumbnail(props: {
   item: ScanHistoryItem;
@@ -59,9 +60,13 @@ export default function History() {
     setUsage(getStorageUsage());
   }
 
+  // Re-read the list whenever a background analysis starts or finishes, so
+  // "Αναλύεται…" turns into the score without leaving the page.
+  const { running } = useAnalysisJobs();
+
   useEffect(() => {
     refresh();
-  }, []);
+  }, [running]);
 
   function handleDelete(id: string) {
     deleteHistoryItem(id);
@@ -181,9 +186,13 @@ export default function History() {
                           </span>
                         ) : (
                           <span className="text-xs text-slate-500">
-                            {item.analysis
-                              ? "Ανεπαρκή στοιχεία"
-                              : "Εκκρεμεί ανάλυση"}
+                            {item.analysisState === "running"
+                              ? "Αναλύεται…"
+                              : item.analysisState === "failed"
+                                ? "Η ανάλυση απέτυχε"
+                                : item.analysis
+                                  ? "Ανεπαρκή στοιχεία"
+                                  : "Εκκρεμεί ανάλυση"}
                           </span>
                         )}
 

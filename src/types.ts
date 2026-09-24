@@ -359,4 +359,10 @@ export interface ScanHistoryItem {
    * stored analysis rather than scored on its own.
    */
   mergeWithStored?: boolean;
+  /**
+   * Set while the analysis runs in the background (see analysisJobs.ts), so
+   * the History list and the Product page can say so and a reload can pick
+   * the work back up. Cleared on success.
+   */
+  analysisState?: "running" | "failed";
 }

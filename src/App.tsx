@@ -1,8 +1,10 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import MobileNav from "./components/MobileNav";
 import { CameraProvider } from "./contexts/CameraContext";
 import ErrorBoundary from "./components/ErrorBoundary";
+import AnalysisBanner from "./components/AnalysisBanner";
+import { resumePendingAnalyses } from "./services/analysisJobs";
 
 const Home = lazy(() => import("./pages/Home"));
 const Scan = lazy(() => import("./pages/Scan"));
@@ -32,6 +34,10 @@ function PageFallback() {
 }
 
 export default function App() {
+  useEffect(() => {
+    resumePendingAnalyses();
+  }, []);
+
   return (
     <BrowserRouter>
       {/* Lives above the routed pages so the camera stream survives
@@ -39,6 +45,7 @@ export default function App() {
           (and re-prompted for permission) on every step. */}
       <CameraProvider>
         <MobileNav />
+        <AnalysisBanner />
         <ErrorBoundary>
           <Suspense fallback={<PageFallback />}>
             <Routes>

@@ -20,6 +20,7 @@ import type {
   ProductAnalysisRecord,
   ScoreBreakdown,
 } from "../types";
+import { useAnalysisJobs } from "../services/analysisJobs";
 import ShareScanButton from "../components/ShareScanButton";
 import AllergenNoticeCard from "../components/AllergenNoticeCard";
 import ExecutiveSummaryCard from "../components/ExecutiveSummaryCard";
@@ -47,6 +48,9 @@ const sectionTitleByCategory: Record<ContentCategory, string> = {
 export default function Product() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+
+  // Re-renders this page when a background analysis finishes.
+  useAnalysisJobs();
 
   const item = getHistoryItem(id);
 
@@ -151,10 +155,26 @@ export default function Product() {
         </div>
 
         <div className="space-y-4 px-4 pt-4">
-        {!record ? (
+        {!record && item.analysisState === "running" ? (
+          <section
+            role="status"
+            className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4"
+          >
+            <span className="block h-3 w-3 animate-pulse rounded-full bg-emerald-500" />
+
+            <p className="mt-3 font-semibold">Αναλύεται…</p>
+
+            <p className="mt-1 text-sm text-slate-400">
+              Μπορείς να συνεχίσεις με άλλη σάρωση, θα σε ειδοποιήσουμε όταν
+              είναι έτοιμο.
+            </p>
+          </section>
+        ) : !record ? (
           <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
             <p className="font-semibold">
-              Η ετικέτα αναγνώστηκε
+              {item.analysisState === "failed"
+                ? "Η ανάλυση δεν ολοκληρώθηκε"
+                : "Η ετικέτα αναγνώστηκε"}
             </p>
 
             <p className="mt-1 text-sm text-slate-400">

@@ -4,6 +4,7 @@ import PhotoCapture from "../components/PhotoCapture";
 import { clearCaptureDraft, clearOcrDraft, getIngredientsDraft, getOcrDraft } from "../services/captureDraftService";
 import { compressImageForStorage, saveHistoryItem } from "../services/historyService";
 import { identifyProduct } from "../services/identifyClient";
+import { startAnalysis } from "../services/analysisJobs";
 
 export default function ProductPhoto() {
   const [searchParams] = useSearchParams();
@@ -49,7 +50,11 @@ export default function ProductPhoto() {
       }
       clearCaptureDraft(barcode);
       if (productId) clearOcrDraft(productId);
-      navigate(`/product/${scanId}/analysis`);
+      // The analysis takes 15–30 s and nobody needs to watch it: it runs in
+      // the background and the banner announces the result, so the next scan
+      // can start right away.
+      void startAnalysis(scanId, { notify: true });
+      navigate("/scan");
     } catch {
       setError("Δεν ήταν δυνατή η αποθήκευση της φωτογραφίας. Δοκίμασε ξανά.");
     } finally {
