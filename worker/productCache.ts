@@ -228,7 +228,10 @@ export async function saveProductResult(
   // Read before writing: once the upsert has run there is no way to tell
   // whether the verified guard skipped it, or whether the row existed at all.
   const existing = await readProductStatus(db, params.barcode);
-  const isNewProduct = existing === null;
+  // A 'draft' row is one a photo upload created before any analysis ran (see
+  // ensureDraftProduct) — for a user scan that is the normal state, so the
+  // first analysis of a draft is still the product's first.
+  const isNewProduct = existing === null || existing === "draft";
 
   const overwriteVerified = params.versionSource === "admin_analyze";
 

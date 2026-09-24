@@ -1,4 +1,5 @@
 ﻿import { timedStage } from "./stageTiming";
+import { afterResponse, bindExecutionContext } from "./background";
 import {
   validateOcrRequest,
   type OcrResponse,
@@ -291,8 +292,10 @@ type JsonBody =
 export default {
   async fetch(
     request: Request,
-    env: Env,
+    baseEnv: Env,
+    ctx: ExecutionContext,
   ): Promise<Response> {
+    const env = bindExecutionContext(baseEnv, ctx);
     const origin = request.headers.get("Origin");
     const requestId = crypto.randomUUID();
 
@@ -2974,9 +2977,9 @@ async function runOcr(
 
     // The label the user just photographed is the catalogue's best chance
     // at a picture for this barcode, so it is kept — never at the cost of
-    // the response, which is why this is awaited but can only log on
-    // failure. See storeScanPhoto for what is (and isn't) retained.
-    await timedStage(requestId, "store_photo", () => storeScanPhoto(env, {
+    // the response, which is why it runs after the response is sent and can
+    // only log on failure. See storeScanPhoto for what is (and isn't) retained.
+    await afterResponse(env, requestId, "store_photo", () => storeScanPhoto(env, {
       barcode: barcode ?? "",
       image,
       photoType:
@@ -4260,11 +4263,7 @@ async function analyzeIngredientsCore(
     '      "normalizedName": "aqua",',
     '      "severity": "info",',
     '      "title": "short Greek title",',
-    '      "explanation": "short Greek explanation",',
-    '      "evidenceType": "none",',
-    '      "sourceName": null,',
-    '      "sourceUrl": null,',
-    '      "confidence": 0.5',
+    '      "explanation": "short Greek explanation"',
     "    }",
     "  ],",
     '  "insufficientDataReasons": [],',
@@ -4278,9 +4277,9 @@ async function analyzeIngredientsCore(
     "- Use unknown only when the category is genuinely unclear.",
     "- Determine productType from the actual ingredients, not from the example above.",
     "- severity must be exactly one of: positive, info, attention, high_attention, unknown.",
-    "- evidenceType must be exactly one of: regulatory, scientific, label, none.",
-    "- confidence must be a number between 0 and 1.",
-    "- sourceName and sourceUrl must be null unless you have verified evidence.",
+    "- In each finding, leave out sourceName, sourceUrl, confidence and evidenceType entirely. Add them only when you have verified evidence: then evidenceType is one of regulatory, scientific, label, and confidence is a number between 0 and 1.",
+    "- The top-level confidence must be a number between 0 and 1.",
+    "- Never leave a title or explanation empty, and never put an empty string in positives or attentionItems: leave the array empty instead.",
     "",
     "Content rules:",
     "- Only analyze ingredients that appear in the provided text.",
@@ -4305,8 +4304,8 @@ async function analyzeIngredientsCore(
     "- Include between 8 and 12 entries in ingredientFindings.",
     "- Always include every ingredient listed in potentialAllergens.",
     "- Also include preservatives, fragrances, additives and notable active ingredients.",
-    "- Keep title under 40 characters.",
-    "- Keep explanation under 120 characters.",
+    "- Keep title under 30 characters.",
+    "- Keep explanation under 90 characters.",
     "- Return ONLY the JSON object. No commentary. No Markdown. No code fences.",
     "",
     "Confirmed ingredients:",
@@ -4509,7 +4508,7 @@ async function analyzeIngredientsCore(
       }));
 
       if (isNewProduct) {
-        await timedStage(requestId, "auto_copy_draft", () => autoApplyAssistantDraft(env, barcode));
+        await afterResponse(env, requestId, "auto_copy_draft", () => autoApplyAssistantDraft(env, barcode));
       }
     }
 
@@ -4866,7 +4865,7 @@ async function analyzeNutritionCore(
       }));
 
       if (isNewProduct) {
-        await timedStage(requestId, "auto_copy_draft", () => autoApplyAssistantDraft(env, barcode));
+        await afterResponse(env, requestId, "auto_copy_draft", () => autoApplyAssistantDraft(env, barcode));
       }
     }
 
@@ -5150,7 +5149,7 @@ async function runChemicalAnalysisPath(
       }));
 
       if (isNewProduct) {
-        await timedStage(requestId, "auto_copy_draft", () => autoApplyAssistantDraft(env, requestBody.barcode));
+        await afterResponse(env, requestId, "auto_copy_draft", () => autoApplyAssistantDraft(env, requestBody.barcode));
       }
     }
 

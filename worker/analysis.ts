@@ -23,7 +23,23 @@ export function parseAnalysis(value: unknown): WorkerAnalysisResult | null {
   return { productType: candidate.productType, summary: candidate.summary, positives: candidate.positives, attentionItems: candidate.attentionItems, potentialAllergens: candidate.potentialAllergens, ingredientFindings: findings.filter((finding): finding is WorkerAnalysisResult["ingredientFindings"][number] => finding !== null), insufficientDataReasons: candidate.insufficientDataReasons, confidence: candidate.confidence };
 }
 
-function parseFinding(value: unknown): WorkerAnalysisResult["ingredientFindings"][number] | null {
+// The prompt asks the model to leave out the fields that are nearly always the
+// same (no source, no evidence, a flat confidence): a shorter reply is a faster
+// one. An absent field takes its usual value here; a field that IS present is
+// still validated exactly as before, so nothing malformed gets in.
+function withFindingDefaults(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  return {
+    evidenceType: "none",
+    sourceName: null,
+    sourceUrl: null,
+    confidence: 0.5,
+    ...value,
+  };
+}
+
+function parseFinding(raw: unknown): WorkerAnalysisResult["ingredientFindings"][number] | null {
+  const value = withFindingDefaults(raw);
   if (!isRecord(value) || !isText(value.ingredientName) || !isText(value.normalizedName) || !isSeverity(value.severity) || !isText(value.title) || !isText(value.explanation) || !isEvidenceType(value.evidenceType) || !(value.sourceName === null || typeof value.sourceName === "string") || !(value.sourceUrl === null || typeof value.sourceUrl === "string") || !isConfidence(value.confidence)) return null;
   const sourceUrl = value.sourceUrl;
   if (sourceUrl !== null && !isSafeUrl(sourceUrl)) return null;
