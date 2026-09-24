@@ -165,9 +165,18 @@ export default function Product() {
             <p className="mt-3 font-semibold">Αναλύεται…</p>
 
             <p className="mt-1 text-sm text-slate-400">
-              Μπορείς να συνεχίσεις με άλλη σάρωση, θα σε ειδοποιήσουμε όταν
+              Θα εμφανιστεί εδώ σε λίγα δευτερόλεπτα. Αν δεν θες να περιμένεις,
+              μπορείς να σαρώσεις άλλο προϊόν και θα σε ειδοποιήσουμε όταν
               είναι έτοιμο.
             </p>
+
+            <button
+              type="button"
+              onClick={() => navigate("/scan")}
+              className="mt-4 h-12 w-full rounded-xl border border-slate-700 font-semibold"
+            >
+              Σάρωση άλλου προϊόντος
+            </button>
           </section>
         ) : !record ? (
           <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">

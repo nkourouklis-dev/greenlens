@@ -12,11 +12,25 @@ const NOTICE_MS = 8000;
 // analyses are doing so the user can keep scanning: how many are running,
 // then "ready" / "failed" for each one as it finishes.
 export default function AnalysisBanner() {
-  const { running, notices } = useAnalysisJobs();
+  const jobs = useAnalysisJobs();
   const navigate = useNavigate();
   const location = useLocation();
 
+  // The product page you are looking at already shows its own loading state
+  // and result, so the banner only speaks about the others.
+  const viewing = (itemId: string) =>
+    location.pathname === `/product/${itemId}`;
+  const running = jobs.running.filter((itemId) => !viewing(itemId));
+  const notices = jobs.notices.filter((entry) => !viewing(entry.itemId));
+
   const notice = notices[0];
+
+  useEffect(() => {
+    for (const entry of jobs.notices) {
+      if (viewing(entry.itemId)) dismissAnalysisNotice(entry.key);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs.notices, location.pathname]);
 
   useEffect(() => {
     if (!notice) return;

@@ -50,11 +50,11 @@ export default function ProductPhoto() {
       }
       clearCaptureDraft(barcode);
       if (productId) clearOcrDraft(productId);
-      // The analysis takes 15–30 s and nobody needs to watch it: it runs in
-      // the background and the banner announces the result, so the next scan
-      // can start right away.
+      // The analysis takes 15–30 s. It runs in the background: the product
+      // page shows it loading and fills in when it is done, and offers
+      // "scan another" for anyone who would rather not wait.
       void startAnalysis(scanId, { notify: true });
-      navigate("/scan");
+      navigate(`/product/${scanId}`, { replace: true });
     } catch {
       setError("Δεν ήταν δυνατή η αποθήκευση της φωτογραφίας. Δοκίμασε ξανά.");
     } finally {
