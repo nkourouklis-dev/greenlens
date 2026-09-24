@@ -15,8 +15,36 @@ export interface WorkerAnalysisResult {
   confidence: number;
 }
 
+// The model sometimes pads a list with an empty string ("positives": [""]) or
+// leaves a finding's title/explanation blank. Each of those used to reject the
+// whole reply — a 20-second wait thrown away, then a retry. Dropping an empty
+// list entry and falling back to the ingredient name loses nothing real; every
+// other malformed value is still rejected by the validation below.
+function repairCandidate(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return candidate;
+  const withoutBlanks = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.filter((entry) => !(typeof entry === "string" && entry.trim() === ""))
+      : value;
+  const findings = Array.isArray(candidate.ingredientFindings)
+    ? candidate.ingredientFindings.map((finding: unknown) => {
+        if (!isRecord(finding)) return finding;
+        const title = isText(finding.title) ? finding.title : finding.ingredientName;
+        return { ...finding, title, explanation: isText(finding.explanation) ? finding.explanation : title };
+      })
+    : candidate.ingredientFindings;
+  return {
+    ...candidate,
+    positives: withoutBlanks(candidate.positives),
+    attentionItems: withoutBlanks(candidate.attentionItems),
+    potentialAllergens: withoutBlanks(candidate.potentialAllergens),
+    insufficientDataReasons: withoutBlanks(candidate.insufficientDataReasons),
+    ingredientFindings: findings,
+  };
+}
+
 export function parseAnalysis(value: unknown): WorkerAnalysisResult | null {
-  const candidate = typeof value === "string" ? parseJson(value) : isRecord(value) && typeof value.response === "string" ? parseJson(value.response) : null;
+  const candidate = repairCandidate(typeof value === "string" ? parseJson(value) : isRecord(value) && typeof value.response === "string" ? parseJson(value.response) : null);
   if (!isRecord(candidate) || !isProductType(candidate.productType) || !isText(candidate.summary) || !isStrings(candidate.positives) || !isStrings(candidate.attentionItems) || !isStrings(candidate.potentialAllergens) || !isStrings(candidate.insufficientDataReasons) || !isConfidence(candidate.confidence) || !Array.isArray(candidate.ingredientFindings)) return null;
   const findings = candidate.ingredientFindings.map(parseFinding);
   if (findings.some((finding) => finding === null)) return null;

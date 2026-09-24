@@ -15,3 +15,17 @@ test("an optional field that is present is still validated", () => {
   assert.equal(parseAnalysis(JSON.stringify({ ...base, ingredientFindings: [{ ...compactFinding, sourceUrl: "http://x.test" }] })), null);
   assert.equal(parseAnalysis(JSON.stringify({ ...base, ingredientFindings: [{ ...compactFinding, severity: "high_attention" }] })), null);
 });
+
+test("blank list entries no longer sink an otherwise valid reply", () => {
+  const parsed = parseAnalysis(JSON.stringify({ ...base, positives: [""], attentionItems: ["υψηλή ζάχαρη", "  "], ingredientFindings: [compactFinding] }));
+  assert.deepEqual(parsed?.positives, []);
+  assert.deepEqual(parsed?.attentionItems, ["υψηλή ζάχαρη"]);
+});
+test("a blank finding title or explanation falls back to the ingredient name", () => {
+  const parsed = parseAnalysis(JSON.stringify({ ...base, ingredientFindings: [{ ...compactFinding, title: "", explanation: "" }] }));
+  assert.equal(parsed?.ingredientFindings[0].title, "Sugar");
+  assert.equal(parsed?.ingredientFindings[0].explanation, "Sugar");
+});
+test("a finding with no ingredient name at all is still rejected", () => {
+  assert.equal(parseAnalysis(JSON.stringify({ ...base, ingredientFindings: [{ ...compactFinding, ingredientName: "", title: "" }] })), null);
+});
