@@ -198,11 +198,6 @@ export default function Product() {
           <Result
             record={record}
             score={score}
-            onReanalyze={() =>
-              navigate(
-                `/product/${id}/analysis`,
-              )
-            }
             onRetakePhoto={() =>
               navigate(
                 `/ingredients-photo?barcode=${encodeURIComponent(item.barcode)}`,
@@ -283,7 +278,6 @@ export default function Product() {
 function Result(props: {
   record: ProductAnalysisRecord;
   score: ScoreBreakdown;
-  onReanalyze: () => void;
   onRetakePhoto: () => void;
   onAddMissingPhoto: () => void;
 }) {
@@ -471,15 +465,6 @@ function Result(props: {
           </p>
 
         </div>
-
-        <button
-          type="button"
-          onClick={props.onReanalyze}
-          className="flex shrink-0 items-center gap-1.5 rounded-full border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 transition active:scale-95"
-        >
-          <RefreshCw size={14} />
-          Νέα ανάλυση
-        </button>
       </section>
 
       <ScoreNoticesCard
