@@ -32,6 +32,7 @@ export default function Scan() {
     start: startCamera,
     stop: stopCamera,
     videoRef,
+    videoElement,
   } = useCameraViewport();
 
   const codeReaderRef =
@@ -317,12 +318,16 @@ export default function Scan() {
   // ready (or if it was already running from a previous step), (re)start
   // the decode loop. On unmount, only the decode loop is torn down — the
   // stream itself keeps running for the next step in the flow.
+  // Re-runs when the <video> node itself changes: the shared element is
+  // re-parented into this page's viewport a render after mount, and a
+  // decoder bound to the old (detached) node would look at a dead frame.
   useEffect(() => {
-    if (isCameraActive) {
+    if (isCameraActive && videoElement) {
+      stopDecoding();
       startDecoding();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isCameraActive]);
+  }, [isCameraActive, videoElement]);
 
   useEffect(() => {
     return stopDecoding;

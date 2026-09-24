@@ -25,6 +25,8 @@ interface CameraContextValue {
   error: string;
   start: () => Promise<void>;
   stop: () => void;
+  /** The live <video> node; changes when it is re-parented between pages. */
+  videoElement: HTMLVideoElement | null;
   attachViewport: (node: HTMLDivElement | null) => void;
   captureFrame: () => Promise<CapturedPhoto | null>;
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -214,6 +216,8 @@ export function CameraProvider({ children }: { children: ReactNode }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const startingRef = useRef<Promise<void> | null>(null);
+  const [videoElement, setVideoElement] =
+    useState<HTMLVideoElement | null>(null);
 
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const [fallbackNode, setFallbackNode] =
@@ -232,6 +236,7 @@ export function CameraProvider({ children }: { children: ReactNode }) {
   // stream already in progress is reattached to it instead of being lost.
   const setVideoNode = useCallback((node: HTMLVideoElement | null) => {
     videoRef.current = node;
+    setVideoElement(node);
     if (node && streamRef.current) {
       node.srcObject = streamRef.current;
       node.play().catch(() => {});
@@ -417,11 +422,9 @@ export function CameraProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // Release the camera only when the whole app unmounts (teardown/hot
-  // reload) — never on ordinary navigation. Once granted, the permission
-  // and the live stream both stay warm for the rest of the session, so
-  // bouncing between Scan and other pages never re-triggers the browser's
-  // camera prompt.
+  // The camera is released as soon as a camera page closes (see
+  // useCameraViewport) and on app teardown. The browser remembers the
+  // grant, so re-opening it later is silent — we just don't hold it.
   useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -437,6 +440,7 @@ export function CameraProvider({ children }: { children: ReactNode }) {
         error,
         start,
         stop,
+        videoElement,
         attachViewport,
         captureFrame,
         videoRef,
@@ -487,8 +491,16 @@ export function useCamera(): CameraContextValue {
 // stream (a no-op if it is already running), and detaches the viewport
 // (without stopping the stream) on unmount.
 export function useCameraViewport() {
-  const { attachViewport, start, stop, isActive, error, captureFrame, videoRef } =
-    useCamera();
+  const {
+    attachViewport,
+    start,
+    stop,
+    isActive,
+    error,
+    captureFrame,
+    videoRef,
+    videoElement,
+  } = useCamera();
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -498,9 +510,19 @@ export function useCameraViewport() {
 
     return () => {
       attachViewport(null);
+      stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { containerRef, isActive, error, captureFrame, start, stop, videoRef };
+  return {
+    containerRef,
+    isActive,
+    error,
+    captureFrame,
+    start,
+    stop,
+    videoRef,
+    videoElement,
+  };
 }

@@ -2,6 +2,7 @@ import {
   Camera,
   RefreshCw,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import {
   useNavigate,
   useParams,
@@ -15,6 +16,7 @@ import {
 import { scoreBandMeta } from "../utils/scoreBand";
 import type {
   ContentCategory,
+  IngredientRating,
   ProductAnalysisRecord,
   ScoreBreakdown,
 } from "../types";
@@ -387,6 +389,57 @@ function Result(props: {
         ? nutritionInsights.length
         : chemicalInsights.length;
 
+  type Entry = { rating: IngredientRating; impact: number; node: ReactNode };
+
+  const entries: Entry[] =
+    category === "ingredients"
+      ? ingredientInsights.map((insight) => ({
+          rating: insight.rating,
+          impact: insight.scoreImpact,
+          node: (
+            <IngredientCard key={insight.normalizedName} insight={insight} />
+          ),
+        }))
+      : category === "nutrition"
+        ? nutritionInsights.map((insight) => ({
+            rating: insight.rating,
+            impact: insight.scoreImpact,
+            node: (
+              <NutritionCard key={insight.normalizedName} insight={insight} />
+            ),
+          }))
+        : chemicalInsights.map((insight) => ({
+            rating: insight.rating,
+            impact: insight.scoreImpact,
+            node: (
+              <ChemicalCard key={insight.normalizedName} insight={insight} />
+            ),
+          }));
+
+  const groups: Record<IngredientRating, Entry[]> = {
+    caution: [],
+    good: [],
+    neutral: [],
+  };
+
+  for (const entry of entries) groups[entry.rating].push(entry);
+  for (const list of Object.values(groups)) {
+    list.sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
+  }
+
+  const leadsWithPositives =
+    props.score.band === "excellent" || props.score.band === "good";
+
+  const groupOrder: IngredientRating[] = leadsWithPositives
+    ? ["good", "caution", "neutral"]
+    : ["caution", "good", "neutral"];
+
+  const groupTitle: Record<IngredientRating, string> = {
+    caution: "Αρνητικά",
+    good: "Θετικά",
+    neutral: "Ουδέτερα",
+  };
+
   return (
     <>
       <section
@@ -397,10 +450,6 @@ function Result(props: {
             {label}
           </p>
 
-          <p className="mt-0.5 text-xs text-slate-400">
-            Εμπιστοσύνη{" "}
-            {Math.round(props.score.confidence * 100)}%
-          </p>
         </div>
 
         <button
@@ -420,18 +469,6 @@ function Result(props: {
 
       <AllergenNoticeCard notice={allergenNotice} />
 
-      <ExecutiveSummaryCard summary={executiveSummary} />
-
-      {summary && (
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
-          <h2 className="font-bold">Περίληψη</h2>
-
-          <p className="mt-2 text-sm leading-6 text-slate-300">
-            {summary}
-          </p>
-        </section>
-      )}
-
       <section>
         <div className="flex items-baseline justify-between px-1">
           <h2 className="font-bold">
@@ -443,32 +480,35 @@ function Result(props: {
           </span>
         </div>
 
-        <div className="mt-3 space-y-2">
-          {category === "ingredients" &&
-            ingredientInsights.map((insight) => (
-              <IngredientCard
-                key={insight.normalizedName}
-                insight={insight}
-              />
-            ))}
+        {/* GreenPoint-style: what hurts the score first, then what helps,
+            so the reason behind the verdict is the first thing read. A
+            clearly good product leads with its positives instead. */}
+        {groupOrder.map((group) =>
+          groups[group].length > 0 ? (
+            <div key={group} className="mt-4">
+              <h3 className="px-1 text-sm font-bold text-slate-300">
+                {groupTitle[group]}
+              </h3>
 
-          {category === "nutrition" &&
-            nutritionInsights.map((insight) => (
-              <NutritionCard
-                key={insight.normalizedName}
-                insight={insight}
-              />
-            ))}
-
-          {category === "chemical_composition" &&
-            chemicalInsights.map((insight) => (
-              <ChemicalCard
-                key={insight.normalizedName}
-                insight={insight}
-              />
-            ))}
-        </div>
+              <div className="mt-2 space-y-2">
+                {groups[group].map((entry) => entry.node)}
+              </div>
+            </div>
+          ) : null,
+        )}
       </section>
+
+      <ExecutiveSummaryCard summary={executiveSummary} />
+
+      {summary && (
+        <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
+          <h2 className="font-bold">Περίληψη</h2>
+
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            {summary}
+          </p>
+        </section>
+      )}
 
       <ScoreBreakdownPanel
         score={props.score}
