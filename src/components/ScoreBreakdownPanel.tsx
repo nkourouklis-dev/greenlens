@@ -1,4 +1,5 @@
 import type { IngredientInsight, ScoreBreakdown } from "../types";
+import CompositionBreakdown from "./CompositionBreakdown";
 
 const STARTING_SCORE = 100;
 
@@ -7,6 +8,12 @@ export default function ScoreBreakdownPanel(props: {
   insights: IngredientInsight[];
 }) {
   const { score, insights } = props;
+
+  // A food scored from both halves has its own breakdown: the "100 minus
+  // deductions" arithmetic below does not describe a weighted blend.
+  if (score.score !== null && score.composition) {
+    return <CompositionBreakdown score={score} insights={insights} />;
+  }
 
   if (score.score === null) {
     return (

@@ -1,3 +1,9 @@
+import { composeDisplayTitle } from "../src/utils/productTitle";
+import {
+  factsFromOpenFoodFacts,
+  physicalViolations,
+  type NutritionFacts,
+} from "./nutritionFacts";
 import {
   panelFromOpenFoodFacts,
   type NutritionPanel,
@@ -19,7 +25,13 @@ export interface D1Like {
  * so old rows are ignored rather than served by newer code that expects
  * different fields.
  */
-const CACHE_SCHEMA_VERSION = 1;
+/**
+ * 2: records are kept when they carry nutrition but no name or brand (the
+ * old identity-only check discarded them, and cached that as "unknown"), and
+ * the result gained `nutritionFacts` and `categoryTags`. Version-1 rows are
+ * ignored, which is what un-sticks a barcode cached as a miss.
+ */
+export const CACHE_SCHEMA_VERSION = 2;
 
 /**
  * A product OFF knows about barely changes; a barcode it does not know is
@@ -29,7 +41,7 @@ const CACHE_SCHEMA_VERSION = 1;
 const HIT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MISS_TTL_MS = 24 * 60 * 60 * 1000;
 
-interface BarcodeProductResult {
+export interface BarcodeProductResult {
   productName: string | null;
   brand: string | null;
   netContent: string | null;
@@ -40,8 +52,27 @@ interface BarcodeProductResult {
    * coverage is thin outside the big brands.
    */
   nutritionPanel: NutritionPanel | null;
+  /**
+   * The record's `nutriments` as per-100 facts, for the Nutri-Score — null
+   * when it has none, or when they fail the physical-plausibility checks.
+   * Unlike `nutritionPanel` this tolerates missing fields: a record without
+   * a protein figure still tells us its saturates.
+   */
+  nutritionFacts: NutritionFacts | null;
+  /** Open Food Facts `categories_tags`, for the Nutri-Score category. */
+  categoryTags: string[];
   confidence: number;
+  /**
+   * Which service knew the barcode. Says nothing about whether the product
+   * has a name: a record can hold nutrition and no name at all (Lurpak Soft,
+   * 5740900401655). Check `productName`/`brand` for identity.
+   */
   source: "openfoodfacts" | "openbeautyfacts" | null;
+}
+
+/** Whether a lookup result names the product (as opposed to only describing it). */
+export function hasIdentity(result: BarcodeProductResult): boolean {
+  return Boolean(result.productName || result.brand);
 }
 
 function trimAndLimit(value: string | undefined, maxLength: number): string | null {
@@ -51,6 +82,11 @@ function trimAndLimit(value: string | undefined, maxLength: number): string | nu
   return trimmed.slice(0, maxLength);
 }
 
+/**
+ * Splits nothing and invents nothing: when the name already says the brand
+ * (or is the brand), the brand field is dropped so the two are never shown
+ * side by side twice. The rule itself lives in composeDisplayTitle.
+ */
 function deduplicateBrandFromName(
   brand: string | null,
   productName: string | null,
@@ -58,11 +94,19 @@ function deduplicateBrandFromName(
   if (!brand || !productName) {
     return { brand, productName };
   }
-  const brandLower = brand.toLowerCase().trim();
-  const nameLower = productName.toLowerCase();
-  if (nameLower.startsWith(brandLower)) {
+
+  const title = composeDisplayTitle(brand, productName);
+
+  // The composed title is the name alone when the name already carried the
+  // brand; it is the brand alone when the name was only the brand again.
+  if (title === productName) {
     return { brand: null, productName };
   }
+
+  if (title === brand) {
+    return { brand, productName: null };
+  }
+
   return { brand, productName };
 }
 
@@ -117,6 +161,8 @@ function extractFromOpenFoodFacts(
   brand: string | null;
   netContent: string | null;
   nutritionPanel: NutritionPanel | null;
+  nutritionFacts: NutritionFacts | null;
+  categoryTags: string[];
 } | null {
   if (!data.code || !data.product) {
     return null;
@@ -138,15 +184,42 @@ function extractFromOpenFoodFacts(
 
   const dedup = deduplicateBrandFromName(brand, productName);
 
+  const isBeverage = isBeverageProduct(product);
+
+  const facts = factsFromOpenFoodFacts(product.nutriments, isBeverage);
+
+  const violations = facts === null ? [] : physicalViolations(facts);
+
+  if (violations.length > 0) {
+    // Crowd-sourced numbers that contradict themselves are worse than none.
+    console.error("openfoodfacts_nutrition_rejected", {
+      code: String(data.code),
+      violations,
+    });
+  }
+
   return {
     productName: dedup.productName,
     brand: dedup.brand,
     netContent,
-    nutritionPanel: panelFromOpenFoodFacts(
-      product.nutriments,
-      isBeverageProduct(product),
-    ),
+    nutritionPanel: panelFromOpenFoodFacts(product.nutriments, isBeverage),
+    nutritionFacts: violations.length > 0 ? null : facts,
+    categoryTags: Array.isArray(product.categories_tags)
+      ? product.categories_tags.filter(
+          (tag): tag is string => typeof tag === "string",
+        )
+      : [],
   };
+}
+
+function isUsable(extracted: {
+  productName: string | null;
+  brand: string | null;
+  nutritionFacts: NutritionFacts | null;
+}): boolean {
+  return Boolean(
+    extracted.productName || extracted.brand || extracted.nutritionFacts,
+  );
 }
 
 function validateBarcode(barcode: string): boolean {
@@ -161,6 +234,8 @@ const EMPTY_RESULT: BarcodeProductResult = {
   brand: null,
   netContent: null,
   nutritionPanel: null,
+  nutritionFacts: null,
+  categoryTags: [],
   confidence: 0,
   source: null,
 };
@@ -200,8 +275,15 @@ async function readCachedLookup(
 
     const parsed: unknown = JSON.parse(row.result);
 
+    // Defaults for the fields a row written by an earlier build of this
+    // schema version might lack: a cache row must never crash its reader.
     return typeof parsed === "object" && parsed !== null
-      ? (parsed as BarcodeProductResult)
+      ? {
+          ...(parsed as BarcodeProductResult),
+          nutritionFacts:
+            (parsed as BarcodeProductResult).nutritionFacts ?? null,
+          categoryTags: (parsed as BarcodeProductResult).categoryTags ?? [],
+        }
       : null;
   } catch {
     return null;
@@ -271,7 +353,10 @@ async function fetchFromOpenFoodFacts(
       const offData = (await offResponse.json()) as Record<string, unknown>;
       const extracted = extractFromOpenFoodFacts(offData);
 
-      if (extracted && (extracted.productName || extracted.brand)) {
+      // A record is usable for its identity *or* for its nutrition. It used
+      // to be identity only, so a barcode Open Food Facts holds numbers for
+      // but nobody named was reported unknown — and its nutrition dropped.
+      if (extracted && isUsable(extracted)) {
         clearTimeout(timeoutId);
         return {
           result: {
@@ -303,7 +388,10 @@ async function fetchFromOpenFoodFacts(
       const obfData = (await obfResponse.json()) as Record<string, unknown>;
       const extracted = extractFromOpenFoodFacts(obfData);
 
-      if (extracted && (extracted.productName || extracted.brand)) {
+      // A record is usable for its identity *or* for its nutrition. It used
+      // to be identity only, so a barcode Open Food Facts holds numbers for
+      // but nobody named was reported unknown — and its nutrition dropped.
+      if (extracted && isUsable(extracted)) {
         clearTimeout(timeoutId);
         return {
           result: {

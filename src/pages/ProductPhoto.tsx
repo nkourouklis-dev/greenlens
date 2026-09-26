@@ -5,6 +5,7 @@ import { clearCaptureDraft, clearOcrDraft, getIngredientsDraft, getOcrDraft } fr
 import { compressImageForStorage, saveHistoryItem } from "../services/historyService";
 import { identifyProduct } from "../services/identifyClient";
 import { startAnalysis } from "../services/analysisJobs";
+import { composeDisplayTitle } from "../utils/productTitle";
 
 export default function ProductPhoto() {
   const [searchParams] = useSearchParams();
@@ -37,10 +38,7 @@ export default function ProductPhoto() {
       );
 
       const displayName = identity
-        ? [identity.brand, identity.productName]
-            .filter(Boolean)
-            .join(" ")
-            .trim()
+        ? composeDisplayTitle(identity.brand, identity.productName)
         : "";
 
       const wasSaved = saveHistoryItem({ id: scanId, barcode, status: "unknown", scannedAt: new Date().toISOString(), ingredientsPhoto, productPhoto,productName: displayName || undefined,ocrRawText: ocrDraft?.result.rawText, ocrConfidence: ocrDraft?.result.confidence, categoryOverride: ocrDraft?.categoryOverride });

@@ -42,6 +42,15 @@ export interface NutritionPanel {
   readings: NutrientReading[];
   /** Declared per 100 ml — sugars are banded far more harshly. */
   isBeverage: boolean;
+  /**
+   * The rows read only to cross-check the scored ones (see PanelKey) and the
+   * declared energy. The Nutri-Score needs them: energy is one of its four
+   * unfavourable components, and fat and carbohydrate bound saturates and
+   * sugars. Absent when the table did not carry them.
+   */
+  energyKcal?: number | null;
+  fat?: number | null;
+  carbohydrate?: number | null;
 }
 
 /**
@@ -589,7 +598,16 @@ function buildPanel(
   }
 
   return {
-    panel: readings.length > 0 ? { readings, isBeverage } : null,
+    panel:
+      readings.length > 0
+        ? {
+            readings,
+            isBeverage,
+            energyKcal,
+            fat: values.get("fat")?.grams ?? null,
+            carbohydrate: values.get("carbohydrate")?.grams ?? null,
+          }
+        : null,
     tableDetected,
     discarded,
     warnings,
@@ -903,7 +921,27 @@ export function parseNutritionPanel(
     });
   }
 
+  const optionalGrams = (field: unknown): number | null =>
+    typeof field === "number" &&
+    Number.isFinite(field) &&
+    field >= 0 &&
+    field <= MAX_GRAMS_PER_100
+      ? field
+      : null;
+
   return readings.length > 0
-    ? { readings, isBeverage: candidate.isBeverage === true }
+    ? {
+        readings,
+        isBeverage: candidate.isBeverage === true,
+        energyKcal:
+          typeof candidate.energyKcal === "number" &&
+          Number.isFinite(candidate.energyKcal) &&
+          candidate.energyKcal >= 0 &&
+          candidate.energyKcal <= 1000
+            ? candidate.energyKcal
+            : null,
+        fat: optionalGrams(candidate.fat),
+        carbohydrate: optionalGrams(candidate.carbohydrate),
+      }
     : null;
 }

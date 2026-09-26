@@ -48,6 +48,12 @@ export interface RuleMatch {
   position: number;
   /** penaltyPoints after bulk/position weighting, before group dedup. */
   weightedPoints: number;
+  /**
+   * The percentage the list declares for this ingredient ("φοινικέλαιο 12%"),
+   * when it does — the quantity itself, which then replaces list position as
+   * the weight. null when the list gives none.
+   */
+  declaredPercent: number | null;
 }
 
 /**
@@ -167,6 +173,59 @@ export async function loadScoringRules(
 
     return { aliases: [] };
   }
+}
+
+/**
+ * Weight for a bulk-weighted ingredient whose share the list *states*. The
+ * ladder mirrors the position one above — "most of the product" costs the
+ * most, a trace the least — but reads the real quantity instead of guessing
+ * it from where the ingredient falls in the list, and adds a trace tier the
+ * position ladder cannot express: 0.3 % of an ingredient is not the same
+ * exposure as 12 %, however early in the list an ordering quirk puts it.
+ */
+const PERCENT_WEIGHTS: Array<[minimumPercent: number, weight: number]> = [
+  [20, 1.6],
+  [5, 1.2],
+  [1, 1],
+  [0, 0.5],
+];
+
+function percentWeight(percent: number): number {
+  return (
+    PERCENT_WEIGHTS.find(([minimum]) => percent >= minimum)?.[1] ??
+    TRAILING_POSITION_WEIGHT
+  );
+}
+
+/**
+ * The percentage printed right after an ingredient: "ζάχαρη 30%",
+ * "Φοινικέλαιο (12,5 %)". It has to start immediately after the ingredient's
+ * own word (only spaces or an opening bracket between), so a number further
+ * along, or in the next comma-separated entry, is never taken for it. Read
+ * from the text rather than from the comma-split segments, because a decimal
+ * comma ("12,5%") would otherwise be cut in half by the split.
+ */
+function declaredPercentAfter(
+  text: string,
+  matchEnd: number,
+): number | null {
+  let wordEnd = matchEnd;
+
+  while (wordEnd < text.length && isLetterOrDigit(text[wordEnd])) {
+    wordEnd += 1;
+  }
+
+  const match = /^\s*\(?\s*(\d{1,3}(?:[.,]\d+)?)\s*%/u.exec(
+    text.slice(wordEnd, wordEnd + 12),
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const percent = Number(match[1].replace(",", "."));
+
+  return Number.isFinite(percent) && percent <= 100 ? percent : null;
 }
 
 function positionWeight(position: number): number {
@@ -368,9 +427,19 @@ export function matchScoringRules(
 
       claimed.push([index, index + alias.length]);
 
+      // A stated percentage is the quantity; the position in the list is
+      // only a guess at it, and is used when there is nothing better.
+      const declaredPercent = declaredPercentAfter(
+        text,
+        index + alias.length,
+      );
+
       const weightedPoints = rule.bulkWeighted
         ? Math.round(
-            rule.penaltyPoints * positionWeight(position),
+            rule.penaltyPoints *
+              (declaredPercent === null
+                ? positionWeight(position)
+                : percentWeight(declaredPercent)),
           )
         : rule.penaltyPoints;
 
@@ -387,6 +456,7 @@ export function matchScoringRules(
           matchedAlias: alias,
           position,
           weightedPoints,
+          declaredPercent,
         });
       }
 

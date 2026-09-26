@@ -17,7 +17,7 @@ import {
   type NutrientReading,
 } from "./nutritionThresholds";
 
-export const scoringVersion = "2026.09.5";
+export const scoringVersion = "2026.09.6";
 
 export type { ScoreNotice } from "./alcohol";
 
@@ -487,6 +487,14 @@ export function scoreInterpretation(
      * it, or passing null, is exactly today's ingredients-only behaviour.
      */
     nutritionPanel?: NutritionPanel | null;
+    /**
+     * True when the Nutri-Score is judging this product's sugar and salt
+     * (foodScore.ts). The added-sugar and salt rules then step aside, as they
+     * do for a panel, but no threshold deductions are added — the ingredient
+     * score stays a pure ingredient score and the nutrition half is blended
+     * in separately, so nothing is charged twice.
+     */
+    nutritionCoversSugarSalt?: boolean;
     /** The drink's declared alcohol, if it is one (alcohol.ts). */
     alcohol?: AlcoholInfo | null;
     /** e.g. "the nutrition table was not taken into account". */
@@ -537,7 +545,7 @@ export function scoreInterpretation(
   // fragrance and the rest are things a quantity table says nothing about,
   // and keep costing exactly what they cost today.
   const scoredRuleMatches =
-    panelReadings.length > 0
+    panelReadings.length > 0 || options?.nutritionCoversSugarSalt
       ? ruleMatches.filter(
           (match) =>
             !THRESHOLD_OWNED_RULE_GROUPS.has(
@@ -591,7 +599,8 @@ export function scoreInterpretation(
     // Same rule as the nutrition path: once there are real numbers to
     // judge, the model's prose about how wholesome the product is does not
     // get to add points on top of them.
-    positivesBonusAllowed: panelReadings.length === 0,
+    positivesBonusAllowed:
+      panelReadings.length === 0 && !options?.nutritionCoversSugarSalt,
     positivesBonusLabel: "Πολλαπλά θετικά χαρακτηριστικά",
     noProblemsBonusLabel: "Δεν εντοπίστηκαν προβληματικά συστατικά",
     confidence,

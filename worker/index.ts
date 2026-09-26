@@ -78,8 +78,10 @@ import {
 } from "./adminProducts";
 import {
   rescoreChemicalResult,
-  rescoreIngredientsResult,
-  rescoreNutritionResult,
+  nutritionEvidenceForRecompute,
+  rescoreFoodIngredients,
+  rescoreFoodNutrition,
+  type StoredLabelContext,
   storedLabelContext,
   syncEnvelopeScoreMentions,
   INGREDIENTS_NOT_CONSIDERED_NOTICE,
@@ -106,7 +108,17 @@ import {
   parseProductIdentity,
   type ProductIdentity,
 } from "./identify";
+import { composeDisplayTitle } from "../src/utils/productTitle";
 import {
+  evaluateNutrition,
+  resolveNutritionEvidence,
+  scoreFood,
+  scoreNutritionOnly,
+  sweetenerFrom,
+} from "./foodScore";
+import type { NutritionFacts } from "./nutritionFacts";
+import {
+  hasIdentity,
   lookupProductByBarcode,
 } from "./productLookup";
 import {
@@ -115,7 +127,6 @@ import {
 } from "./ingredientText";
 import {
   inspectNutritionPanel,
-  type NutritionPanel,
   type NutritionPanelRead,
 } from "./nutritionPanel";
 import {
@@ -143,9 +154,6 @@ import {
   parseNutritionAnalysis,
   type WorkerNutritionResult,
 } from "./nutritionAnalysis";
-import {
-  scoreNutrition,
-} from "./nutritionScoring";
 import {
   buildNutritionInsights,
   buildNutritionExecutiveSummary,
@@ -2004,16 +2012,26 @@ async function runAdminUpdateProduct(
     // deductions) behind it — see rescore.ts.
     const context = storedLabelContext(validated.envelope);
 
-    const rescored = await rescoreIngredientsResult(
+    // A re-read table wins; the one the form posted back is the fallback
+    // for rows analysed before the table text was kept.
+    const effectiveContext: StoredLabelContext =
+      typeof validated.envelope.nutritionSourceText === "string"
+        ? context
+        : { ...context, nutritionPanel: validated.nutritionPanel };
+
+    const evidence = await evidenceForRecompute(
+      barcode,
+      effectiveContext,
+      env,
+      requestId,
+    );
+
+    const rescored = await rescoreFoodIngredients(
       env.DB,
       validated.core,
       validated.sourceText,
-      // A re-read table wins; the one the form posted back is the fallback
-      // for rows analysed before the table text was kept.
-      typeof validated.envelope.nutritionSourceText === "string"
-        ? context.nutritionPanel
-        : validated.nutritionPanel,
-      context,
+      effectiveContext,
+      evidence,
     );
 
     console.log("admin_product_rescored", {
@@ -2042,6 +2060,9 @@ async function runAdminUpdateProduct(
         // storing the submitted one would leave the row's "Κείμενο
         // συστατικών" arguing for a different score than the row's number.
         sourceText: rescored.sourceText,
+        nutritionEvidence: evidence,
+        nutritionSource:
+          evaluateNutrition(evidence, null).evaluation?.source ?? null,
         score: rescored.score,
         ingredientInsights: rescored.ingredientInsights,
       },
@@ -2226,6 +2247,27 @@ async function runAdminUsage(
 }
 
 /**
+ * The nutrition evidence for a recompute. Numbers stored with the scan are
+ * used as they are; a row analysed before they were kept asks Open Food Facts
+ * for its barcode now (served from the D1 cache after the first time), which
+ * is how a product scored on ingredients alone — Lurpak Soft at 100 — picks
+ * its nutrition up on «Επανυπολογισμός» without being photographed again.
+ */
+async function evidenceForRecompute(
+  barcode: string,
+  context: StoredLabelContext,
+  env: Env,
+  requestId: string,
+) {
+  const fresh =
+    context.storedEvidence?.source !== "openfoodfacts" && barcode
+      ? await nutritionLookupFromBarcode(barcode, env, requestId)
+      : null;
+
+  return nutritionEvidenceForRecompute(context, fresh);
+}
+
+/**
  * Recomputes a stored score from the stored label text — no OCR, no model.
  *
  * The PIM's edit form covers ingredients only, so a nutrition row whose
@@ -2285,10 +2327,18 @@ async function runAdminRescoreProduct(
 
       const context = storedLabelContext(stored);
 
-      const rescored = await rescoreNutritionResult(
+      const evidence = await evidenceForRecompute(
+        barcode,
+        context,
+        env,
+        requestId,
+      );
+
+      const rescored = rescoreFoodNutrition(
         core,
         sourceText,
         context,
+        evidence,
       );
 
       score = rescored.score;
@@ -2296,6 +2346,7 @@ async function runAdminRescoreProduct(
       envelope = {
         ...syncEnvelopeScoreMentions(stored, score),
         alcohol: context.alcohol,
+        nutritionEvidence: evidence,
         score,
         nutritionInsights: rescored.nutritionInsights,
         executiveSummary: rescored.executiveSummary,
@@ -2341,12 +2392,19 @@ async function runAdminRescoreProduct(
 
       const context = storedLabelContext(stored);
 
-      const rescored = await rescoreIngredientsResult(
+      const evidence = await evidenceForRecompute(
+        barcode,
+        context,
+        env,
+        requestId,
+      );
+
+      const rescored = await rescoreFoodIngredients(
         env.DB,
         core,
         sourceText,
-        context.nutritionPanel,
         context,
+        evidence,
       );
 
       score = rescored.score;
@@ -2354,6 +2412,9 @@ async function runAdminRescoreProduct(
       envelope = {
         ...syncEnvelopeScoreMentions(stored, score),
         nutritionPanel: context.nutritionPanel,
+        nutritionEvidence: evidence,
+        nutritionSource:
+          evaluateNutrition(evidence, null).evaluation?.source ?? null,
         alcohol: context.alcohol,
         sourceText: rescored.sourceText,
         score,
@@ -3778,37 +3839,43 @@ type IngredientsAnalysisOutcome =
  * the exact same logic a live scan would.
  */
 /**
- * The per-100 quantities Open Food Facts holds for a barcode, or null.
+ * What Open Food Facts holds for a barcode that the nutrition score needs:
+ * its per-100 facts (null when the record has none, or contradicts itself)
+ * and its category tags (which decide the Nutri-Score category).
  *
  * Never allowed to fail an analysis: OFF is a third-party service on the
  * critical path of a scan that is already working, so a timeout, an outage
- * or a record with no nutrition data all mean the same thing here — score
- * from the ingredient rules, exactly as before this existed.
+ * or a record with no nutrition data all mean the same thing here — no
+ * nutrition from this source, and the score says so (foodScore.ts).
+ *
+ * Served from the D1 cache after the first lookup of a barcode, so the
+ * identify step and this one cost a single request between them.
  */
-async function nutritionPanelFromBarcode(
+async function nutritionLookupFromBarcode(
   barcode: string,
   env: Env,
   requestId: string,
-): Promise<NutritionPanel | null> {
+): Promise<{ facts: NutritionFacts | null; categoryTags: string[] } | null> {
   try {
     const lookup = await lookupProductByBarcode(barcode, {
       db: env.DB,
     });
 
-    console.log("nutrition_panel_from_openfoodfacts", {
+    console.log("nutrition_from_openfoodfacts", {
       requestId,
       barcode,
       source: lookup.source,
-      found: lookup.nutritionPanel !== null,
-      nutrients:
-        lookup.nutritionPanel?.readings.map(
-          (reading) => reading.key,
-        ) ?? null,
+      found: lookup.nutritionFacts !== null,
+      hasIdentity: hasIdentity(lookup),
+      categoryTags: lookup.categoryTags.length,
     });
 
-    return lookup.nutritionPanel;
+    return {
+      facts: lookup.nutritionFacts,
+      categoryTags: lookup.categoryTags,
+    };
   } catch (caughtError) {
-    console.error("nutrition_panel_lookup_failed", {
+    console.error("nutrition_lookup_failed", {
       requestId,
       barcode,
       message:
@@ -4050,18 +4117,31 @@ async function analyzeIngredientsCore(
 
   const photoPanel = panelChoice?.read.panel ?? null;
 
-  // Failing that, the quantities Open Food Facts holds for this barcode —
-  // it stores them per 100 g already, and a photo of an ingredient list
-  // very often crops the table out entirely. Only as a fallback, and never
-  // to overrule the photo: the pack in the user's hand is the primary
-  // source, and a community edit should not move a score that a legible
-  // photograph already answered. Both go through the same plausibility
-  // gate, so neither is trusted further than the other.
+  // Failing that, what Open Food Facts holds for this barcode — it stores
+  // per-100 values already, and a photo of an ingredient list very often
+  // crops the table out entirely. The pack in the user's hand is the primary
+  // source and a community edit must not move a score that a legible
+  // photograph already answered, so the label wins whenever it can be
+  // graded; a whole source is used or not, never mixed field by field.
+  // Category tags are wanted either way: they decide which Nutri-Score
+  // rules apply (a butter is a fat, a cola a beverage).
+  const offLookup = barcode
+    ? await nutritionLookupFromBarcode(barcode, env, requestId)
+    : null;
+
+  const nutritionEvidence = resolveNutritionEvidence({
+    panel: photoPanel,
+    offFacts: offLookup?.facts ?? null,
+    categoryTags: offLookup?.categoryTags ?? [],
+  });
+
+  const nutritionGraded =
+    evaluateNutrition(nutritionEvidence, null).evaluation !== null;
+
+  // The legacy per-nutrient panel, still persisted for rows read by older
+  // code, only when the label is what was used.
   const nutritionPanel =
-    photoPanel ??
-    (barcode
-      ? await nutritionPanelFromBarcode(barcode, env, requestId)
-      : null);
+    nutritionEvidence?.source === "label" ? photoPanel : null;
 
   const nutritionOnlyRejection =
     reasons.length > 0 &&
@@ -4130,13 +4210,8 @@ async function analyzeIngredientsCore(
     analysisTextLength: analysisText.length,
     scoredTextLength: scoredText.length,
     nutritionPanelNutrients:
-      nutritionPanel?.readings.map((reading) => reading.key) ?? null,
-    nutritionPanelSource:
-      nutritionPanel === null
-        ? null
-        : photoPanel
-          ? "photo"
-          : "openfoodfacts",
+      photoPanel?.readings.map((reading) => reading.key) ?? null,
+    nutritionSource: nutritionGraded ? nutritionEvidence?.source : null,
     nutritionTableDetected: panelChoice?.read.tableDetected ?? false,
     nutritionPanelDiscarded: panelChoice?.read.discarded ?? [],
     nutritionPanelWarnings: panelChoice?.read.warnings ?? [],
@@ -4430,14 +4505,19 @@ async function analyzeIngredientsCore(
 
     // A table that was on the label but could not be trusted is said so,
     // next to the score, instead of silently scoring the list alone — the
-    // way Kaiser pilsner came out at 100. Open Food Facts standing in for
-    // it means the table *was* taken into account, so no notice then.
+    // way Kaiser pilsner came out at 100. Open Food Facts (or the label)
+    // standing in for it means nutrition *was* taken into account, so no
+    // notice then.
     const notices: ScoreNotice[] =
-      nutritionPanel === null && panelChoice?.read.tableDetected
+      !nutritionGraded && panelChoice?.read.tableDetected
         ? [NUTRITION_NOT_CONSIDERED_NOTICE]
         : [];
 
-    const score = scoreInterpretation(
+    // The ingredient half of the score, on its own: no alcohol (charged once,
+    // below) and no nutrition thresholds (the Nutri-Score is the nutrition
+    // half). When nutrition is graded, the added-sugar and salt rules step
+    // aside for it, exactly as they did for a label panel.
+    const ingredientScore = scoreInterpretation(
       scoredText,
       ocrConfidence,
       result,
@@ -4445,11 +4525,23 @@ async function analyzeIngredientsCore(
         extractionConfidence: gate.confidence,
         lowConfidenceReason: null,
         ruleMatches,
-        nutritionPanel,
-        alcohol,
-        notices,
+        nutritionCoversSugarSalt: nutritionGraded,
       },
     );
+
+    // An ingredient list that could not be scored stays unscored: nutrition
+    // from a database must not rescue a photo whose content was not there —
+    // the content gate's "no content, no score" holds after the gate too.
+    const score: WorkerScore =
+      ingredientScore.score === null
+        ? ingredientScore
+        : scoreFood({
+            ingredientScore,
+            nutrition: nutritionEvidence,
+            nonNutritiveSweetener: sweetenerFrom(ruleMatches),
+            alcohol,
+            notices,
+          });
 
     // Explanation-only enrichment layer. It reads `result` (the AI's
     // findings) and `score` (the Worker's own deductions) but never
@@ -4483,6 +4575,13 @@ async function analyzeIngredientsCore(
       // with it or an admin save would silently rescore the product as if
       // the label had carried no nutrition table at all.
       nutritionPanel,
+      // The evidence the nutrition half was graded from (per-100 facts, their
+      // source and the category tags), so the recompute reproduces the scan
+      // even when the numbers came from Open Food Facts, which it cannot
+      // photograph again. null when nothing was found anywhere.
+      nutritionEvidence,
+      // "label" | "openfoodfacts" | null — which source the score used.
+      nutritionSource: nutritionGraded ? nutritionEvidence?.source : null,
       // The raw text the table was read from, so a recompute can read it
       // again with a fixed parser rather than replaying old numbers.
       nutritionSourceText: panelChoice?.text ?? null,
@@ -4799,16 +4898,36 @@ async function analyzeNutritionCore(
       result.attentionItems,
     );
 
-    const score = scoreNutrition(
-      modelInputText,
+    // Same evidence rules as the ingredients path: the label's table when it
+    // can be graded, else Open Food Facts for the barcode, else nothing. The
+    // Nutri-Score is the whole score here — there is no ingredient list to
+    // blend with, and the notice says so.
+    const photoRead = inspectNutritionPanel(modelInputText, {
+      abv: alcohol?.abv ?? null,
+    });
+
+    const offLookup = barcode
+      ? await nutritionLookupFromBarcode(barcode, env, requestId)
+      : null;
+
+    const nutritionEvidence = resolveNutritionEvidence({
+      panel: photoRead.panel,
+      offFacts: offLookup?.facts ?? null,
+      categoryTags: offLookup?.categoryTags ?? [],
+    });
+
+    const nutritionGraded =
+      evaluateNutrition(nutritionEvidence, null).evaluation !== null;
+
+    const score: WorkerScore = scoreNutritionOnly({
+      evidence: nutritionEvidence,
+      alcohol,
+      notices: extraNotices,
+      text: modelInputText,
       ocrConfidence,
-      result,
-      {
-        extractionConfidence: extraction.confidence,
-        alcohol,
-        notices: extraNotices,
-      },
-    );
+      analysis: result,
+      extractionConfidence: extraction.confidence,
+    });
 
     const nutritionInsights = buildNutritionInsights(
       result,
@@ -4835,6 +4954,9 @@ async function analyzeNutritionCore(
       sourceText: modelInputText,
       alcohol,
       labelTexts,
+      // See the matching fields on the ingredients path.
+      nutritionEvidence,
+      nutritionSource: nutritionGraded ? nutritionEvidence?.source : null,
     };
 
     // A table the reader could not vouch for is exactly the case worth a
@@ -5321,7 +5443,10 @@ async function runIdentify(
         },
       );
 
-      if (barcodeResult.source) {
+      // Identity means a name or a brand. A record can be known to Open Food
+      // Facts for its nutrition alone, and handing that on as an identity
+      // sent the client a product with no name at all.
+      if (hasIdentity(barcodeResult)) {
         identity = barcodeResult;
       }
     }
@@ -5377,9 +5502,7 @@ async function runIdentify(
       await fillMissingProductName(
         env.DB,
         barcode,
-        [identity.brand, identity.productName]
-          .filter(Boolean)
-          .join(" "),
+        composeDisplayTitle(identity.brand, identity.productName),
       );
     }
 

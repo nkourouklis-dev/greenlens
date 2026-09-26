@@ -1,4 +1,5 @@
 import type { ScanHistoryItem } from "../types";
+import { collapseRepeatedTitle } from "../utils/productTitle";
 
 const HISTORY_KEY =
   "greenlens.scan-history.v1";
@@ -27,8 +28,15 @@ function readHistory(): ScanHistoryItem[] {
     const parsedHistory: unknown =
       JSON.parse(storedHistory);
 
+    // Titles saved before composeDisplayTitle existed can say the brand
+    // twice ("LURPAK LURPAK"); every read cleans them, and the next write
+    // stores the cleaned title.
     return Array.isArray(parsedHistory)
-      ? (parsedHistory as ScanHistoryItem[])
+      ? (parsedHistory as ScanHistoryItem[]).map((item) =>
+          typeof item.productName === "string"
+            ? { ...item, productName: collapseRepeatedTitle(item.productName) }
+            : item,
+        )
       : [];
   } catch {
     return [];

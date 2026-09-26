@@ -42,6 +42,18 @@ import {
   type AlcoholInfo,
 } from "./alcohol";
 import { cleanIngredientText } from "./ingredientText";
+import {
+  evaluateNutrition,
+  resolveNutritionEvidence,
+  scoreFood,
+  scoreNutritionOnly,
+  sweetenerFrom,
+  type FoodWorkerScore,
+} from "./foodScore";
+import {
+  parseNutritionEvidence,
+  type NutritionEvidence,
+} from "./nutritionFacts";
 import { scoreNutrition } from "./nutritionScoring";
 import {
   buildNutritionExecutiveSummary,
@@ -69,6 +81,13 @@ const HUMAN_VERIFIED_CONFIDENCE = 1;
 export interface StoredLabelContext {
   /** The quantities to score, re-read from the stored table text if any. */
   nutritionPanel: NutritionPanel | null;
+  /**
+   * What the scan graded the nutrition half from (per-100 facts, source and
+   * category tags), as stored. Carries Open Food Facts numbers across a
+   * recompute, which cannot fetch or photograph them again — and the
+   * category tags even when the label was the source.
+   */
+  storedEvidence: NutritionEvidence | null;
   alcohol: AlcoholInfo | null;
   notices: ScoreNotice[];
 }
@@ -125,9 +144,12 @@ export function storedLabelContext(
       ? stored.nutritionSourceText
       : null;
 
+  const storedEvidence = parseNutritionEvidence(stored.nutritionEvidence);
+
   if (tableText === null) {
     return {
       nutritionPanel: parseNutritionPanel(stored.nutritionPanel),
+      storedEvidence,
       alcohol,
       notices: [],
     };
@@ -139,6 +161,7 @@ export function storedLabelContext(
 
   return {
     nutritionPanel: read.panel,
+    storedEvidence,
     alcohol,
     notices:
       read.panel === null && read.tableDetected
@@ -215,6 +238,115 @@ export async function rescoreIngredientsResult(
     ingredientInsights,
     ruleMatches,
     sourceText: cleanedText,
+  };
+}
+
+/**
+ * The nutrition evidence a recompute grades from: the label's table re-read
+ * from its stored text, else Open Food Facts numbers — the ones stored with
+ * the scan, or, for a row analysed before they were kept, `freshOffFacts`
+ * that the caller fetched for the barcode. Same rules as a scan
+ * (resolveNutritionEvidence), which is what keeps the two in agreement.
+ */
+export function nutritionEvidenceForRecompute(
+  context: StoredLabelContext,
+  fresh: { facts: NutritionEvidence["facts"] | null; categoryTags: string[] } | null,
+): NutritionEvidence | null {
+  const stored = context.storedEvidence;
+
+  const storedOffFacts =
+    stored?.source === "openfoodfacts" ? stored.facts : null;
+
+  return resolveNutritionEvidence({
+    panel: context.nutritionPanel,
+    offFacts: storedOffFacts ?? fresh?.facts ?? null,
+    categoryTags:
+      stored && stored.categoryTags.length > 0
+        ? stored.categoryTags
+        : (fresh?.categoryTags ?? []),
+  });
+}
+
+/**
+ * The unified counterpart of rescoreIngredientsResult: the ingredient half
+ * recomputed exactly as before, then blended with the nutrition half the way
+ * a scan blends them (foodScore.ts). Same input, same output.
+ */
+export async function rescoreFoodIngredients(
+  db: D1Like,
+  result: WorkerAnalysisResult,
+  sourceText: string,
+  context: StoredLabelContext,
+  evidence: NutritionEvidence | null,
+): Promise<RescoreOutcome & { score: FoodWorkerScore }> {
+  const ruleSet = await loadScoringRules(db);
+
+  const cleanedText = cleanIngredientText(sourceText);
+
+  const ruleMatches = matchScoringRules(cleanedText, ruleSet);
+
+  const graded = evaluateNutrition(evidence, null).evaluation !== null;
+
+  const ingredientScore = scoreInterpretation(
+    cleanedText,
+    HUMAN_VERIFIED_CONFIDENCE,
+    result,
+    {
+      extractionConfidence: HUMAN_VERIFIED_CONFIDENCE,
+      lowConfidenceReason: null,
+      ruleMatches,
+      nutritionCoversSugarSalt: graded,
+    },
+  );
+
+  // As on a scan: an unscoreable ingredient list stays unscored, whatever a
+  // database says about the nutrition.
+  const score: FoodWorkerScore =
+    ingredientScore.score === null
+      ? ingredientScore
+      : scoreFood({
+          ingredientScore,
+          nutrition: evidence,
+          nonNutritiveSweetener: sweetenerFrom(ruleMatches),
+          alcohol: context.alcohol,
+          notices: graded ? [] : context.notices,
+        });
+
+  const ingredientInsights = await buildIngredientInsights(
+    result,
+    score,
+    db,
+    ruleMatches,
+  );
+
+  return { score, ingredientInsights, ruleMatches, sourceText: cleanedText };
+}
+
+/** The unified counterpart of rescoreNutritionResult. */
+export function rescoreFoodNutrition(
+  result: WorkerNutritionResult,
+  sourceText: string,
+  context: StoredLabelContext,
+  evidence: NutritionEvidence | null,
+): {
+  score: WorkerScore;
+  nutritionInsights: NutritionInsight[];
+  executiveSummary: ExecutiveSummary;
+} {
+  const score = scoreNutritionOnly({
+    evidence,
+    alcohol: context.alcohol,
+    notices: context.notices,
+    text: sourceText,
+    ocrConfidence: HUMAN_VERIFIED_CONFIDENCE,
+    analysis: result,
+    extractionConfidence: HUMAN_VERIFIED_CONFIDENCE,
+  });
+
+  return {
+    score,
+    nutritionInsights: buildNutritionInsights(result, score),
+    executiveSummary: buildNutritionExecutiveSummary(result, score),
   };
 }
 

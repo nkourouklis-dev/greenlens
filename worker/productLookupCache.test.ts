@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  CACHE_SCHEMA_VERSION,
   lookupProductByBarcode,
   type D1Like,
   type D1PreparedStatementLike,
@@ -104,7 +105,7 @@ function createFakeD1(rows: CacheRow[]): {
 
 const CACHED_NESTLE: CacheRow = {
   barcode: "7613287308870",
-  schema_version: 1,
+  schema_version: CACHE_SCHEMA_VERSION,
   found: 1,
   fetched_at_ms: Date.now(),
   result: JSON.stringify({
@@ -161,7 +162,7 @@ test("an expired hit is not served", async () => {
 test("a cached miss is served, and expires much sooner than a hit", async () => {
   const miss: CacheRow = {
     barcode: "5201109003724",
-    schema_version: 1,
+    schema_version: CACHE_SCHEMA_VERSION,
     found: 0,
     fetched_at_ms: Date.now(),
     result: JSON.stringify({

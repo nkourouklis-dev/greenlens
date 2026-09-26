@@ -5,6 +5,8 @@ import type { ScoreNotice } from "../types";
 const MISSING_SOURCE_CODES = new Set([
   "nutrition_not_considered",
   "ingredients_not_considered",
+  "partial_no_nutrition",
+  "partial_no_ingredients",
 ]);
 
 function hasMissingSourceNotice(

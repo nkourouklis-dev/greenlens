@@ -98,8 +98,60 @@ export interface ScoreNotice {
   body: string;
 }
 
+/** One line of the Nutri-Score: what was measured and the points it earned. */
+export interface NutriScoreComponent {
+  key:
+    | "energy"
+    | "energy_from_saturates"
+    | "sugars"
+    | "saturates"
+    | "saturates_ratio"
+    | "salt"
+    | "sweeteners"
+    | "protein"
+    | "fibre"
+    | "fruit_veg_legumes";
+  side: "negative" | "positive";
+  value: number | null;
+  points: number;
+  /** False for a favourable component the final formula leaves out. */
+  counted: boolean;
+}
+
+export type NutritionSource = "label" | "openfoodfacts";
+
+/** What the nutrition half of a food's score was graded from. */
+export interface NutritionEvaluation {
+  source: NutritionSource;
+  grade: "A" | "B" | "C" | "D" | "E";
+  points: number | null;
+  category: string;
+  components: NutriScoreComponent[];
+  /** Favourable nutrients not declared: they earned nothing, and we say so. */
+  uncredited: Array<"fibre" | "protein" | "fruit_veg_legumes" | "sweeteners">;
+  sugarsBoundedByCarbohydrate: boolean;
+}
+
+/** How a food's single score was put together (worker/foodScore.ts). */
+export interface ScoreComposition {
+  nutrition: {
+    score: number;
+    weight: number;
+    grade: "A" | "B" | "C" | "D" | "E";
+    source: NutritionSource;
+  } | null;
+  ingredients: { score: number; weight: number } | null;
+  /** The blend, before the partial-evaluation cap and the alcohol row. */
+  blended: number;
+  cappedFrom: number | null;
+  cap: number | null;
+}
+
 export interface ScoreBreakdown {
   score: number | null;
+  /** Present on foods scored since the Nutri-Score was introduced. */
+  composition?: ScoreComposition;
+  nutritionEvaluation?: NutritionEvaluation | null;
   band:
     | "excellent"
     | "good"
