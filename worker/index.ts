@@ -1021,8 +1021,23 @@ async function generateAssistantDraftForProduct(
     throw new Error("no_analysis");
   }
 
-  const analysisResult = product.analysisResult;
+  return generateAssistantDraftFromAnalysis(
+    env,
+    product.productName,
+    product.analysisResult,
+  );
+}
 
+/**
+ * The same draft, from an analysis that is still in memory — which is what a
+ * scan has before it has been saved, and what lets the copy be part of the
+ * answer the user is waiting for instead of arriving after it.
+ */
+async function generateAssistantDraftFromAnalysis(
+  env: Env,
+  productName: string | null,
+  analysisResult: Record<string, unknown>,
+): Promise<AssistantDraft> {
   const findings = Array.isArray(analysisResult.ingredientFindings)
     ? analysisResult.ingredientFindings
         .filter(isRecord)
@@ -1053,7 +1068,7 @@ async function generateAssistantDraftForProduct(
 
   const prompt = buildDraftPrompt({
     scoreFacts: explanation?.facts ?? [],
-    productName: product.productName,
+    productName,
     sourceText:
       typeof analysisResult.sourceText === "string"
         ? analysisResult.sourceText
@@ -1170,6 +1185,87 @@ async function runAssistDraft(
  * must never surface as a scan failure to the person who just took the
  * photo.
  */
+/** An analysis with the assistant's copy written into it. */
+function withDraftCopy(
+  analysisResult: Record<string, unknown>,
+  draft: AssistantDraft,
+): Record<string, unknown> {
+  const executiveSummary = isRecord(analysisResult.executiveSummary)
+    ? analysisResult.executiveSummary
+    : {};
+
+  return {
+    ...analysisResult,
+    copySource: "auto" as const,
+    summary: draft.summary || analysisResult.summary,
+    executiveSummary: {
+      ...executiveSummary,
+      overallVerdict:
+        draft.overallVerdict || executiveSummary.overallVerdict,
+      highlights:
+        draft.highlights.length > 0
+          ? draft.highlights
+          : executiveSummary.highlights,
+      watchOutFor:
+        draft.watchOutFor.length > 0
+          ? draft.watchOutFor
+          : executiveSummary.watchOutFor,
+    },
+  };
+}
+
+/**
+ * Puts the assistant's copy into a scan's result *before* it is saved and
+ * returned, so every user who scans sees the written summary, verdict and
+ * cautions on their own screen — not only the next person, after a
+ * background write.
+ *
+ * Skipped when the catalogue already holds a person's word for this barcode
+ * (a verified row, or copy marked manual), which a user's scan must not
+ * replace. Never allowed to fail the scan: a model hiccup returns the
+ * analysis exactly as it was, with the model's own copy.
+ */
+async function withAssistantCopy<T extends Record<string, unknown>>(
+  env: Env,
+  barcode: string,
+  productName: string | null,
+  responseBody: T,
+): Promise<T> {
+  if (!barcode) {
+    return responseBody;
+  }
+
+  try {
+    const existing = await getAdminProduct(env.DB, barcode);
+
+    if (
+      existing &&
+      (existing.status === "verified" ||
+        readCopySource(existing.analysisResult) === "manual")
+    ) {
+      return responseBody;
+    }
+
+    const draft = await generateAssistantDraftFromAnalysis(
+      env,
+      productName ?? existing?.productName ?? null,
+      responseBody,
+    );
+
+    return withDraftCopy(responseBody, draft) as T;
+  } catch (caughtError) {
+    console.error("scan_copy_draft_failed", {
+      barcode,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return responseBody;
+  }
+}
+
 async function autoApplyAssistantDraft(
   env: Env,
   barcode: string,
@@ -1191,30 +1287,10 @@ async function autoApplyAssistantDraft(
       return;
     }
 
-    const analysisResult = product.analysisResult;
-
-    const executiveSummary = isRecord(analysisResult.executiveSummary)
-      ? analysisResult.executiveSummary
-      : {};
-
-    const updatedAnalysisResult = {
-      ...analysisResult,
-      copySource: "auto" as const,
-      summary: draft.summary || analysisResult.summary,
-      executiveSummary: {
-        ...executiveSummary,
-        overallVerdict:
-          draft.overallVerdict || executiveSummary.overallVerdict,
-        highlights:
-          draft.highlights.length > 0
-            ? draft.highlights
-            : executiveSummary.highlights,
-        watchOutFor:
-          draft.watchOutFor.length > 0
-            ? draft.watchOutFor
-            : executiveSummary.watchOutFor,
-      },
-    };
+    const updatedAnalysisResult = withDraftCopy(
+      product.analysisResult,
+      draft,
+    );
 
     await applyAssistantDraftCopy(
       env.DB,
@@ -4631,7 +4707,7 @@ async function analyzeIngredientsCore(
       score,
     );
 
-    const responseBody = {
+    const scanBody = {
       ...result,
       score,
       ingredientInsights,
@@ -4663,6 +4739,15 @@ async function analyzeIngredientsCore(
       labelTexts,
     };
 
+    // The written summary, verdict and cautions are part of what the user
+    // gets back, not a later background write.
+    const responseBody =
+      score.score === null
+        ? scanBody
+        : await timedStage(requestId, "scan_copy", () =>
+            withAssistantCopy(env, barcode, productTitle ?? null, scanBody),
+          );
+
     // Only cache a genuinely complete, scored result — score.score can
     // still be null here (insufficient_data band) even after a valid AI
     // parse, e.g. on shaky OCR confidence, and that verdict is about this
@@ -4670,17 +4755,13 @@ async function analyzeIngredientsCore(
     // future, much clearer scan of the same barcode into the same
     // "insufficient data" answer forever.
     if (score.score !== null) {
-      const { isNewProduct } = await timedStage(requestId, "save_result", () => saveProductResult(env.DB, {
+      await timedStage(requestId, "save_result", () => saveProductResult(env.DB, {
         barcode,
         productName: productTitle ?? null,
         category: "ingredients",
         analysisResult: responseBody,
         versionSource,
       }));
-
-      if (isNewProduct) {
-        await afterResponse(env, requestId, "auto_copy_draft", () => autoApplyAssistantDraft(env, barcode));
-      }
     }
 
     return { ok: true, responseBody };
@@ -5011,7 +5092,7 @@ async function analyzeNutritionCore(
       score,
     );
 
-    const responseBody = {
+    const scanBody = {
       ...result,
       score,
       nutritionInsights,
@@ -5030,6 +5111,14 @@ async function analyzeNutritionCore(
       nutritionEvidence,
       nutritionSource: nutritionGraded ? nutritionEvidence?.source : null,
     };
+
+    // See the matching step on the ingredients path.
+    const responseBody =
+      score.score === null
+        ? scanBody
+        : await timedStage(requestId, "scan_copy", () =>
+            withAssistantCopy(env, barcode, productTitle ?? null, scanBody),
+          );
 
     // A table the reader could not vouch for is exactly the case worth a
     // regression fixture, and without its OCR text there is nothing to
@@ -5050,17 +5139,13 @@ async function analyzeNutritionCore(
     // be null (insufficient_data) on a valid parse with shaky evidence,
     // and that's a fact about this scan, not the product.
     if (score.score !== null) {
-      const { isNewProduct } = await timedStage(requestId, "save_result", () => saveProductResult(env.DB, {
+      await timedStage(requestId, "save_result", () => saveProductResult(env.DB, {
         barcode,
         productName: productTitle ?? null,
         category: "nutrition",
         analysisResult: responseBody,
         versionSource,
       }));
-
-      if (isNewProduct) {
-        await afterResponse(env, requestId, "auto_copy_draft", () => autoApplyAssistantDraft(env, barcode));
-      }
     }
 
     return { ok: true, responseBody };

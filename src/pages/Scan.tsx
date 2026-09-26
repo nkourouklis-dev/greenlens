@@ -10,6 +10,7 @@ import {
   saveHistoryItem,
 } from "../services/historyService";
 import { checkCachedProduct } from "../services/analysisClient";
+import { refreshFromCatalogue } from "../services/catalogueRefresh";
 import { buildAnalysisRecord } from "../services/analysisRecord";
 import ManualBarcodeInput from "../components/ManualBarcodeInput";
 import type { ScanHistoryItem } from "../types";
@@ -75,6 +76,31 @@ export default function Scan() {
     useState<ScanHistoryItem | null>(null);
 
   const navigate = useNavigate();
+
+  // A barcode already saved on this phone is shown from the saved copy, which
+  // may predate the catalogue's current score; check, and show the current one.
+  const existingId = existingItem?.id;
+
+  useEffect(() => {
+    if (!existingItem) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void refreshFromCatalogue(existingItem).then((updated) => {
+      if (updated && !cancelled) {
+        setExistingItem(updated);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // Keyed on the item's identity: a refresh replaces the item and must not
+    // trigger another one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingId]);
 
   const error = cameraError || decodeError;
 

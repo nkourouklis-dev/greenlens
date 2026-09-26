@@ -2,12 +2,14 @@ import {
   Camera,
   RefreshCw,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   useNavigate,
   useParams,
 } from "react-router-dom";
 import { getHistoryItem } from "../services/historyService";
+import { refreshFromCatalogue } from "../services/catalogueRefresh";
 import {
   deriveAllergenNotice,
   deriveExecutiveSummary,
@@ -52,7 +54,37 @@ export default function Product() {
   // Re-renders this page when a background analysis finishes.
   useAnalysisJobs();
 
+  // Bumped when the saved copy was replaced by the catalogue's newer one.
+  const [, setRefreshed] = useState(0);
+
   const item = getHistoryItem(id);
+
+  // What this phone saved is the result at the time of the scan. The shared
+  // catalogue may have moved since (new scoring, corrected list, nutrition
+  // found), so opening a product checks it and shows the current answer.
+  const savedItem = getHistoryItem(id);
+  const savedBarcode = savedItem?.barcode;
+  const savedRunning = savedItem?.analysisState;
+
+  useEffect(() => {
+    const current = getHistoryItem(id);
+
+    if (!current || !savedBarcode || savedRunning) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void refreshFromCatalogue(current).then((updated) => {
+      if (updated && !cancelled) {
+        setRefreshed((count) => count + 1);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, savedBarcode, savedRunning]);
 
   if (!item) {
     return (
