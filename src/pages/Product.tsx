@@ -141,15 +141,19 @@ export default function Product() {
   return (
     <main className="min-h-screen bg-canvas pb-5 text-ink">
       <section className="mx-auto max-w-md">
-        <div className="relative h-64 w-full overflow-hidden bg-slate-800">
+        {/* min-h, not h: a long product name grows the header downwards
+            instead of climbing out of it under the back button and the
+            status bar (a three-line Garnier name did exactly that). The top
+            padding keeps the text clear of the floating back button. */}
+        <div className="relative flex min-h-64 w-full flex-col justify-end overflow-hidden bg-slate-800 px-4 pb-4 pt-16">
           {photoSource ? (
             <img
               src={photoSource}
               alt="Φωτογραφία προϊόντος"
-              className="h-full w-full object-cover"
+              className="absolute inset-0 h-full w-full object-cover"
             />
           ) : (
-            <div className="h-full w-full bg-gradient-to-br from-emerald-800 via-slate-800 to-slate-900" />
+            <div className="absolute inset-0 bg-gradient-to-br from-emerald-800 via-slate-800 to-slate-900" />
           )}
 
           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
@@ -162,14 +166,14 @@ export default function Product() {
             </div>
           )}
 
-          <div className="absolute inset-x-4 bottom-4">
+          <div className="relative pr-16">
             {categoryChip && (
               <span className="mb-2 inline-block rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur-sm">
                 {categoryChip}
               </span>
             )}
 
-            <h1 className="text-2xl font-bold leading-tight text-white drop-shadow-sm">
+            <h1 className="line-clamp-3 text-2xl font-bold leading-tight text-white drop-shadow-sm">
               {item.productName || "Νέο προϊόν"}
             </h1>
 

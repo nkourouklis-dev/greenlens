@@ -13,6 +13,8 @@ import { checkCachedProduct } from "../services/analysisClient";
 import { refreshFromCatalogue } from "../services/catalogueRefresh";
 import { buildAnalysisRecord } from "../services/analysisRecord";
 import ManualBarcodeInput from "../components/ManualBarcodeInput";
+import CameraScreen from "../components/CameraScreen";
+import { Keyboard, ScanLine } from "lucide-react";
 import type { ScanHistoryItem } from "../types";
 import { useCameraViewport } from "../contexts/CameraContext";
 
@@ -71,6 +73,10 @@ export default function Scan() {
   // running across the whole flow; this only tracks the scanning loop.
   const [isScanning, setIsScanning] =
     useState(false);
+
+  // Set when the person chose to type the barcode (camera turned off), so
+  // "camera off" reads as a choice, not as a camera still starting up.
+  const [isPaused, setIsPaused] = useState(false);
 
   const [existingItem, setExistingItem] =
     useState<ScanHistoryItem | null>(null);
@@ -223,11 +229,13 @@ export default function Scan() {
   // flow steps, this is a deliberate request to turn the camera off, so it
   // stops the actual hardware, not just the decode loop.
   function pauseScanning() {
+    setIsPaused(true);
     stopDecoding();
     stopCamera();
   }
 
   async function resumeScanning() {
+    setIsPaused(false);
     setDecodeError("");
     await startCamera();
   }
@@ -476,122 +484,109 @@ export default function Scan() {
   }
 
   return (
-    <main className="min-h-screen bg-canvas px-4 pb-28 pt-4 text-ink">
-      <section className="mx-auto max-w-md">
-        <header className="mb-4">
+    <CameraScreen
+      viewportRef={containerRef}
+      label="Σάρωση barcode"
+      guide="barcode"
+      scanning={isScanning && !barcode}
+      hint={
+        barcode
+          ? null
+          : isScanning
+            ? "Αναζήτηση barcode..."
+            : isCameraActive
+              ? "Η σάρωση είναι σε παύση"
+              : null
+      }
+      placeholder={
+        isCameraActive ? null : (
+          <p>
+            {cameraError
+              ? "Η κάμερα δεν είναι διαθέσιμη. Πληκτρολόγησε το barcode."
+              : isPaused
+                ? "Η κάμερα είναι κλειστή."
+                : "Άνοιγμα κάμερας..."}
+          </p>
+        )
+      }
+    >
+      {error && (
+        <p
+          role="alert"
+          className="rounded-xl border border-red-500/40 bg-red-950/40 p-2.5 text-xs leading-5 text-red-100"
+        >
+          {error}
+        </p>
+      )}
+
+      {barcode ? (
+        <>
           <div>
-            <h1 className="text-2xl font-bold">
-              Σάρωση προϊόντος
-            </h1>
-
-            <p className="mt-1 text-sm leading-5 text-ink-muted">
-              Βάλε το barcode μέσα στο πλαίσιο και
-              κράτησε την κάμερα σταθερή.
-            </p>
-          </div>
-        </header>
-
-        {/* Same aspect-ratio/max-height fix as PhotoCapture.tsx: capping
-            height directly leaves width at w-full, so the box silently
-            renders wider/shorter than 4/5 on short viewports. Capping
-            width instead (50vh * 4/5) keeps it genuinely 4/5 at any
-            height, matching the border frame the barcode is aimed at. */}
-        <div className="relative mx-auto aspect-[4/5] w-full max-w-[40vh] overflow-hidden rounded-2xl border border-line bg-black shadow-lg shadow-black/20">
-          <div
-            ref={containerRef}
-            className="h-full w-full [&>video]:h-full [&>video]:w-full [&>video]:object-cover"
-          />
-
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="relative h-32 w-[82%] rounded-xl border-2 border-emerald-400 shadow-[0_0_0_999px_rgba(0,0,0,0.42)]">
-              <div className="absolute left-3 right-3 top-1/2 h-0.5 -translate-y-1/2 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.75)]" />
-            </div>
-          </div>
-
-          <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/65 px-3 py-1.5 text-xs font-medium text-white backdrop-blur">
-            {isScanning
-              ? "Αναζήτηση barcode..."
-              : "Η κάμερα είναι κλειστή"}
-          </div>
-        </div>
-
-        {error && (
-          <div
-            role="alert"
-            className="mt-3 rounded-xl border border-red-500/40 bg-red-950/40 p-3 text-sm leading-5 text-red-100"
-          >
-            {error}
-          </div>
-        )}
-
-        {barcode && (
-          <div className="mt-3 rounded-2xl border border-emerald-500/40 bg-emerald-950/30 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+            <p className="text-xs font-semibold text-accent-strong">
               Το barcode αναγνωρίστηκε
             </p>
-
-            <p className="mt-1 break-all font-mono text-xl font-bold">
+            <p className="mt-0.5 break-all text-xl font-bold tabular-nums tracking-wide">
               {barcode}
             </p>
-
-            <div className="mt-3 space-y-2">
-              <button
-                type="button"
-                onClick={() =>
-                  handleBarcode(barcode)
-                }
-                className="h-12 w-full rounded-xl bg-accent px-4 font-bold text-on-accent transition active:scale-[0.98]"
-              >
-                Συνέχεια
-              </button>
-
-              <button
-                type="button"
-                onClick={startDecoding}
-                className="h-11 w-full rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink-muted"
-              >
-                Νέα σάρωση
-              </button>
-            </div>
           </div>
-        )}
 
-        {!isScanning && !barcode && (
-          <div className="mt-4">
-            <ManualBarcodeInput
-              value={manualBarcode}
-              onChange={setManualBarcode}
-              onSubmit={handleBarcode}
-            />
-          </div>
-        )}
-      </section>
+          <button
+            type="button"
+            onClick={() => handleBarcode(barcode)}
+            className="h-12 w-full rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.99]"
+          >
+            Συνέχεια
+          </button>
 
-      {!barcode && (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line-subtle bg-canvas/95 px-4 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-3 backdrop-blur">
-          <div className="mx-auto max-w-md">
-            {isScanning ? (
-              <button
-                type="button"
-                onClick={pauseScanning}
-                className="h-12 w-full rounded-xl border border-line bg-surface-muted px-5 font-semibold text-ink transition active:scale-[0.98]"
-              >
-                Διακοπή σάρωσης
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={resumeScanning}
-                className="h-14 w-full rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98]"
-              >
-                {error
-                  ? "Δοκιμή ξανά"
-                  : "Άνοιγμα κάμερας"}
-              </button>
-            )}
+          <button
+            type="button"
+            onClick={startDecoding}
+            className="h-11 w-full rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink"
+          >
+            Νέα σάρωση
+          </button>
+        </>
+      ) : !isPaused && !error ? (
+        <>
+          <div>
+            <h1 className="text-lg font-bold leading-tight">
+              Σάρωσε το barcode
+            </h1>
+            <p className="mt-0.5 text-[13px] leading-5 text-ink-muted [@media(max-height:700px)]:hidden">
+              Βάλε το barcode μέσα στο πλαίσιο. Η αναγνώριση γίνεται
+              αυτόματα.
+            </p>
           </div>
-        </div>
+
+          <button
+            type="button"
+            onClick={pauseScanning}
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink"
+          >
+            <Keyboard size={16} />
+            Πληκτρολόγηση barcode
+          </button>
+        </>
+      ) : (
+        <>
+          <ManualBarcodeInput
+            value={manualBarcode}
+            onChange={setManualBarcode}
+            onSubmit={handleBarcode}
+            label="Πληκτρολόγηση barcode"
+            hint=""
+          />
+
+          <button
+            type="button"
+            onClick={resumeScanning}
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink"
+          >
+            <ScanLine size={16} />
+            {error ? "Δοκιμή ξανά" : "Σάρωση με κάμερα"}
+          </button>
+        </>
       )}
-    </main>
+    </CameraScreen>
   );
 }

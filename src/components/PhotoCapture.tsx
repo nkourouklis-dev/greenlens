@@ -1,16 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import {
-  ArrowLeft,
-  Check,
-  Image as ImageIcon,
-  Maximize,
-  RotateCcw,
-  Sun,
-  SunDim,
-  ZoomIn,
-  type LucideIcon,
-} from "lucide-react";
+import { Image as ImageIcon, RotateCcw } from "lucide-react";
+import CameraScreen from "./CameraScreen";
 import {
   estimateSharpness,
   getVisibleSourceRect,
@@ -21,9 +11,9 @@ import { usePhotoFilePicker } from "../hooks/usePhotoFilePicker";
 interface PhotoCaptureProps {
   /** Heading of the bottom sheet while framing, e.g. "Φωτογράφισε τα συστατικά". */
   title: string;
-  /** One short line under the heading: what to photograph and where it usually is. */
+  /** One short line under the heading; dropped on short screens. */
   description: string;
-  /** Short hint shown under the framing guide on the live feed. */
+  /** Short hint over the lower edge of the guide on the live feed. */
   hint: string;
   actionLabel: string;
   onContinue: (file: File) => void;
@@ -32,26 +22,14 @@ interface PhotoCaptureProps {
   /**
    * Which kind of shot this is: "list" is the ingredients list (lines of
    * text, usually on the back of the pack), "pack" is the front-of-pack
-   * identification photo. Picks the empty-state glyph and the tips row,
-   * and turns on the live "too far to read" hint for text.
+   * identification photo. Picks the no-camera glyph and turns on the live
+   * "too far to read" hint for text.
    */
   icon?: "list" | "pack";
   step?: number;
   stepCount?: number;
   barcode?: string;
 }
-
-const TIPS: Record<"list" | "pack", { label: string; Icon: LucideIcon }[]> = {
-  list: [
-    { label: "Καλό φως", Icon: Sun },
-    { label: "Κοντά", Icon: ZoomIn },
-    { label: "Χωρίς αντανάκλαση", Icon: SunDim },
-  ],
-  pack: [
-    { label: "Καλό φως", Icon: Sun },
-    { label: "Γέμισε το κάδρο", Icon: Maximize },
-  ],
-};
 
 // Lines-of-text glyph shown in the guide for the ingredients step when
 // there is no live camera, so the shape being asked for reads at a glance.
@@ -79,19 +57,6 @@ function PackFrameIcon() {
   );
 }
 
-// The four rounded corner brackets of the framing guide.
-function GuideCorners() {
-  const corner = "absolute h-9 w-9 border-accent";
-  return (
-    <>
-      <span className={`${corner} left-0 top-0 rounded-tl-2xl border-l-4 border-t-4`} />
-      <span className={`${corner} right-0 top-0 rounded-tr-2xl border-r-4 border-t-4`} />
-      <span className={`${corner} bottom-0 left-0 rounded-bl-2xl border-b-4 border-l-4`} />
-      <span className={`${corner} bottom-0 right-0 rounded-br-2xl border-b-4 border-r-4`} />
-    </>
-  );
-}
-
 // Below this, the live guide area is treated as too flat/empty to contain
 // readable text at this distance — most likely the label isn't filling the
 // guide yet. Deliberately conservative (only flags a clearly sparse frame)
@@ -104,10 +69,12 @@ const LIVE_FRAMING_SAMPLE_SIZE = 96;
 const errorBox =
   "rounded-xl border border-red-400/40 bg-red-950/40 p-2.5 text-xs text-red-100";
 
+const secondaryButton =
+  "flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-line bg-surface text-sm font-semibold text-ink disabled:opacity-50";
+
 /**
- * Full-screen photo step: the live camera fills the screen, a framing
- * guide marks what will be kept, and a bottom sheet holds the heading,
- * tips and shutter. After a shot the same sheet turns into the check
+ * A photo step (ingredients list, front of pack) on the shared full-screen
+ * camera layout (CameraScreen). After a shot the sheet turns into the check
  * ("Διαβάζεται καθαρά;") with continue / retake.
  *
  * The photo is cropped to the guide (captureFrame(guideRef)), so what the
@@ -126,7 +93,6 @@ export default function PhotoCapture({
   stepCount,
   barcode,
 }: PhotoCaptureProps) {
-  const navigate = useNavigate();
   const {
     containerRef,
     isActive: isCameraActive,
@@ -255,248 +221,143 @@ export default function PhotoCapture({
     });
   }
 
-  const tips = icon ? TIPS[icon] : [];
+  const placeholder = isCameraActive ? null : (
+    <>
+      {icon === "list" && <ListFrameIcon />}
+      {icon === "pack" && <PackFrameIcon />}
+      <p>
+        {cameraError
+          ? "Η κάμερα δεν είναι διαθέσιμη. Διάλεξε μια φωτογραφία από τη συσκευή."
+          : "Άνοιγμα κάμερας..."}
+      </p>
+    </>
+  );
 
   return (
-    <div className="fixed inset-0 z-30 flex flex-col bg-[#0e1411] text-white">
+    <CameraScreen
+      viewportRef={containerRef}
+      hideVideo={Boolean(previewUrl)}
+      step={
+        step !== undefined && stepCount !== undefined
+          ? { current: step, total: stepCount }
+          : undefined
+      }
+      barcode={barcode}
+      guide="document"
+      guideRef={guideRef}
+      scanning={isCameraActive}
+      hint={
+        isCameraActive
+          ? seemsTooFar
+            ? "Πλησίασε, ώστε το κείμενο να γεμίζει το πλαίσιο"
+            : hint
+          : null
+      }
+      placeholder={placeholder}
+      overlay={
+        previewUrl ? (
+          <img
+            src={previewUrl}
+            alt={title}
+            className="h-full w-full rounded-2xl object-contain"
+          />
+        ) : null
+      }
+    >
       {filePicker.input}
 
-      {/* Camera area: the shared live video is portaled into containerRef
-          and fills it. It stays mounted (and the stream keeps running) while
-          a captured photo is shown on top, so retaking is instant. */}
-      <div className="relative min-h-0 flex-1 overflow-hidden">
-        <div
-          ref={containerRef}
-          className={`absolute inset-0 [&>video]:h-full [&>video]:w-full [&>video]:object-cover ${previewUrl ? "invisible" : ""}`}
-        />
-
-        {/* Darkening behind the top controls so they read on any scene. */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-black/45"
-        />
-
-        {/* Top controls: back, step, barcode. */}
-        <div className="absolute inset-x-0 top-0 z-10 flex flex-col gap-2 px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => navigate(-1)}
-              aria-label="Πίσω"
-              className="flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur transition active:scale-95"
-            >
-              <ArrowLeft size={20} />
-            </button>
-
-            {step !== undefined && stepCount !== undefined && (
-              <div className="flex flex-col items-center gap-1.5">
-                <p className="text-[13px] font-semibold">
-                  Βήμα {step} από {stepCount}
-                </p>
-                <div className="flex gap-1" aria-hidden>
-                  {Array.from({ length: stepCount }, (_, index) => (
-                    <span
-                      key={index}
-                      className={`h-1 w-7 rounded-full ${index < step ? "bg-accent" : "bg-white/30"}`}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Keeps the step label centred against the back button. */}
-            <span aria-hidden className="h-11 w-11" />
-          </div>
-
-          {barcode && (
-            <div className="flex items-center gap-2 self-center rounded-full bg-white/15 py-1.5 pl-1.5 pr-3 backdrop-blur">
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-on-accent">
-                <Check size={12} strokeWidth={3} />
-              </span>
-              <span className="text-[13px] text-white/80">Barcode</span>
-              <span className="min-w-0 break-all text-[13px] font-semibold tabular-nums tracking-wide">
-                {barcode}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Framing guide. Everything inside it — and only that — becomes
-            the photo (see captureFrame(guideRef) above). */}
-        <div
-          ref={guideRef}
-          className={`absolute inset-x-5 bottom-9 top-[calc(max(0.75rem,env(safe-area-inset-top))+6.5rem)] min-h-40 ${previewUrl ? "invisible" : ""}`}
-        >
-          <GuideCorners />
-
-          {isCameraActive && (
-            <span
-              aria-hidden
-              className="gl-scan-line absolute inset-x-5 h-0.5 rounded-full bg-accent shadow-[0_0_12px_2px_var(--color-accent)]"
-            />
-          )}
-
-          {!isCameraActive && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-white/70">
-              {icon === "list" && <ListFrameIcon />}
-              {icon === "pack" && <PackFrameIcon />}
-              <p className="text-sm leading-5">
-                {cameraError
-                  ? "Η κάμερα δεν είναι διαθέσιμη. Διάλεξε μια φωτογραφία από τη συσκευή."
-                  : "Άνοιγμα κάμερας..."}
-              </p>
-            </div>
-          )}
-        </div>
-
-        {!previewUrl && isCameraActive && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-12 flex justify-center px-4">
-            <p
-              aria-live="polite"
-              className="rounded-full bg-black/65 px-3 py-1.5 text-center text-xs font-medium"
-            >
-              {seemsTooFar
-                ? "Πλησίασε, ώστε το κείμενο να γεμίζει το πλαίσιο"
-                : hint}
+      {previewUrl ? (
+        <>
+          <div>
+            <h1 className="text-lg font-bold leading-tight">Διαβάζεται καθαρά;</h1>
+            <p className="mt-0.5 text-[13px] leading-5 text-ink-muted">
+              Αυτή ακριβώς η φωτογραφία θα σταλεί για ανάλυση.
             </p>
           </div>
-        )}
 
-        {/* The captured (already cropped) photo, shown whole for checking. */}
-        {previewUrl && (
-          <div className="absolute inset-x-4 bottom-9 top-[calc(max(0.75rem,env(safe-area-inset-top))+6.5rem)]">
-            <img
-              src={previewUrl}
-              alt={title}
-              className="h-full w-full rounded-2xl object-contain"
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Bottom sheet. */}
-      <div className="relative -mt-6 rounded-t-[28px] bg-canvas px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 text-ink">
-        <div className="mx-auto flex max-w-md flex-col gap-3">
-          {previewUrl ? (
-            <>
-              <div className="flex flex-col gap-1">
-                <h1 className="text-xl font-bold leading-tight tracking-tight">
-                  Διαβάζεται καθαρά;
-                </h1>
-                <p className="text-sm leading-5 text-ink-muted">
-                  Αυτή ακριβώς η φωτογραφία θα σταλεί για ανάλυση.
-                </p>
-              </div>
-
-              {isBlurry && (
-                <p className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-2.5 text-xs text-amber-50">
-                  Η φωτογραφία μοιάζει θολή. Κάνε νέα λήψη κρατώντας το κινητό
-                  σταθερό, ή συνέχισε αν το κείμενο διαβάζεται καθαρά.
-                </p>
-              )}
-
-              {error && <p className={errorBox}>{error}</p>}
-
-              <div className="flex flex-col gap-2.5">
-                <button
-                  type="button"
-                  disabled={!file || isSaving}
-                  onClick={() => file && onContinue(file)}
-                  className="h-13 w-full rounded-2xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
-                >
-                  {isSaving ? "Αποθήκευση..." : actionLabel}
-                </button>
-
-                <div className="flex gap-2.5">
-                  <button
-                    type="button"
-                    onClick={retake}
-                    disabled={isSaving}
-                    className="flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl border border-line bg-surface text-sm font-semibold text-ink disabled:opacity-50"
-                  >
-                    <RotateCcw size={16} />
-                    Νέα λήψη
-                  </button>
-                  <button
-                    type="button"
-                    onClick={filePicker.open}
-                    disabled={isSaving}
-                    className="flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl border border-line bg-surface text-sm font-semibold text-ink disabled:opacity-50"
-                  >
-                    <ImageIcon size={16} />
-                    Από συλλογή
-                  </button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex flex-col gap-1">
-                <h1 className="text-xl font-bold leading-tight tracking-tight">{title}</h1>
-                <p className="text-[13px] leading-5 text-ink-muted [@media(max-height:700px)]:hidden">{description}</p>
-              </div>
-
-              {tips.length > 0 && (
-                <ul className="-mx-5 flex gap-1.5 overflow-x-auto px-5 [scrollbar-width:none]">
-                  {tips.map(({ label, Icon }) => (
-                    <li
-                      key={label}
-                      className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg bg-emerald-950 px-2 py-1 text-[11px] font-semibold text-emerald-200"
-                    >
-                      <Icon size={12} aria-hidden />
-                      {label}
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {cameraError && <p className={errorBox}>{cameraError}</p>}
-              {captureError && (
-                <p className={errorBox}>Η λήψη απέτυχε. Δοκίμασε ξανά.</p>
-              )}
-              {error && <p className={errorBox}>{error}</p>}
-
-              {isCameraActive ? (
-                <div className="flex items-center justify-between px-2">
-                  <button
-                    type="button"
-                    onClick={filePicker.open}
-                    aria-label="Επιλογή από αρχείο ή συλλογή"
-                    className="flex h-12 w-12 items-center justify-center rounded-2xl border border-line bg-surface text-ink transition active:scale-95"
-                  >
-                    <ImageIcon size={20} />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={takePhoto}
-                    disabled={isCapturing}
-                    aria-label={isCapturing ? "Λήψη..." : "Λήψη φωτογραφίας"}
-                    className="flex h-[72px] w-[72px] items-center justify-center rounded-full border-4 border-accent p-1.5 transition active:scale-95 disabled:opacity-60"
-                  >
-                    <span className="h-full w-full rounded-full bg-accent" />
-                  </button>
-
-                  {/* Keeps the shutter centred against the gallery button. */}
-                  <span aria-hidden className="h-12 w-12" />
-                </div>
-              ) : (
-                /* No live camera — a computer without a webcam, or permission
-                   refused. Choosing a file is the only way forward here, so
-                   it is the primary action. */
-                <button
-                  type="button"
-                  onClick={filePicker.open}
-                  className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-accent px-5 text-base font-bold text-on-accent"
-                >
-                  <ImageIcon size={20} />
-                  Επιλογή φωτογραφίας από τη συσκευή
-                </button>
-              )}
-            </>
+          {isBlurry && (
+            <p className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-2.5 text-xs text-amber-50">
+              Η φωτογραφία μοιάζει θολή. Κάνε νέα λήψη κρατώντας το κινητό
+              σταθερό, ή συνέχισε αν το κείμενο διαβάζεται καθαρά.
+            </p>
           )}
-        </div>
-      </div>
-    </div>
+
+          {error && <p className={errorBox}>{error}</p>}
+
+          <button
+            type="button"
+            disabled={!file || isSaving}
+            onClick={() => file && onContinue(file)}
+            className="h-12 w-full rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+          >
+            {isSaving ? "Αποθήκευση..." : actionLabel}
+          </button>
+
+          <div className="flex gap-2">
+            <button type="button" onClick={retake} disabled={isSaving} className={secondaryButton}>
+              <RotateCcw size={16} />
+              Νέα λήψη
+            </button>
+            <button type="button" onClick={filePicker.open} disabled={isSaving} className={secondaryButton}>
+              <ImageIcon size={16} />
+              Από συλλογή
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div>
+            <h1 className="text-lg font-bold leading-tight">{title}</h1>
+            <p className="mt-0.5 text-[13px] leading-5 text-ink-muted [@media(max-height:700px)]:hidden">
+              {description}
+            </p>
+          </div>
+
+          {cameraError && <p className={errorBox}>{cameraError}</p>}
+          {captureError && (
+            <p className={errorBox}>Η λήψη απέτυχε. Δοκίμασε ξανά.</p>
+          )}
+          {error && <p className={errorBox}>{error}</p>}
+
+          {isCameraActive ? (
+            <div className="flex items-center justify-between px-2">
+              <button
+                type="button"
+                onClick={filePicker.open}
+                aria-label="Επιλογή από αρχείο ή συλλογή"
+                className="flex h-12 w-12 items-center justify-center rounded-xl border border-line bg-surface text-ink transition active:scale-95"
+              >
+                <ImageIcon size={20} />
+              </button>
+
+              <button
+                type="button"
+                onClick={takePhoto}
+                disabled={isCapturing}
+                aria-label={isCapturing ? "Λήψη..." : "Λήψη φωτογραφίας"}
+                className="flex h-[68px] w-[68px] items-center justify-center rounded-full border-4 border-accent p-1.5 transition active:scale-95 disabled:opacity-60"
+              >
+                <span className="h-full w-full rounded-full bg-accent" />
+              </button>
+
+              {/* Keeps the shutter centred against the gallery button. */}
+              <span aria-hidden className="h-12 w-12" />
+            </div>
+          ) : (
+            /* No live camera — a computer without a webcam, or permission
+               refused. Choosing a file is the only way forward here, so it
+               is the primary action. */
+            <button
+              type="button"
+              onClick={filePicker.open}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-accent px-5 text-base font-bold text-on-accent"
+            >
+              <ImageIcon size={20} />
+              Επιλογή φωτογραφίας από τη συσκευή
+            </button>
+          )}
+        </>
+      )}
+    </CameraScreen>
   );
 }

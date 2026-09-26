@@ -1,5 +1,6 @@
 import { ArrowLeft, History, Home, ScanLine } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useAppChromeHidden } from "../hooks/useAppChrome";
 
 const tabs = [
   { path: "/", label: "Αρχική", icon: Home },
@@ -7,16 +8,15 @@ const tabs = [
   { path: "/history", label: "Ιστορικό", icon: History },
 ];
 
-const FULL_SCREEN_ROUTES = ["/ingredients-photo", "/product-photo"];
-
 export default function MobileNav() {
   const navigate = useNavigate();
   const location = useLocation();
   const canGoBack = location.pathname !== "/";
+  const chromeHidden = useAppChromeHidden();
 
-  // The photo steps are full-screen camera views with their own back
-  // button and controls; the floating nav would sit on top of the shutter.
-  if (FULL_SCREEN_ROUTES.includes(location.pathname)) {
+  // The camera screens (CameraScreen.tsx) are full-screen with their own
+  // back button and controls; the floating nav would sit on the shutter.
+  if (chromeHidden) {
     return null;
   }
 

@@ -61,10 +61,10 @@ export default function ScoreNoticesCard(props: {
         <button
           type="button"
           onClick={props.onAddPhoto}
-          className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-amber-300/60 text-sm font-bold text-amber-50"
+          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-amber-300/60 px-3 py-2 text-center text-sm font-bold leading-5 text-amber-50"
         >
-          <Camera size={16} />
-          Πρόσθεσε φωτογραφία που λείπει
+          <Camera size={16} className="shrink-0" />
+          <span>Πρόσθεσε φωτογραφία που λείπει</span>
         </button>
       )}
     </section>
