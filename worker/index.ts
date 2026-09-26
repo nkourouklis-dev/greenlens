@@ -109,6 +109,7 @@ import {
   type ProductIdentity,
 } from "./identify";
 import { composeDisplayTitle } from "../src/utils/productTitle";
+import { explainFoodScore, withScoreExplanation } from "./scoreExplanation";
 import {
   evaluateNutrition,
   resolveNutritionEvidence,
@@ -1039,7 +1040,16 @@ async function generateAssistantDraftForProduct(
     ? analysisResult.score
     : {};
 
+  // What actually decided the score, in words computed from its numbers. The
+  // model is told these facts and the verdict is then set from them, so the
+  // copy cannot argue for a number with "περιέχει βούτυρο" when the reason
+  // is 23 g of saturated fat.
+  const explanation = isRecord(analysisResult.score)
+    ? explainFoodScore(analysisResult.score as never)
+    : null;
+
   const prompt = buildDraftPrompt({
+    scoreFacts: explanation?.facts ?? [],
     productName: product.productName,
     sourceText:
       typeof analysisResult.sourceText === "string"
@@ -1073,6 +1083,16 @@ async function generateAssistantDraftForProduct(
 
   if (!draft) {
     throw new Error("unusable_draft");
+  }
+
+  if (explanation) {
+    return {
+      ...draft,
+      overallVerdict: explanation.overallVerdict,
+      watchOutFor: Array.from(
+        new Set([...explanation.watchOutFor, ...draft.watchOutFor]),
+      ).slice(0, 4),
+    };
   }
 
   return draft;
@@ -4553,10 +4573,11 @@ async function analyzeIngredientsCore(
       ruleMatches,
     );
 
-    const executiveSummary = buildExecutiveSummary(
-      result,
+    // The verdict and cautions say what decided the number — the nutrition
+    // drivers, from the measured values — not only what is in the list.
+    const executiveSummary = withScoreExplanation(
+      buildExecutiveSummary(result, score, ingredientInsights),
       score,
-      ingredientInsights,
     );
 
     const responseBody = {

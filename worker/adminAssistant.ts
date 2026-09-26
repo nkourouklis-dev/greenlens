@@ -189,13 +189,24 @@ export function buildDraftPrompt(params: {
   }>;
   score: number | null;
   band: string | null;
+  /** What decided the score, computed from its numbers (scoreExplanation.ts). */
+  scoreFacts?: string[];
 }): string {
+  const scoreFacts = params.scoreFacts ?? [];
+
   return [
     "Γράφεις το κείμενο παρουσίασης ενός προϊόντος για καταναλωτές, στα ελληνικά.",
     "",
     `ΟΝΟΜΑ: ${params.productName ?? "άγνωστο"}`,
     `ΒΑΘΜΟΛΟΓΙΑ: ${params.score ?? "χωρίς βαθμολογία"} (${params.band ?? "-"})`,
     "",
+    ...(scoreFacts.length > 0
+      ? [
+          "ΤΙ ΕΠΗΡΕΑΣΕ ΤΗ ΒΑΘΜΟΛΟΓΙΑ (μετρημένα στοιχεία, χρησιμοποίησέ τα ως έχουν):",
+          ...scoreFacts.map((fact) => `- ${fact}`),
+          "",
+        ]
+      : []),
     "ΣΥΣΤΑΤΙΚΑ:",
     params.sourceText.slice(0, 2000) || "(δεν υπάρχει κείμενο συστατικών)",
     "",
@@ -213,7 +224,7 @@ export function buildDraftPrompt(params: {
     "",
     "ΚΑΝΟΝΕΣ:",
     "- summary: μία με δύο προτάσεις για το τι είναι το προϊόν.",
-    "- overallVerdict: μία πρόταση που δικαιολογεί τη βαθμολογία.",
+    "- overallVerdict: μία πρόταση που δικαιολογεί τη βαθμολογία, με βάση το «ΤΙ ΕΠΗΡΕΑΣΕ ΤΗ ΒΑΘΜΟΛΟΓΙΑ» όπου υπάρχει.",
     "- highlights: 2 έως 4 θετικά, το καθένα το πολύ 8 λέξεις.",
     "- watchOutFor: 0 έως 3 σημεία προσοχής, μόνο όσα προκύπτουν από τα ευρήματα.",
     "- Μην αναφέρεις συστατικό που δεν υπάρχει παραπάνω. Χωρίς διατροφικούς ισχυρισμούς υγείας.",
