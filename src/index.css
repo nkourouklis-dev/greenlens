@@ -93,3 +93,10 @@ label {
 main { padding-bottom: var(--nav-clearance); }
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--color-accent-strong); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+/* Scan line sweeping inside the full-screen camera's framing guide
+   (PhotoCapture.tsx). Stilled by the reduced-motion rule above. */
+@keyframes gl-scan-sweep {
+	0%, 100% { top: 10%; }
+	50% { top: 90%; }
+}
+.gl-scan-line { animation: gl-scan-sweep 2.8s ease-in-out infinite; }

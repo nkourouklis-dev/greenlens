@@ -28,7 +28,12 @@ interface CameraContextValue {
   /** The live <video> node; changes when it is re-parented between pages. */
   videoElement: HTMLVideoElement | null;
   attachViewport: (node: HTMLDivElement | null) => void;
-  captureFrame: () => Promise<CapturedPhoto | null>;
+  /**
+   * Captures what is visible in the preview. With `region`, only the part
+   * of the preview that element covers is kept (the framing guide of a
+   * full-screen camera), so the photo is exactly what the guide showed.
+   */
+  captureFrame: (region?: Element | null) => Promise<CapturedPhoto | null>;
   videoRef: RefObject<HTMLVideoElement | null>;
 }
 
@@ -139,6 +144,88 @@ function logCaptureDebug(
   } catch (loggingError) {
     console.error("camera_capture_debug_failed", loggingError);
   }
+}
+
+export interface SourceRect {
+  sourceX: number;
+  sourceY: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  displayWidth: number;
+  displayHeight: number;
+}
+
+/**
+ * Maps what the <video> shows on screen back to raw sensor pixels.
+ *
+ * The preview crops the feed to fit its box (CSS object-cover, centered);
+ * this mirrors that crop. With `region`, the result is narrowed further to
+ * the part of the preview that element covers on screen — used by the
+ * full-screen capture so only the framing guide's contents are kept.
+ * Returns null while the video has no layout or no decoded size.
+ */
+export function getVisibleSourceRect(
+  video: HTMLVideoElement,
+  region?: Element | null,
+): SourceRect | null {
+  const displayWidth = video.clientWidth;
+  const displayHeight = video.clientHeight;
+
+  if (
+    displayWidth === 0 ||
+    displayHeight === 0 ||
+    video.videoWidth === 0 ||
+    video.videoHeight === 0
+  ) {
+    return null;
+  }
+
+  const videoAspect = video.videoWidth / video.videoHeight;
+  const displayAspect = displayWidth / displayHeight;
+
+  let sourceX = 0;
+  let sourceY = 0;
+  let sourceWidth = video.videoWidth;
+  let sourceHeight = video.videoHeight;
+
+  if (videoAspect > displayAspect) {
+    sourceWidth = video.videoHeight * displayAspect;
+    sourceX = (video.videoWidth - sourceWidth) / 2;
+  } else if (videoAspect < displayAspect) {
+    sourceHeight = video.videoWidth / displayAspect;
+    sourceY = (video.videoHeight - sourceHeight) / 2;
+  }
+
+  if (region) {
+    const videoBox = video.getBoundingClientRect();
+    const regionBox = region.getBoundingClientRect();
+    const clamp = (value: number, max: number) =>
+      Math.min(Math.max(value, 0), max);
+
+    const left = clamp(regionBox.left - videoBox.left, displayWidth);
+    const top = clamp(regionBox.top - videoBox.top, displayHeight);
+    const right = clamp(regionBox.right - videoBox.left, displayWidth);
+    const bottom = clamp(regionBox.bottom - videoBox.top, displayHeight);
+
+    // A guide that is off-screen or collapsed would give an empty crop —
+    // fall back to the whole visible preview rather than fail the shot.
+    if (right - left >= 8 && bottom - top >= 8) {
+      const scale = sourceWidth / displayWidth;
+      sourceX += left * scale;
+      sourceY += top * scale;
+      sourceWidth = (right - left) * scale;
+      sourceHeight = (bottom - top) * scale;
+    }
+  }
+
+  return {
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    displayWidth,
+    displayHeight,
+  };
 }
 
 // `focusMode` is a real, shipping capability (Chrome/Android; part of the
@@ -301,7 +388,9 @@ export function CameraProvider({ children }: { children: ReactNode }) {
     setIsActive(false);
   }, []);
 
-  const captureFrame = useCallback(async (): Promise<CapturedPhoto | null> => {
+  const captureFrame = useCallback(async (
+    region?: Element | null,
+  ): Promise<CapturedPhoto | null> => {
     const video = videoRef.current;
 
     // HAVE_CURRENT_DATA (2): the element has decoded at least one frame at
@@ -322,16 +411,16 @@ export function CameraProvider({ children }: { children: ReactNode }) {
     // photo that didn't match what the user framed on screen. Mirror the
     // same "cover" crop — centered, filling the displayed box — so the
     // captured photo is exactly what was visible in the preview.
-    const displayWidth = video.clientWidth;
-    const displayHeight = video.clientHeight;
-
+    //
     // clientWidth/clientHeight read 0 when the video isn't laid out in the
     // visible viewport yet (e.g. still attached to the off-screen fallback
     // container). Falling back to the raw sensor size here used to
     // silently disable the crop, so the capture no longer matched the
     // on-screen preview at all — better to fail the capture than to
     // produce a mismatched one.
-    if (displayWidth === 0 || displayHeight === 0) {
+    const visible = getVisibleSourceRect(video, region);
+
+    if (!visible) {
       console.error("camera_capture_no_layout", {
         videoWidth: video.videoWidth,
         videoHeight: video.videoHeight,
@@ -339,25 +428,18 @@ export function CameraProvider({ children }: { children: ReactNode }) {
       return null;
     }
 
-    const videoAspect = video.videoWidth / video.videoHeight;
-    const displayAspect = displayWidth / displayHeight;
-
-    let sourceX = 0;
-    let sourceY = 0;
-    let sourceWidth = video.videoWidth;
-    let sourceHeight = video.videoHeight;
-
-    if (videoAspect > displayAspect) {
-      sourceWidth = video.videoHeight * displayAspect;
-      sourceX = (video.videoWidth - sourceWidth) / 2;
-    } else if (videoAspect < displayAspect) {
-      sourceHeight = video.videoWidth / displayAspect;
-      sourceY = (video.videoHeight - sourceHeight) / 2;
-    }
+    const {
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      displayWidth,
+      displayHeight,
+    } = visible;
 
     const canvas = document.createElement("canvas");
-    canvas.width = sourceWidth;
-    canvas.height = sourceHeight;
+    canvas.width = Math.round(sourceWidth);
+    canvas.height = Math.round(sourceHeight);
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;

@@ -61,45 +61,20 @@ export default function ProductPhoto() {
   }
 
   return (
-    <main className="bg-canvas text-ink">
-      <section className="mx-auto flex max-w-md flex-col gap-3 px-4 py-4 pb-20">
-        <div className="flex gap-1.5">
-          <div className="h-1.5 flex-1 rounded-full bg-accent" />
-          <div className="h-1.5 flex-1 rounded-full bg-accent" />
-        </div>
-
-        <div>
-          <p className="text-xs font-semibold text-accent-strong">
-            Βήμα 2 από 2
-          </p>
-
-          <h1 className="mt-1 text-2xl font-bold">
-            Μπροστινή όψη
-          </h1>
-
-          <p className="mt-1 text-xs text-ink-faint">
-            Φωτογράφισε τη μάρκα και το όνομα του
-            προϊόντος, για την αναγνώρισή του.
-          </p>
-        </div>
-
-        <div className="rounded-lg border border-line bg-surface p-2 break-all">
-          <p className="text-xs text-ink-faint">Barcode</p>
-          <p className="mt-0.5 font-mono text-sm font-semibold text-ink-muted">
-            {barcode}
-          </p>
-        </div>
-
-        <PhotoCapture
-          title="Μπροστινή όψη"
-          description="Γέμισε το κάδρο με την μπροστινή όψη της συσκευασίας (μάρκα, όνομα προϊόντος)."
-          actionLabel="Αποθήκευση"
-          icon="pack"
-          onContinue={saveProduct}
-          isSaving={isSaving}
-          error={error}
-        />
-      </section>
+    <main>
+      <PhotoCapture
+        step={2}
+        stepCount={2}
+        barcode={barcode || undefined}
+        title="Φωτογράφισε την μπροστινή όψη"
+        description="Να φαίνονται η μάρκα και το όνομα του προϊόντος, για την αναγνώρισή του."
+        hint="Γέμισε το πλαίσιο με τη συσκευασία"
+        actionLabel="Αποθήκευση"
+        icon="pack"
+        onContinue={saveProduct}
+        isSaving={isSaving}
+        error={error}
+      />
     </main>
   );
 }

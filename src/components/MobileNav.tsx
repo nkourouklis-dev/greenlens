@@ -7,10 +7,18 @@ const tabs = [
   { path: "/history", label: "Ιστορικό", icon: History },
 ];
 
+const FULL_SCREEN_ROUTES = ["/ingredients-photo", "/product-photo"];
+
 export default function MobileNav() {
   const navigate = useNavigate();
   const location = useLocation();
   const canGoBack = location.pathname !== "/";
+
+  // The photo steps are full-screen camera views with their own back
+  // button and controls; the floating nav would sit on top of the shutter.
+  if (FULL_SCREEN_ROUTES.includes(location.pathname)) {
+    return null;
+  }
 
   return (
     <>

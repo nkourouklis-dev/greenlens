@@ -112,50 +112,20 @@ export default function IngredientsPhoto() {
   }
 
   return (
-    <main className="bg-canvas px-4 py-4 pb-20 text-ink">
-      <section className="mx-auto flex max-w-md flex-col gap-3">
-        <div className="flex gap-1.5">
-          <div className="h-1.5 flex-1 rounded-full bg-accent" />
-          <div className="h-1.5 flex-1 rounded-full bg-surface-muted" />
-        </div>
-
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-accent-strong">
-            Βήμα 1 από 2
-          </p>
-
-          <h1 className="mt-1 text-2xl font-bold">
-            Λίστα συστατικών
-          </h1>
-
-          <p className="mt-1 text-xs leading-5 text-ink-muted">
-            Συνήθως στο πίσω μέρος της συσκευασίας. Φέρε
-            κοντά την ετικέτα με καθαρό κείμενο.
-          </p>
-        </div>
-
-        {barcode && (
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-line-subtle bg-surface px-2.5 py-2">
-            <span className="text-xs text-ink-faint">
-              Barcode
-            </span>
-
-            <span className="min-w-0 break-all font-mono text-xs font-semibold text-ink-muted">
-              {barcode}
-            </span>
-          </div>
-        )}
-
-        <PhotoCapture
-          title="Λίστα συστατικών"
-          description='Δείξε τη ΛΙΣΤΑ ΣΥΣΤΑΤΙΚΩΝ (Ingredients / INCI) — συνήθως στο πίσω μέρος της συσκευασίας.'
-          actionLabel="Διάβασμα ετικέτας"
-          icon="list"
-          onContinue={readIngredients}
-          isSaving={isSaving}
-          error={error}
-        />
-      </section>
+    <main>
+      <PhotoCapture
+        step={1}
+        stepCount={2}
+        barcode={barcode || undefined}
+        title="Φωτογράφισε τα συστατικά"
+        description="Η λίστα «Ingredients / INCI», συνήθως στο πίσω μέρος της συσκευασίας."
+        hint="Χωράει όλη η λίστα στο πλαίσιο"
+        actionLabel="Ανάγνωση συστατικών"
+        icon="list"
+        onContinue={readIngredients}
+        isSaving={isSaving}
+        error={error}
+      />
     </main>
   );
 }
