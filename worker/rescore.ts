@@ -45,7 +45,7 @@ import { cleanIngredientText } from "./ingredientText";
 import {
   evaluateNutrition,
   resolveNutritionEvidence,
-  scoreFood,
+  scoreForProductType,
   scoreNutritionOnly,
   sweetenerFrom,
   type FoodWorkerScore,
@@ -304,7 +304,7 @@ export async function rescoreFoodIngredients(
   const score: FoodWorkerScore =
     ingredientScore.score === null
       ? ingredientScore
-      : scoreFood({
+      : scoreForProductType(result.productType, {
           ingredientScore,
           nutrition: evidence,
           nonNutritiveSweetener: sweetenerFrom(ruleMatches),

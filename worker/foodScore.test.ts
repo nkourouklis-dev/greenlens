@@ -8,6 +8,7 @@ import {
   PARTIAL_EVALUATION_SCORE_CAP,
   resolveNutritionEvidence,
   scoreFood,
+  scoreForProductType,
   scoreNutritionOnly,
 } from "./foodScore";
 import { KAISER_PILSNER_OCR } from "./labelFixtures";
@@ -551,4 +552,61 @@ test("Kaiser: a nutrition photo alone is graded too, with the missing-ingredient
     score.notices.some((notice) => notice.code === "partial_no_ingredients"),
     true,
   );
+});
+
+test("a shampoo is scored on its list alone: no nutrition notice, no 65 cap", () => {
+  const shampoo: WorkerAnalysisResult = {
+    ...lurpakAnalysis,
+    productType: "cosmetic",
+    potentialAllergens: [],
+  };
+  const ingredientScore = ingredientHalf(
+    shampoo,
+    "Aqua, Sodium Laureth Sulfate, Coco-Betaine, Glycerin, Parfum",
+    false,
+  );
+
+  const score = scoreForProductType("cosmetic", {
+    ingredientScore,
+    nutrition: null,
+    nonNutritiveSweetener: null,
+    alcohol: null,
+    notices: [],
+  });
+
+  assert.equal(score, ingredientScore);
+  assert(
+    !score.notices.some((notice) => notice.code === "partial_no_nutrition"),
+    "a cosmetic must never be told to photograph a nutrition table",
+  );
+  assert(
+    !score.deductions.some((deduction) => deduction.code === "partial:no_nutrition_cap"),
+  );
+});
+
+test("a food still goes through scoreFood: Lurpak with no nutrition keeps the cap", () => {
+  const score = scoreForProductType("food", {
+    ingredientScore: ingredientHalf(lurpakAnalysis, LURPAK_LIST, false),
+    nutrition: null,
+    nonNutritiveSweetener: null,
+    alcohol: null,
+    notices: [],
+  });
+
+  assert.equal(score.score, PARTIAL_EVALUATION_SCORE_CAP);
+  assert(score.notices.some((notice) => notice.code === "partial_no_nutrition"));
+});
+
+test("an unplaced product with no nutrition anywhere is not treated as food", () => {
+  const ingredientScore = ingredientHalf(lurpakAnalysis, LURPAK_LIST, false);
+
+  const score = scoreForProductType("unknown", {
+    ingredientScore,
+    nutrition: null,
+    nonNutritiveSweetener: null,
+    alcohol: null,
+    notices: [],
+  });
+
+  assert.equal(score, ingredientScore);
 });

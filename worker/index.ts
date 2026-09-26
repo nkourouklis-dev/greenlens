@@ -116,7 +116,7 @@ import { explainFoodScore, withScoreExplanation } from "./scoreExplanation";
 import {
   evaluateNutrition,
   resolveNutritionEvidence,
-  scoreFood,
+  scoreForProductType,
   scoreNutritionOnly,
   sweetenerFrom,
 } from "./foodScore";
@@ -4682,7 +4682,7 @@ async function analyzeIngredientsCore(
     const score: WorkerScore =
       ingredientScore.score === null
         ? ingredientScore
-        : scoreFood({
+        : scoreForProductType(result.productType, {
             ingredientScore,
             nutrition: nutritionEvidence,
             nonNutritiveSweetener: sweetenerFrom(ruleMatches),

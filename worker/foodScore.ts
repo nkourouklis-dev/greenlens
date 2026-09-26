@@ -9,7 +9,9 @@
  *   nutrition   — the Nutri-Score (nutriScore.ts), mapped to 0–100;
  *   ingredients — the existing ingredient/additive score (scoring.ts).
  *
- * Cosmetics and chemical composition do not come through here.
+ * Cosmetics and chemical composition do not come through here: an
+ * ingredient-list scan enters through scoreForProductType, which sends only
+ * foods on to scoreFood.
  *
  * What is missing is never dropped silently:
  *  - no nutrition from any source → the score is capped at
@@ -263,6 +265,41 @@ export function incompleteNutritionScore(
  * their own visible rows. The Nutri-Score's own components are on
  * `nutritionEvaluation`.
  */
+/**
+ * Whether a product is scored as a food (scoreFood) or on its ingredient
+ * list alone. A cosmetic never is: the Nutri-Score half, the partial cap and
+ * the "no nutrition found" notice mean nothing for a shampoo — a Garnier
+ * shampoo was capped at 65 and told to photograph its nutrition table.
+ * A product nobody could place counts as food only when nutrition exists
+ * for it somewhere (label or Open Food Facts), which only foods have.
+ */
+export function isScoredAsFood(
+  productType: "food" | "cosmetic" | "unknown",
+  nutrition: NutritionEvidence | null,
+): boolean {
+  if (productType === "food") return true;
+  if (productType === "cosmetic") return false;
+  return nutrition !== null;
+}
+
+/**
+ * The entry point for an ingredient-list scan: scoreFood for foods, the
+ * ingredient score unchanged for everything else (see isScoredAsFood).
+ */
+export function scoreForProductType(
+  productType: "food" | "cosmetic" | "unknown",
+  input: FoodScoreInput,
+): FoodWorkerScore {
+  if (
+    input.ingredientScore !== null &&
+    !isScoredAsFood(productType, input.nutrition)
+  ) {
+    return input.ingredientScore;
+  }
+
+  return scoreFood(input);
+}
+
 export function scoreFood(input: FoodScoreInput): FoodWorkerScore {
   const { result, evaluation } = evaluateNutrition(
     input.nutrition,
