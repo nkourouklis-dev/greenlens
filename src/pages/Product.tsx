@@ -28,6 +28,7 @@ import AllergenNoticeCard from "../components/AllergenNoticeCard";
 import ExecutiveSummaryCard from "../components/ExecutiveSummaryCard";
 import IngredientCard from "../components/IngredientCard";
 import NutritionCard from "../components/NutritionCard";
+import SectionDrawer from "../components/SectionDrawer";
 import ChemicalCard from "../components/ChemicalCard";
 import ScoreBreakdownPanel from "../components/ScoreBreakdownPanel";
 import ScoreNoticesCard from "../components/ScoreNoticesCard";
@@ -486,15 +487,10 @@ function Result(props: {
     list.sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
   }
 
-  const leadsWithPositives =
-    props.score.band === "excellent" || props.score.band === "good";
-
-  const groupOrder: IngredientRating[] = leadsWithPositives
-    ? ["good", "caution", "neutral"]
-    : ["caution", "good", "neutral"];
+  const groupOrder: IngredientRating[] = ["caution", "good", "neutral"];
 
   const groupTitle: Record<IngredientRating, string> = {
-    caution: "Αρνητικά",
+    caution: "Χρειάζονται προσοχή",
     good: "Θετικά",
     neutral: "Ουδέτερα",
   };
@@ -530,22 +526,38 @@ function Result(props: {
           </span>
         </div>
 
-        {/* GreenPoint-style: what hurts the score first, then what helps,
-            so the reason behind the verdict is the first thing read. A
-            clearly good product leads with its positives instead. */}
-        {groupOrder.map((group) =>
-          groups[group].length > 0 ? (
-            <div key={group} className="mt-4">
-              <h3 className="px-1 text-sm font-bold text-slate-300">
-                {groupTitle[group]}
-              </h3>
+        {/* Attention items stay open and lead; positives and neutrals sit
+            in drawers. Positives open by default when nothing needs
+            attention, so the section is never a wall of closed drawers. */}
+        {groupOrder.map((group) => {
+          const list = groups[group];
+          if (list.length === 0) return null;
 
-              <div className="mt-2 space-y-2">
-                {groups[group].map((entry) => entry.node)}
+          if (group === "caution") {
+            return (
+              <div key={group} className="mt-4">
+                <h3 className="px-1 text-sm font-bold text-slate-300">
+                  {groupTitle[group]} ({list.length})
+                </h3>
+
+                <div className="mt-2 space-y-2">
+                  {list.map((entry) => entry.node)}
+                </div>
               </div>
-            </div>
-          ) : null,
-        )}
+            );
+          }
+
+          return (
+            <SectionDrawer
+              key={group}
+              title={groupTitle[group]}
+              count={list.length}
+              defaultOpen={group === "good" && groups.caution.length === 0}
+            >
+              {list.map((entry) => entry.node)}
+            </SectionDrawer>
+          );
+        })}
       </section>
 
       <ExecutiveSummaryCard summary={executiveSummary} />

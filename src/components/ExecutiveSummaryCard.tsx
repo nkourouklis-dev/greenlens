@@ -8,7 +8,7 @@ export default function ExecutiveSummaryCard(props: {
 
   return (
     <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
-      <div className="flex items-baseline justify-between">
+      <div className="flex flex-col gap-1">
         <h2 className="font-bold">Με μια ματιά</h2>
         <span className="text-sm font-semibold text-emerald-300">
           {summary.overallVerdict}

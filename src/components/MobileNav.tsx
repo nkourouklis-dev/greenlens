@@ -1,4 +1,5 @@
 import { ArrowLeft, History, Home, ScanLine } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAppChromeHidden } from "../hooks/useAppChrome";
 
@@ -14,6 +15,28 @@ export default function MobileNav() {
   const canGoBack = location.pathname !== "/";
   const chromeHidden = useAppChromeHidden();
 
+  // On the product page the floating back button would sit on top of the
+  // content being read, so it hides while scrolling down and returns on
+  // scrolling up. Other pages keep it always visible.
+  const hidesOnScroll = location.pathname.startsWith("/product/");
+  const [scrolledDown, setScrolledDown] = useState(false);
+
+  useEffect(() => {
+    if (!hidesOnScroll) return;
+    let lastY = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (Math.abs(y - lastY) < 8) return;
+      setScrolledDown(y > lastY && y > 80);
+      lastY = y;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      setScrolledDown(false);
+    };
+  }, [hidesOnScroll]);
+
   // The camera screens (CameraScreen.tsx) are full-screen with their own
   // back button and controls; the floating nav would sit on the shutter.
   if (chromeHidden) {
@@ -28,7 +51,11 @@ export default function MobileNav() {
           type="button"
           onClick={() => navigate(-1)}
           aria-label="Πίσω"
-          className="fixed left-4 top-[max(0.75rem,env(safe-area-inset-top))] z-20 flex h-11 w-11 items-center justify-center rounded-full border border-line-subtle bg-surface/90 text-ink shadow-md backdrop-blur transition active:scale-95"
+          className={`fixed left-4 top-[max(0.75rem,env(safe-area-inset-top))] z-20 flex h-11 w-11 items-center justify-center rounded-full border border-line-subtle bg-surface/90 text-ink shadow-md backdrop-blur transition active:scale-95 ${
+            hidesOnScroll && scrolledDown
+              ? "pointer-events-none -translate-y-16 opacity-0"
+              : ""
+          }`}
         >
           <ArrowLeft size={20} />
         </button>
