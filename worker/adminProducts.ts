@@ -388,15 +388,28 @@ export async function applyAssistantDraftCopy(
   db: D1Like,
   barcode: string,
   analysisResult: Record<string, unknown>,
+  options?: {
+    /**
+     * Also write to a verified row. Only for copy nobody has written by
+     * hand (copySource !== "manual", see adminAssistant.ts): a human
+     * sign-off on the *numbers* is not a reason to leave the words beside
+     * them stale after those numbers change.
+     */
+    includeVerified?: boolean;
+  },
 ): Promise<void> {
   await db
     .prepare(
       `UPDATE products
        SET analysis_result = ?,
            updated_at = datetime('now')
-       WHERE barcode = ? AND status != 'verified'`,
+       WHERE barcode = ? AND (status != 'verified' OR ? = 1)`,
     )
-    .bind(JSON.stringify(analysisResult), barcode)
+    .bind(
+      JSON.stringify(analysisResult),
+      barcode,
+      options?.includeVerified ? 1 : 0,
+    )
     .run();
 }
 

@@ -34,6 +34,59 @@ export interface AssistantDraft {
   watchOutFor: string[];
 }
 
+/**
+ * Who wrote a product's catalogue copy: the assistant ("auto") or a person
+ * ("manual"). Only auto copy is ever refreshed on its own — after a scan, an
+ * analysis, a recompute or a save that changed the numbers it argues for.
+ * A person's wording is never overwritten without their asking.
+ */
+export type CopySource = "auto" | "manual";
+
+export function readCopySource(analysisResult: unknown): CopySource | null {
+  if (typeof analysisResult !== "object" || analysisResult === null) {
+    return null;
+  }
+
+  const value = (analysisResult as Record<string, unknown>).copySource;
+
+  return value === "auto" || value === "manual" ? value : null;
+}
+
+/** The four fields the assistant writes, read out of a stored analysis. */
+function copyFieldsOf(analysisResult: unknown): string {
+  const record =
+    typeof analysisResult === "object" && analysisResult !== null
+      ? (analysisResult as Record<string, unknown>)
+      : {};
+
+  const summary =
+    typeof record.executiveSummary === "object" &&
+    record.executiveSummary !== null
+      ? (record.executiveSummary as Record<string, unknown>)
+      : {};
+
+  const list = (value: unknown) =>
+    Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+
+  return JSON.stringify([
+    typeof record.summary === "string" ? record.summary.trim() : "",
+    typeof summary.overallVerdict === "string"
+      ? summary.overallVerdict.trim()
+      : "",
+    list(summary.highlights),
+    list(summary.watchOutFor),
+  ]);
+}
+
+/**
+ * True when a PIM save changed the words the assistant writes. Applying an
+ * assistant draft counts too — it is the person choosing that wording — and
+ * from then on the copy is theirs.
+ */
+export function copyWasEdited(stored: unknown, submitted: unknown): boolean {
+  return copyFieldsOf(stored) !== copyFieldsOf(submitted);
+}
+
 export interface AssistantReply {
   mode: "draft" | "report";
   /** Present in report mode: the narrative answer. */
@@ -197,7 +250,10 @@ export function buildDraftPrompt(params: {
   return [
     "Γράφεις το κείμενο παρουσίασης ενός προϊόντος για καταναλωτές, στα ελληνικά.",
     "",
-    `ΟΝΟΜΑ: ${params.productName ?? "άγνωστο"}`,
+    // The name is read off the front of the pack by a vision model and
+    // sometimes comes back garbled ("MýÑo & Kavéla" for "Μήλο & Κανέλα"),
+    // so the summary is written from the ingredients, not from it.
+    `ΟΝΟΜΑ (ενδέχεται να έχει λάθη ανάγνωσης): ${params.productName ?? "άγνωστο"}`,
     `ΒΑΘΜΟΛΟΓΙΑ: ${params.score ?? "χωρίς βαθμολογία"} (${params.band ?? "-"})`,
     "",
     ...(scoreFacts.length > 0
@@ -223,7 +279,7 @@ export function buildDraftPrompt(params: {
     '{"summary": string, "overallVerdict": string, "highlights": string[], "watchOutFor": string[]}',
     "",
     "ΚΑΝΟΝΕΣ:",
-    "- summary: μία με δύο προτάσεις για το τι είναι το προϊόν.",
+    "- summary: μία με δύο προτάσεις για το τι είναι το προϊόν, από τα συστατικά. Μην αντιγράφεις το ΟΝΟΜΑ στο summary· περιέγραψε το είδος του προϊόντος.",
     "- overallVerdict: μία πρόταση που δικαιολογεί τη βαθμολογία, με βάση το «ΤΙ ΕΠΗΡΕΑΣΕ ΤΗ ΒΑΘΜΟΛΟΓΙΑ» όπου υπάρχει.",
     "- highlights: 2 έως 4 θετικά, το καθένα το πολύ 8 λέξεις.",
     "- watchOutFor: 0 έως 3 σημεία προσοχής, μόνο όσα προκύπτουν από τα ευρήματα.",

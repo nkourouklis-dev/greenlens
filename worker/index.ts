@@ -91,9 +91,12 @@ import {
   buildDraftPrompt,
   buildReportPrompt,
   collectCatalogueFacts,
+  copyWasEdited,
   parseAssistantDraft,
+  readCopySource,
   type AssistantDraft,
   type AssistantReply,
+  type CopySource,
 } from "./adminAssistant";
 import {
   getProductVersion,
@@ -1170,8 +1173,16 @@ async function runAssistDraft(
 async function autoApplyAssistantDraft(
   env: Env,
   barcode: string,
+  options?: { includeVerified?: boolean },
 ): Promise<void> {
   try {
+    const before = await getAdminProduct(env.DB, barcode);
+
+    // A person's wording is theirs: never regenerate over it.
+    if (before && readCopySource(before.analysisResult) === "manual") {
+      return;
+    }
+
     const draft = await generateAssistantDraftForProduct(barcode, env);
 
     const product = await getAdminProduct(env.DB, barcode);
@@ -1188,6 +1199,7 @@ async function autoApplyAssistantDraft(
 
     const updatedAnalysisResult = {
       ...analysisResult,
+      copySource: "auto" as const,
       summary: draft.summary || analysisResult.summary,
       executiveSummary: {
         ...executiveSummary,
@@ -1208,6 +1220,7 @@ async function autoApplyAssistantDraft(
       env.DB,
       barcode,
       updatedAnalysisResult,
+      { includeVerified: options?.includeVerified },
     );
 
     console.log("admin_assist_auto_draft_applied", {
@@ -2054,6 +2067,18 @@ async function runAdminUpdateProduct(
       evidence,
     );
 
+    // Who wrote the copy now: a save that changed the assistant's words is a
+    // person's edit and the copy is theirs from here on; a save that left
+    // them alone keeps whatever it had, and the words follow the numbers.
+    const previous = await getAdminProduct(env.DB, barcode);
+
+    const copySource: CopySource | null = copyWasEdited(
+      previous?.analysisResult,
+      validated.envelope,
+    )
+      ? "manual"
+      : readCopySource(previous?.analysisResult);
+
     console.log("admin_product_rescored", {
       requestId,
       barcode,
@@ -2085,8 +2110,16 @@ async function runAdminUpdateProduct(
           evaluateNutrition(evidence, null).evaluation?.source ?? null,
         score: rescored.score,
         ingredientInsights: rescored.ingredientInsights,
+        ...(copySource ? { copySource } : {}),
       },
     });
+
+    // The score may have moved, and the words beside it argue for it.
+    if (copySource !== "manual") {
+      await afterResponse(env, requestId, "auto_copy_refresh", () =>
+        autoApplyAssistantDraft(env, barcode, { includeVerified: true }),
+      );
+    }
 
     const product = await getAdminProduct(env.DB, barcode);
 
@@ -2468,6 +2501,12 @@ async function runAdminRescoreProduct(
       analysisResult: envelope,
     });
 
+    if (readCopySource(stored) !== "manual") {
+      await afterResponse(env, requestId, "auto_copy_refresh", () =>
+        autoApplyAssistantDraft(env, barcode, { includeVerified: true }),
+      );
+    }
+
     const updated = await getAdminProduct(env.DB, barcode);
 
     if (updated) {
@@ -2660,6 +2699,9 @@ async function runAdminAnalyzeProduct(
     );
   }
 
+  const previousAnalysis = (await getAdminProduct(env.DB, barcode))
+    ?.analysisResult;
+
   // Best-effort only — a lookup miss or D1 failure just means the noise
   // filter below has no title to match against, same as any other scan.
   const cachedForTitle = await lookupCachedProduct(env.DB, barcode);
@@ -2710,6 +2752,15 @@ async function runAdminAnalyzeProduct(
   }
 
   const product = await getAdminProduct(env.DB, barcode);
+
+  // A fresh analysis brings fresh generic copy; write the assistant's over it
+  // unless a person had written the previous words (which the analysis has
+  // just replaced — the version history keeps them).
+  if (readCopySource(previousAnalysis) !== "manual") {
+    await afterResponse(env, requestId, "auto_copy_refresh", () =>
+      autoApplyAssistantDraft(env, barcode, { includeVerified: true }),
+    );
+  }
 
   console.log("admin_product_analyzed", {
     requestId,
