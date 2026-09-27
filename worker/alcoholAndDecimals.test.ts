@@ -186,6 +186,24 @@ test("wine vinegar, ginger ale and a sauce with wine are not alcoholic drinks", 
   );
 });
 
+test("a liqueur/spirit name alone is enough, with no nutrition table at all", () => {
+  assert.deepEqual(
+    detectAlcohol([
+      "ΛΙΚΕΡ ΜΑΣΤΙΧΑ / MASTIHA LIQUEUR",
+      "Στουπάκης Χίος",
+    ]),
+    { abv: null, declared: null },
+  );
+  assert.deepEqual(detectAlcohol(["Ούζο Πλωμαρίου"]), {
+    abv: null,
+    declared: null,
+  });
+  assert.deepEqual(detectAlcohol(["Τσίπουρο Τυρνάβου"]), {
+    abv: null,
+    declared: null,
+  });
+});
+
 test("an alcohol-free beer is recognised as such", () => {
   assert.deepEqual(
     detectAlcohol(["Μπύρα χωρίς αλκοόλ", "ανά 100ml"]),

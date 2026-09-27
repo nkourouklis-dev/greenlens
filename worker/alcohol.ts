@@ -50,14 +50,31 @@ const ABV_PATTERNS: RegExp[] = [
 
 /**
  * Words that make a product an alcoholic drink even when its strength was
- * not read. Kept to drink *types* — "κρασί" alone is not here, because
- * "ξύδι από κρασί" is an ingredient of half the dressings on a shelf.
- * `(?<!\p{L})`/`(?!\p{L})` rather than `\b`, which in JavaScript only
- * knows ASCII letters and never matches next to a Greek one. No "ale":
- * ginger ale is a soft drink.
+ * not read, split by how trustworthy the word alone is:
+ *
+ *   - "strong": spirit/liqueur/sparkling-wine names that are never a cooking
+ *     ingredient elsewhere on a shelf, so the word alone is enough.
+ *   - "weak": beer/wine words, which *do* turn up as an ingredient ("ξύδι
+ *     από κρασί", a stew's "κόκκινο οίνο"), so they only count alongside a
+ *     per-100ml table (see the `100 ml` check below) — that table is what a
+ *     drink's own label has and a sauce mentioning wine does not. "κρασί"
+ *     alone is not in the weak list for the same reason: too common a
+ *     cooking-ingredient word to trust even with that gate.
+ *
+ * Many EU spirits/liqueurs are legally exempt from a nutrition declaration
+ * and so never carry a "100 ml" table at all — gating "strong" words behind
+ * one the same way "weak" words are missed every one of them (e.g. a plain
+ * "ΛΙΚΕΡ ΜΑΣΤΙΧΑ" bottle with no numbers on the back).
+ *
+ * `(?<!\p{L})`/`(?!\p{L})` rather than `\b`, which in JavaScript only knows
+ * ASCII letters and never matches next to a Greek one. No "ale": ginger ale
+ * is a soft drink.
  */
-const ALCOHOLIC_DRINK_PATTERN =
-  /(?<!\p{L})(μπ[ύυ]ρα|μπ[ύυ]ρες|beer|pilsner|lager|ζυθοποι\p{L}*|wine|ο[ίι]νος|ο[ίι]νου|ο[ύυ]ζο|τσ[ίι]πουρο|τσικουδι[άα]|vodka|β[όο]τκα|whiske?y|ουισκι|gin|rum|λικ[έε]ρ|liqueur|cider|μηλ[ίι]της|σαμπ[άα]νια|champagne|prosecco|spirit drink)(?!\p{L})/iu;
+const STRONG_ALCOHOLIC_DRINK_PATTERN =
+  /(?<!\p{L})(ο[ύυ]ζο|τσ[ίι]πουρο|τσικουδι[άα]|vodka|β[όο]τκα|whiske?y|ουισκι|gin|rum|λικ[έε]ρ|liqueur|cider|μηλ[ίι]της|σαμπ[άα]νια|champagne|prosecco|spirit drink)(?!\p{L})/iu;
+
+const WEAK_ALCOHOLIC_DRINK_PATTERN =
+  /(?<!\p{L})(μπ[ύυ]ρα|μπ[ύυ]ρες|beer|pilsner|lager|ζυθοποι\p{L}*|wine|ο[ίι]νος|ο[ίι]νου)(?!\p{L})/iu;
 
 /** A drink-type word used as an ingredient, not as what the product is. */
 const NOT_A_DRINK_PATTERN =
@@ -107,27 +124,44 @@ export function detectAlcohol(
     return { abv: strength.abv, declared: strength.declared };
   }
 
-  const drinkWord = ALCOHOLIC_DRINK_PATTERN.exec(joined);
+  // A spirit/liqueur name is never a cooking ingredient elsewhere, so it
+  // counts on its own — most such bottles carry no nutrition table at all.
+  const strongDrinkWord = STRONG_ALCOHOLIC_DRINK_PATTERN.exec(joined);
 
-  // A drink word alone is weak evidence — "κόκκινος οίνος" is an ingredient
-  // of many sauces — so it only counts on a label that also declares its
-  // values per 100 ml, i.e. on a drink.
-  if (drinkWord && /100\s*ml/iu.test(joined)) {
-    if (ALCOHOL_FREE_PATTERN.test(joined)) {
-      return { abv: 0, declared: null };
-    }
+  if (strongDrinkWord) {
+    return strengthlessDrink(joined, strongDrinkWord);
+  }
 
-    const around = joined.slice(
-      Math.max(0, drinkWord.index - 20),
-      drinkWord.index + drinkWord[0].length + 20,
-    );
+  // A beer/wine word alone is weak evidence — "κόκκινος οίνος" is an
+  // ingredient of many sauces — so it only counts on a label that also
+  // declares its values per 100 ml, i.e. on a drink.
+  const weakDrinkWord = WEAK_ALCOHOLIC_DRINK_PATTERN.exec(joined);
 
-    if (!NOT_A_DRINK_PATTERN.test(around)) {
-      return { abv: null, declared: null };
-    }
+  if (weakDrinkWord && /100\s*ml/iu.test(joined)) {
+    return strengthlessDrink(joined, weakDrinkWord);
   }
 
   return null;
+}
+
+function strengthlessDrink(
+  joined: string,
+  drinkWord: RegExpExecArray,
+): AlcoholInfo | null {
+  if (ALCOHOL_FREE_PATTERN.test(joined)) {
+    return { abv: 0, declared: null };
+  }
+
+  const around = joined.slice(
+    Math.max(0, drinkWord.index - 20),
+    drinkWord.index + drinkWord[0].length + 20,
+  );
+
+  if (NOT_A_DRINK_PATTERN.test(around)) {
+    return null;
+  }
+
+  return { abv: null, declared: null };
 }
 
 /** Grams of ethanol in 100 ml, for the energy cross-check. */
