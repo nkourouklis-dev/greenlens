@@ -87,11 +87,7 @@ export default function ShareScanButton({
       lines.push("", `Barcode: ${barcode.trim()}`);
     }
 
-    lines.push(
-      "",
-      "Σαρώθηκε με GreenLens",
-      `Σάρωσε κι εσύ: ${GREENLENS_URL}`,
-    );
+    lines.push("", "Σαρώθηκε με GreenLens");
 
     return lines.join("\n");
   }
@@ -103,9 +99,13 @@ export default function ShareScanButton({
     // otherwise iOS Safari blocks it as a non-user gesture.
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
+        // A separate `url` (rather than pasting the link into `text`) is
+        // what makes the share sheet render it as an actual tappable link
+        // instead of plain text the recipient has to select and open.
         await navigator.share({
           title: productName?.trim() || "GreenLens",
           text,
+          url: GREENLENS_URL,
         });
         return;
       } catch (error) {
@@ -116,8 +116,13 @@ export default function ShareScanButton({
       }
     }
 
+    // No native share target to carry a separate `url` field, so the
+    // clipboard copy spells it out as its own line — most chat apps
+    // auto-link a bare URL once it's pasted in.
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(
+        `${text}\nΣάρωσε κι εσύ: ${GREENLENS_URL}`,
+      );
       setFeedback("Αντιγράφηκε στο πρόχειρο");
     } catch {
       setFeedback("Η κοινοποίηση δεν είναι διαθέσιμη σε αυτή τη συσκευή.");
