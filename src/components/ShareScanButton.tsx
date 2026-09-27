@@ -1,19 +1,38 @@
 import { useState } from "react";
+import type { ScoreBreakdown } from "../types";
 
 type ShareScanButtonProps = {
   productName?: string;
   barcode: string;
   score?: number | null;
+  band?: ScoreBreakdown["band"] | null;
+  category?: string | null;
   summary?: string;
   positives?: string[];
   attentionItems?: string[];
   allergens?: string[];
 };
 
+const GREENLENS_URL = "https://greenlens.pages.dev";
+
+// Mirrors the dot colors in scoreBand.ts, so a shared scan reads the same
+// verdict color as the app itself; insufficient_data gets no emoji since
+// there is no verdict to color.
+const BAND_EMOJI: Record<ScoreBreakdown["band"], string> = {
+  excellent: "🟢",
+  good: "🟢",
+  moderate: "🟡",
+  attention: "🟠",
+  high_attention: "🔴",
+  insufficient_data: "",
+};
+
 export default function ShareScanButton({
   productName,
   barcode,
   score,
+  band,
+  category,
   summary,
   positives,
   attentionItems,
@@ -25,12 +44,19 @@ export default function ShareScanButton({
     const lines: string[] = [];
 
     const title = productName?.trim() || "Προϊόν";
+    const emoji = band ? BAND_EMOJI[band] : "";
+    const categoryLabel = category?.trim();
 
-    lines.push(
+    const headline = [
       typeof score === "number"
         ? `${title} — Score ${score}/100`
         : title,
-    );
+      categoryLabel ? `(${categoryLabel})` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    lines.push(emoji ? `${emoji} ${headline}` : headline);
 
     if (summary?.trim()) {
       lines.push("", summary.trim());
@@ -61,7 +87,11 @@ export default function ShareScanButton({
       lines.push("", `Barcode: ${barcode.trim()}`);
     }
 
-    lines.push("", "Σαρώθηκε με GreenLens");
+    lines.push(
+      "",
+      "Σαρώθηκε με GreenLens",
+      `Σάρωσε κι εσύ: ${GREENLENS_URL}`,
+    );
 
     return lines.join("\n");
   }

@@ -261,6 +261,8 @@ export default function Product() {
           productName={item.productName}
           barcode={item.barcode}
           score={item.analysis?.score?.score}
+          band={score.score != null ? score.band : null}
+          category={categoryChip}
           // The reviewed catalogue copy (same text as the "Με μια ματιά"
           // card and the admin editor) is the source of truth; only a
           // record saved before executiveSummary existed falls back to the
