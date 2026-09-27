@@ -261,26 +261,35 @@ export default function Product() {
           productName={item.productName}
           barcode={item.barcode}
           score={item.analysis?.score?.score}
+          // The reviewed catalogue copy (same text as the "Με μια ματιά"
+          // card and the admin editor) is the source of truth; only a
+          // record saved before executiveSummary existed falls back to the
+          // raw per-scan AI fields.
           summary={
-            category === "nutrition"
+            record?.executiveSummary?.overallVerdict ||
+            (category === "nutrition"
               ? record?.nutritionAnalysis?.structured.summary
               : category === "chemical_composition"
                 ? record?.chemicalAnalysis?.structured.summary
-                : record?.structured?.summary
+                : record?.structured?.summary)
           }
           positives={
-            category === "nutrition"
-              ? record?.nutritionAnalysis?.structured.positives
-              : category === "chemical_composition"
-                ? record?.chemicalAnalysis?.structured.positives
-                : record?.structured?.positives
+            record?.executiveSummary?.highlights?.length
+              ? record.executiveSummary.highlights
+              : category === "nutrition"
+                ? record?.nutritionAnalysis?.structured.positives
+                : category === "chemical_composition"
+                  ? record?.chemicalAnalysis?.structured.positives
+                  : record?.structured?.positives
           }
           attentionItems={
-            category === "nutrition"
-              ? record?.nutritionAnalysis?.structured.attentionItems
-              : category === "chemical_composition"
-                ? record?.chemicalAnalysis?.structured.attentionItems
-                : record?.structured?.attentionItems
+            record?.executiveSummary?.watchOutFor?.length
+              ? record.executiveSummary.watchOutFor
+              : category === "nutrition"
+                ? record?.nutritionAnalysis?.structured.attentionItems
+                : category === "chemical_composition"
+                  ? record?.chemicalAnalysis?.structured.attentionItems
+                  : record?.structured?.attentionItems
           }
           allergens={
             record?.allergenNotice?.labels ??

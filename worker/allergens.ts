@@ -640,3 +640,58 @@ export function withoutAllergenOnlyItems(items: string[]): string[] {
     return !statesAllergyOnly(item) || statesRealConcern(item);
   });
 }
+
+/**
+ * Patterns that introduce a "this product does not contain X" claim, in
+ * accent-stripped lowercase text (see `normalizeForMatching`). The text
+ * after the marker is what gets checked against the allergen registry.
+ */
+const FREE_FROM_PATTERNS: RegExp[] = [
+  /χωρισ\s+([a-zα-ω0-9\s]+)/,
+  /δεν περιεχει\s+([a-zα-ω0-9\s]+)/,
+  /απαλλαγμενο απο\s+([a-zα-ω0-9\s]+)/,
+  /free of\s+([a-z0-9\s]+)/,
+  /free from\s+([a-z0-9\s]+)/,
+  /without\s+([a-z0-9\s]+)/,
+  /(?:^|\s)([a-z]+)[\s-]free\b/,
+];
+
+/**
+ * Guards against the model contradicting its own allergen detection: e.g.
+ * listing "Χωρίς γλουτένη" as a highlight while also flagging wheat as a
+ * declared allergen from the same ingredient list. `allergenKeys` is the
+ * set already confirmed present (from `classifyAllergenFindings`'s notice),
+ * so a "free of X" claim is dropped only when X is one of those groups —
+ * an unrelated claim like "χωρίς ζάχαρη" (no added sugar) is untouched.
+ */
+export function withoutContradictedFreeFromClaims(
+  items: string[],
+  allergenKeys: string[],
+): string[] {
+  if (items.length === 0 || allergenKeys.length === 0) {
+    return items;
+  }
+
+  const detected = new Set(allergenKeys);
+
+  return items.filter((item) => {
+    const normalized = normalizeForMatching(item);
+
+    for (const pattern of FREE_FROM_PATTERNS) {
+      const match = normalized.match(pattern);
+
+      if (!match) {
+        continue;
+      }
+
+      const claimed = match[1].split(/[.,;]/)[0].trim();
+      const group = matchAllergenGroup(claimed);
+
+      if (group && detected.has(group.key)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}

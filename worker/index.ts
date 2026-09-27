@@ -27,6 +27,7 @@ import {
 import {
   classifyAllergenFindings,
   withoutAllergenOnlyItems,
+  withoutContradictedFreeFromClaims,
   type AllergenNotice,
 } from "./allergens";
 import {
@@ -4616,6 +4617,14 @@ async function analyzeIngredientsCore(
       result.attentionItems,
     );
 
+    // Guards against the model contradicting its own allergen detection,
+    // e.g. "Χωρίς γλουτένη" as a highlight next to wheat flagged as a
+    // declared allergen from the same ingredient list.
+    result.positives = withoutContradictedFreeFromClaims(
+      result.positives,
+      allergens.notice?.keys ?? [],
+    );
+
     // After allergen classification (it reads the model's wording) and
     // before scoring/insights (they copy title/explanation into what the
     // user sees): nothing the model wrote about an ingredient's name or
@@ -5049,6 +5058,11 @@ async function analyzeNutritionCore(
 
     result.attentionItems = withoutAllergenOnlyItems(
       result.attentionItems,
+    );
+
+    result.positives = withoutContradictedFreeFromClaims(
+      result.positives,
+      allergens.notice?.keys ?? [],
     );
 
     // Same evidence rules as the ingredients path: the label's table when it

@@ -7,6 +7,7 @@ import {
   matchAllergenGroup,
   matchFragranceAllergen,
   withoutAllergenOnlyItems,
+  withoutContradictedFreeFromClaims,
 } from "./allergens";
 
 const finding = (over: Partial<{
@@ -242,4 +243,31 @@ test("drops allergen-only summary bullets but keeps real ones", () =>
       "Σιτάρι με μη δηλωμένη ποσότητα",
     ]),
     ["Υψηλή περιεκτικότητα σε ζάχαρη", "Σιτάρι με μη δηλωμένη ποσότητα"],
+  ));
+
+test("drops a free-from claim contradicted by a detected allergen", () =>
+  assert.deepEqual(
+    withoutContradictedFreeFromClaims(
+      ["Χωρίς γλουτένη", "Vegan Friendly", "Χωρίς ζάχαρη"],
+      ["gluten"],
+    ),
+    ["Vegan Friendly", "Χωρίς ζάχαρη"],
+  ));
+
+test("keeps a free-from claim unrelated to any detected allergen", () =>
+  assert.deepEqual(
+    withoutContradictedFreeFromClaims(["Χωρίς γλουτένη"], ["milk"]),
+    ["Χωρίς γλουτένη"],
+  ));
+
+test("keeps everything when no allergen was detected", () =>
+  assert.deepEqual(
+    withoutContradictedFreeFromClaims(["Χωρίς γλουτένη"], []),
+    ["Χωρίς γλουτένη"],
+  ));
+
+test("recognises the English gluten-free phrasing too", () =>
+  assert.deepEqual(
+    withoutContradictedFreeFromClaims(["Gluten-free recipe"], ["gluten"]),
+    [],
   ));
