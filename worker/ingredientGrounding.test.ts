@@ -145,8 +145,10 @@ test("OFF entries without a Greek name keep their English name — no Greek plac
 
   // Audited against static.openfoodfacts.org's additives.json: 68 entries
   // with no `el` name, 13 whose `el` name is itself English, and e126, which
-  // the taxonomy has since dropped.
-  assert.equal(englishOnly.length, 82);
+  // the taxonomy has since dropped, for 82. Migration 0012 then gave 10 of
+  // those (the Southampton Six colorants, E171, sulphites, ...) a curated
+  // Greek short_description, leaving 72 still English-only.
+  assert.equal(englishOnly.length, 72);
 
   const { grounded, insights } = await groundAndBuild(
     englishOnly.map((row) => modelFinding(row.normalized_name, row.normalized_name)),
