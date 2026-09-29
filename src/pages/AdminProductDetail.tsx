@@ -737,6 +737,33 @@ function AdminProductDetailContent() {
           </div>
         )}
 
+        {product.ocrTexts && product.ocrTexts.entries.length > 0 && (
+          <details className="mt-3 rounded-2xl border border-line-subtle bg-surface/70 p-4">
+            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-ink-faint">
+              Ακατέργαστο OCR ({product.ocrTexts.entries.length})
+            </summary>
+
+            <p className="mt-2 text-xs text-ink-faint">
+              Από την τελευταία ανάλυση ({product.ocrTexts.source},{" "}
+              {product.ocrTexts.updatedAt}). Αν ο πίνακας ή τα συστατικά
+              λείπουν από εδώ, φταίει η ανάγνωση της φωτογραφίας.
+            </p>
+
+            {product.ocrTexts.entries.map((entry, index) => (
+              <div key={index} className="mt-3">
+                <p className="text-xs font-semibold text-ink-muted">
+                  #{index + 1} · {entry.labelType} ·{" "}
+                  {Math.round(entry.confidence * 100)}%
+                </p>
+
+                <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-surface-muted p-2 text-xs leading-5 text-ink-muted">
+                  {entry.text}
+                </pre>
+              </div>
+            ))}
+          </details>
+        )}
+
         {canEdit && (
           <div className="mt-5 space-y-5">
             <div>

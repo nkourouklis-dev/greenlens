@@ -33,6 +33,12 @@ export interface AdminProductDetail {
   updatedAt: string;
   analysisResult: unknown;
   photos: AdminProductPhoto[];
+  /** The raw OCR behind the newest analysis, when one was recorded. */
+  ocrTexts?: {
+    entries: Array<{ text: string; labelType: string; confidence: number }>;
+    source: string;
+    updatedAt: string;
+  } | null;
 }
 
 export interface AdminProductListResult {

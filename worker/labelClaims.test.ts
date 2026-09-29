@@ -73,3 +73,15 @@ test("claims stored by a scan reach the assistant's draft", async () => {
   assert.deepEqual(draft.watchOutFor, []);
   assert.deepEqual(applyClaims({ highlights: ["x"], watchOutFor: [] }, claimsFromStored(undefined)).highlights, ["x"]);
 });
+
+test("vegan and lactose-free are picked up; vegetarian is not vegan", () => {
+  const claims = detectLabelClaims(["VEGAN", "Χωρίς λακτόζη"]);
+
+  assert.equal(claims.vegan, true);
+  assert.equal(claims.noLactose, true);
+  assert.equal(detectLabelClaims(["Suitable for vegetarians"]).vegan, false);
+  assert.deepEqual(claimHighlights(claims), [
+    "Χωρίς λακτόζη",
+    "Vegan (δήλωση συσκευασίας)",
+  ]);
+});

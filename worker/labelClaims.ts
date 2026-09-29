@@ -35,7 +35,12 @@ const CLAIM_WINDOW = 70;
 const GLUTEN_FREE =
   /(?:χωρισ|ωρισ)\s+γλουτεν|gluten[- ]?free|without gluten|free from gluten|free of gluten|αδεν γλουτεν/u;
 
+const LACTOSE_FREE =
+  /(?:χωρισ|ωρισ)\s+λακτοζ|lactose[- ]?free|without lactose|free from lactose|χωρισ λακτοζη/u;
+
 export interface LabelClaims {
+  vegan: boolean;
+  noLactose: boolean;
   noGluten: boolean;
   noAddedSugar: boolean;
   noPreservatives: boolean;
@@ -45,6 +50,8 @@ export interface LabelClaims {
 
 export function detectLabelClaims(texts: string[]): LabelClaims {
   const claims: LabelClaims = {
+    vegan: false,
+    noLactose: false,
     noGluten: false,
     noAddedSugar: false,
     noPreservatives: false,
@@ -57,6 +64,15 @@ export function detectLabelClaims(texts: string[]): LabelClaims {
 
     if (GLUTEN_FREE.test(text)) {
       claims.noGluten = true;
+    }
+
+    // "Vegetarian" is not "vegan": only the word itself counts.
+    if (/(?<![a-z])vegan(?![a-z])|βιγκαν/u.test(text)) {
+      claims.vegan = true;
+    }
+
+    if (LACTOSE_FREE.test(text)) {
+      claims.noLactose = true;
     }
 
     if (NO_ADDED_SUGAR.test(text)) {
@@ -96,6 +112,10 @@ export function claimHighlights(claims: LabelClaims): string[] {
     highlights.push("Χωρίς γλουτένη");
   }
 
+  if (claims.noLactose) {
+    highlights.push("Χωρίς λακτόζη");
+  }
+
   if (claims.noAddedSugar) {
     highlights.push("Χωρίς προστιθέμενη ζάχαρη");
   }
@@ -112,6 +132,10 @@ export function claimHighlights(claims: LabelClaims): string[] {
     highlights.push(
       `Χωρίς ${free.slice(0, -1).join(", ")} και ${free[free.length - 1]}`,
     );
+  }
+
+  if (claims.vegan) {
+    highlights.push("Vegan (δήλωση συσκευασίας)");
   }
 
   return highlights;
@@ -141,6 +165,8 @@ export function claimsFromStored(value: unknown): LabelClaims {
       : {};
 
   return {
+    vegan: record.vegan === true,
+    noLactose: record.noLactose === true,
     noGluten: record.noGluten === true,
     noAddedSugar: record.noAddedSugar === true,
     noPreservatives: record.noPreservatives === true,

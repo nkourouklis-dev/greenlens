@@ -115,6 +115,11 @@ import {
 } from "./identify";
 import { composeDisplayTitle } from "../src/utils/productTitle";
 import { explainFoodScore, withScoreExplanation } from "./scoreExplanation";
+import { readOcrTexts, saveOcrTexts } from "./ocrLog";
+import {
+  NUTRITION_VISION_PROMPT,
+  tableTextFromVision,
+} from "./nutritionVision";
 import {
   applyClaims,
   claimsFromStored,
@@ -2014,7 +2019,14 @@ async function runAdminGetProduct(
       );
     }
 
-    return json({ product }, 200, origin, requestId);
+    const ocr = await readOcrTexts(env.DB, barcode);
+
+    return json(
+      { product: { ...product, ocrTexts: ocr } },
+      200,
+      origin,
+      requestId,
+    );
   } catch (caughtError) {
     console.error("admin_product_get_failed", {
       requestId,
@@ -2643,6 +2655,75 @@ async function runAdminRescoreProduct(
 /** The photo slots that carry label text worth reading. */
 const LABEL_PHOTO_TYPES: PhotoType[] = ["ingredients", "nutrition", "other"];
 
+/**
+ * Reads a nutrition table with the same Workers AI vision-capable model the
+ * app already uses, only when OCR could not. Counted in the same daily
+ * allowance as every other Workers AI call, and skipped outright once a
+ * budget is exhausted — this is a nicety, never a reason to spend past the
+ * free allowance. Returns rows for the deterministic reader, or null.
+ */
+async function readNutritionTableWithVision(
+  env: Env,
+  image: File,
+  requestId: string,
+): Promise<string | null> {
+  try {
+    const breach = await findBudgetBreach(
+      env.DB,
+      resolveBudgets(env as Env & UsageBudgetEnvironment),
+    );
+
+    if (breach) {
+      console.warn("nutrition_vision_skipped_over_budget", {
+        requestId,
+        budget: breach.id,
+      });
+
+      return null;
+    }
+
+    const modelOutput = await env.AI.run(textModel, {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: NUTRITION_VISION_PROMPT },
+            {
+              type: "image_url",
+              image_url: { url: await fileToDataUri(image) },
+            },
+          ],
+        },
+      ],
+      max_tokens: 300,
+      temperature: 0,
+    } as never);
+
+    await recordUsage(env.DB, "workers_ai_vision");
+
+    const reply = extractModelText(modelOutput);
+
+    const text = reply ? tableTextFromVision(reply) : null;
+
+    console.log("nutrition_vision_read", {
+      requestId,
+      produced: text !== null,
+    });
+
+    return text;
+  } catch (caughtError) {
+    console.error("nutrition_vision_failed", {
+      requestId,
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+
+    return null;
+  }
+}
+
 async function runAdminAnalyzeProduct(
   barcode: string,
   request: Request,
@@ -2710,6 +2791,8 @@ async function runAdminAnalyzeProduct(
 
   const labels: LabelText[] = [];
 
+  let nutritionImage: File | null = null;
+
   for (const photo of labelPhotos) {
     let object: R2ObjectBody | null;
 
@@ -2750,6 +2833,10 @@ async function runAdminAnalyzeProduct(
         type: object.httpMetadata?.contentType || "image/jpeg",
       },
     );
+
+    if (photo.photoType === "nutrition") {
+      nutritionImage = imageFile;
+    }
 
     try {
       const ocrResult = await extractWithAzureOcr(
@@ -2797,6 +2884,30 @@ async function runAdminAnalyzeProduct(
       origin,
       requestId,
     );
+  }
+
+  // A nutrition photo whose OCR text yields no table gets one second look by
+  // a vision model. Admin analysis only: a shopper's scan never waits for it.
+  if (
+    nutritionImage &&
+    choosePanelText(
+      labels.map((label) => label.text),
+      detectAlcohol(labels.map((label) => label.text)),
+    )?.read.panel == null
+  ) {
+    const visionText = await readNutritionTableWithVision(
+      env,
+      nutritionImage,
+      requestId,
+    );
+
+    if (visionText) {
+      labels.push({
+        text: visionText,
+        ocrConfidence: 0.5,
+        labelType: "nutrition",
+      });
+    }
   }
 
   const previousAnalysis = (await getAdminProduct(env.DB, barcode))
@@ -4125,6 +4236,19 @@ async function analyzeFoodLabels(
   versionSource: ProductVersionSource,
   primaryIndex?: number,
 ): Promise<FoodAnalysisOutcome> {
+  // What the OCR actually returned, kept for the admin: when a score looks
+  // wrong this is the first thing to look at.
+  await saveOcrTexts(
+    env.DB,
+    barcode,
+    versionSource,
+    labels.map((label) => ({
+      text: label.text,
+      labelType: label.labelType,
+      confidence: label.ocrConfidence,
+    })),
+  );
+
   const ranked = labels
     .map((label, index) => ({
       label,
@@ -4638,6 +4762,14 @@ async function analyzeIngredientsCore(
 
     // A pack that says "Χωρίς γλουτένη" outranks the oat/flour stem match.
     const labelClaims = detectLabelClaims(labelTexts);
+
+    // A "vegan" logo beside milk or egg in the list is a contradiction we
+    // cannot settle; say nothing rather than repeat a claim we doubt.
+    if (
+      allergens.notice?.keys.some((key) => key === "milk" || key === "eggs")
+    ) {
+      labelClaims.vegan = false;
+    }
 
     const allergenNotice = withoutClaimedFreeGroups(
       allergens.notice,
