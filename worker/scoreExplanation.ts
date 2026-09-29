@@ -75,9 +75,16 @@ function nutritionWatchOuts(evaluation: NutritionEvaluation): string[] {
     const component = find(key);
 
     if (component && component.value !== null) {
+      // "Σάκχαρα" is not "ζάχαρη": with no added sugar in the list, say the
+      // figure comes from the ingredients themselves.
+      const natural =
+        key === "sugars" && evaluation.addedSugar === false
+          ? " (φυσικά, από τα συστατικά)"
+          : "";
+
       lines.push({
         points: component.points,
-        text: `${label}: ${formatNumber(component.value)} ${unit}`,
+        text: `${label}: ${formatNumber(component.value)} ${unit}${natural}`,
       });
     }
   }
@@ -105,6 +112,9 @@ export interface ScoreExplanation {
   /** The checkable facts in words, to hand to a prompt. */
   facts: string[];
 }
+
+/** The positive that goes with a natural-sugars caution. */
+const NO_ADDED_SUGAR = "Χωρίς προστιθέμενη ζάχαρη";
 
 function lowercaseFirst(text: string): string {
   return `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
@@ -161,6 +171,7 @@ export function explainFoodScore(
   const facts = evaluation
     ? [
         `Nutri-Score ${evaluation.grade}`,
+        ...(evaluation.addedSugar === false ? [NO_ADDED_SUGAR] : []),
         ...watchOutFor,
         ...(evaluation.uncredited.length > 0
           ? [
@@ -188,8 +199,13 @@ export function withScoreExplanation(
     return summary;
   }
 
+  const noAddedSugar = score.nutritionEvaluation?.addedSugar === false;
+
   return {
     ...summary,
+    highlights: noAddedSugar
+      ? Array.from(new Set([NO_ADDED_SUGAR, ...summary.highlights])).slice(0, 4)
+      : summary.highlights,
     overallVerdict: explanation.overallVerdict,
     watchOutFor: Array.from(
       new Set([...explanation.watchOutFor, ...summary.watchOutFor]),

@@ -111,6 +111,12 @@ export interface NutritionEvaluation {
   /** Favourable nutrients not declared — they earned nothing, and we say so. */
   uncredited: UncreditedNutrient[];
   sugarsBoundedByCarbohydrate: boolean;
+  /**
+   * Whether the ingredient list names an added sweetener. false is the claim
+   * "no added sugar" — the sugars in the table then come from whole foods
+   * (dates, fruit, milk). null when nobody checked (no rules matched).
+   */
+  addedSugar?: boolean | null;
 }
 
 /** How the final number was put together, for the breakdown panel. */
@@ -143,6 +149,8 @@ export interface FoodScoreInput {
   nutrition: NutritionEvidence | null;
   /** From the ingredient rules: a beverage's non-nutritive sweetener. */
   nonNutritiveSweetener: boolean | null;
+  /** See NutritionEvaluation.addedSugar; absent means unchecked. */
+  addedSugar?: boolean | null;
   alcohol: AlcoholInfo | null;
   notices: ScoreNotice[];
 }
@@ -157,6 +165,13 @@ export function sweetenerFrom(ruleMatches: RuleMatch[]): boolean | null {
   return ruleMatches.length === 0
     ? null
     : ruleMatches.some((match) => match.rule.ruleGroup === "artificial_sweetener");
+}
+
+/** Whether the ingredients name an added sugar; null when nothing was checked. */
+export function addedSugarFrom(ruleMatches: RuleMatch[]): boolean | null {
+  return ruleMatches.length === 0
+    ? null
+    : ruleMatches.some((match) => match.rule.ruleGroup === "added_sugar");
 }
 
 /** Evaluates the nutrition half; null when there is nothing gradable. */
@@ -425,7 +440,10 @@ export function scoreFood(input: FoodScoreInput): FoodWorkerScore {
       cappedFrom,
       cap: nutritionScore === null ? PARTIAL_EVALUATION_SCORE_CAP : null,
     },
-    nutritionEvaluation: evaluation,
+    nutritionEvaluation: evaluation && {
+      ...evaluation,
+      addedSugar: input.addedSugar ?? null,
+    },
   };
 }
 

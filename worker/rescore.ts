@@ -48,6 +48,7 @@ import {
   scoreForProductType,
   scoreNutritionOnly,
   sweetenerFrom,
+  addedSugarFrom,
   type FoodWorkerScore,
 } from "./foodScore";
 import {
@@ -308,6 +309,7 @@ export async function rescoreFoodIngredients(
           ingredientScore,
           nutrition: evidence,
           nonNutritiveSweetener: sweetenerFrom(ruleMatches),
+            addedSugar: addedSugarFrom(ruleMatches),
           alcohol: context.alcohol,
           notices: graded ? [] : context.notices,
         });

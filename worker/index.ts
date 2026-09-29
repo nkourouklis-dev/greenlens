@@ -114,12 +114,14 @@ import {
 } from "./identify";
 import { composeDisplayTitle } from "../src/utils/productTitle";
 import { explainFoodScore, withScoreExplanation } from "./scoreExplanation";
+import { withLabelClaims } from "./labelClaims";
 import {
   evaluateNutrition,
   resolveNutritionEvidence,
   scoreForProductType,
   scoreNutritionOnly,
   sweetenerFrom,
+  addedSugarFrom,
 } from "./foodScore";
 import type { NutritionFacts } from "./nutritionFacts";
 import {
@@ -4695,6 +4697,7 @@ async function analyzeIngredientsCore(
             ingredientScore,
             nutrition: nutritionEvidence,
             nonNutritiveSweetener: sweetenerFrom(ruleMatches),
+            addedSugar: addedSugarFrom(ruleMatches),
             alcohol,
             notices,
           });
@@ -4711,9 +4714,14 @@ async function analyzeIngredientsCore(
 
     // The verdict and cautions say what decided the number — the nutrition
     // drivers, from the measured values — not only what is in the list.
-    const executiveSummary = withScoreExplanation(
-      buildExecutiveSummary(result, score, ingredientInsights),
-      score,
+    // ...and what the pack says it does without ("χωρίς συντηρητικά…") is a
+    // positive, not a caution.
+    const executiveSummary = withLabelClaims(
+      withScoreExplanation(
+        buildExecutiveSummary(result, score, ingredientInsights),
+        score,
+      ),
+      labelTexts,
     );
 
     const scanBody = {
