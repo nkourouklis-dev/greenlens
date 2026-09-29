@@ -115,7 +115,12 @@ import {
 } from "./identify";
 import { composeDisplayTitle } from "../src/utils/productTitle";
 import { explainFoodScore, withScoreExplanation } from "./scoreExplanation";
-import { detectLabelClaims, withLabelClaims } from "./labelClaims";
+import {
+  applyClaims,
+  claimsFromStored,
+  detectLabelClaims,
+  withLabelClaims,
+} from "./labelClaims";
 import {
   evaluateNutrition,
   resolveNutritionEvidence,
@@ -1107,17 +1112,32 @@ async function generateAssistantDraftFromAnalysis(
     throw new Error("unusable_draft");
   }
 
+  // What the pack says it does without (stored by the scan) is a positive the
+  // model was never shown; and a sugars caution it wrote itself is dropped
+  // when the measured one is already there.
+  const claimed = (draftToClaim: AssistantDraft): AssistantDraft =>
+    applyClaims(draftToClaim, claimsFromStored(analysisResult.labelClaims));
+
   if (explanation) {
-    return {
+    const measuredSugars = explanation.watchOutFor.some((item) =>
+      item.startsWith("Σάκχαρα"),
+    );
+
+    return claimed({
       ...draft,
       overallVerdict: explanation.overallVerdict,
       watchOutFor: Array.from(
-        new Set([...explanation.watchOutFor, ...draft.watchOutFor]),
+        new Set([
+          ...explanation.watchOutFor,
+          ...draft.watchOutFor.filter(
+            (item) => !(measuredSugars && /σ[άα]κχαρ/i.test(item)),
+          ),
+        ]),
       ).slice(0, 4),
-    };
+    });
   }
 
-  return draft;
+  return claimed(draft);
 }
 
 async function runAssistDraft(
@@ -4739,6 +4759,7 @@ async function analyzeIngredientsCore(
       ingredientInsights,
       executiveSummary,
       allergenNotice,
+      labelClaims,
       contentCategory: "ingredients" as const,
       // The exact text the score was computed from. Persisted so the PIM
       // can recompute the score after an edit without re-running OCR, and

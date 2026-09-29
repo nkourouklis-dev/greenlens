@@ -133,12 +133,29 @@ function contradictsClaims(item: string, claims: LabelClaims): boolean {
   );
 }
 
-export function withLabelClaims(
-  summary: ExecutiveSummary,
-  texts: string[],
-): ExecutiveSummary {
-  const claims = detectLabelClaims(texts);
+/** Reads claims back from what a scan stored; empty when there were none. */
+export function claimsFromStored(value: unknown): LabelClaims {
+  const record =
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)
+      : {};
 
+  return {
+    noGluten: record.noGluten === true,
+    noAddedSugar: record.noAddedSugar === true,
+    noPreservatives: record.noPreservatives === true,
+    noColourants: record.noColourants === true,
+    noAdditives: record.noAdditives === true,
+  };
+}
+
+/**
+ * Puts the claims' positives first and removes cautions that only repeat
+ * them. Used on the scan's summary and on the assistant's draft alike.
+ */
+export function applyClaims<
+  T extends { highlights: string[]; watchOutFor: string[] },
+>(summary: T, claims: LabelClaims): T {
   const added = claimHighlights(claims);
 
   if (added.length === 0) {
@@ -155,4 +172,11 @@ export function withLabelClaims(
       (item) => !contradictsClaims(item, claims),
     ),
   };
+}
+
+export function withLabelClaims(
+  summary: ExecutiveSummary,
+  texts: string[],
+): ExecutiveSummary {
+  return applyClaims(summary, detectLabelClaims(texts));
 }

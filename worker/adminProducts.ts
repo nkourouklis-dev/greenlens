@@ -371,6 +371,9 @@ export function validateVerifiedAnalysisResult(
       nutritionPanel,
       executiveSummary: candidate.executiveSummary,
       allergenNotice: candidate.allergenNotice ?? null,
+      ...(isPlainObject(candidate.labelClaims)
+        ? { labelClaims: candidate.labelClaims }
+        : {}),
       contentCategory: "ingredients",
     },
   };

@@ -53,3 +53,23 @@ test("a gluten-free claim is detected and lifts only gluten out of the notice", 
     null,
   );
 });
+
+test("claims stored by a scan reach the assistant's draft", async () => {
+  const { applyClaims, claimsFromStored } = await import("./labelClaims");
+
+  const draft = applyClaims(
+    {
+      highlights: ["Πρωτεΐνη αρακά"],
+      watchOutFor: ["Χρωστικές και πρόσθετα"],
+    },
+    claimsFromStored({ noGluten: true, noPreservatives: true, noColourants: true, noAdditives: true }),
+  );
+
+  assert.deepEqual(draft.highlights, [
+    "Χωρίς γλουτένη",
+    "Χωρίς συντηρητικά, χρωστικές και πρόσθετα",
+    "Πρωτεΐνη αρακά",
+  ]);
+  assert.deepEqual(draft.watchOutFor, []);
+  assert.deepEqual(applyClaims({ highlights: ["x"], watchOutFor: [] }, claimsFromStored(undefined)).highlights, ["x"]);
+});
