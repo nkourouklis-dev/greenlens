@@ -114,10 +114,12 @@ function assertNoModelText(fields: string[], context: string) {
 
 const GREEK = /[Ͱ-Ͽἀ-῿]/;
 
-test("the dataset is the real migrated import: 50 curated + 669 Open Food Facts entries", () => {
+test("the dataset is the real migrated import: 187 curated + 669 Open Food Facts entries", () => {
   const count = (source: string) => knowledgeRows.filter((row) => row.source === source).length;
 
-  assert.equal(count("curated"), 50);
+  // 50 from 0001/0006, 137 added by 0014/0015 to give every ingredient seen on
+  // a scanned product a description.
+  assert.equal(count("curated"), 187);
   assert.equal(count("openfoodfacts"), 669);
 });
 
@@ -147,8 +149,12 @@ test("OFF entries without a Greek name keep their English name — no Greek plac
   // with no `el` name, 13 whose `el` name is itself English, and e126, which
   // the taxonomy has since dropped, for 82. Migration 0012 then gave 10 of
   // those (the Southampton Six colorants, E171, sulphites, ...) a curated
-  // Greek short_description, leaving 72 still English-only.
-  assert.equal(englishOnly.length, 72);
+  // Greek short_description, leaving 72 still English-only. Migration 0014
+  // then rewrote the placeholder "E1520 - Propylene glycol" rows as
+  // "<name as imported> — <kind of additive> (E1520)": the name is still the
+  // English one and nothing is translated, but the sentence around it is
+  // Greek, so 50 of them no longer count here. 22 keep their English text.
+  assert.equal(englishOnly.length, 22);
 
   const { grounded, insights } = await groundAndBuild(
     englishOnly.map((row) => modelFinding(row.normalized_name, row.normalized_name)),
