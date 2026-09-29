@@ -653,20 +653,98 @@ export function inspectNutritionPanel(
   // rejected exactly as a wrong walk is.
   const ordered = readPanelValuesInOrder(rawText);
 
-  if (ordered === null) {
-    return read;
+  const reread =
+    ordered === null
+      ? null
+      : buildPanel(
+          ordered.values,
+          ordered.energyKcal,
+          isBeverage,
+          alcoholKcal,
+        );
+
+  if (reread?.panel) {
+    return reread;
   }
 
-  const reread = buildPanel(
-    ordered.values,
-    ordered.energyKcal,
-    isBeverage,
-    alcoholKcal,
-  );
+  // Last resort, for a table whose masses carry no unit at all.
+  const unitless = readUnitlessValues(rawText);
 
-  return reread.panel !== null
-    ? reread
-    : { ...read, tableDetected: read.tableDetected || reread.tableDetected };
+  const unitlessRead =
+    unitless.values.size === 0
+      ? null
+      : buildPanel(
+          unitless.values,
+          walked.energyKcal,
+          isBeverage,
+          alcoholKcal,
+        );
+
+  if (unitlessRead?.panel) {
+    return unitlessRead;
+  }
+
+  return {
+    ...read,
+    tableDetected:
+      read.tableDetected ||
+      (reread?.tableDetected ?? false) ||
+      (unitlessRead?.tableDetected ?? false),
+  };
+}
+
+/**
+ * A table printed with bare numbers — "Λιπαρά / Fat", "13", "8" — where only
+ * the energy row carries a unit (barcode 5214001318841, a bilingual bar
+ * label: per 100 g, then per 60 g). Every reading above waits for a "g", so
+ * such a table yielded nothing and the product stayed capped at "no
+ * nutrition found" with the photo sitting right there.
+ *
+ * The column printed first is per 100 g, so the first bare number after a
+ * row name is the reading; later numbers of the same row (the portion
+ * column) find no pending name and are skipped. Only lines that are nothing
+ * but a number count, so a percentage inside an ingredient list can never be
+ * read as a quantity. The plausibility checks still have the last word.
+ */
+function readUnitlessValues(rawText: string): {
+  values: Map<PanelKey, PanelValue>;
+} {
+  const values = new Map<PanelKey, PanelValue>();
+
+  let pending: string[] = [];
+
+  for (const rawLine of rawText.split(/\r?\n/)) {
+    const line = rawLine.trim();
+
+    if (line.length === 0) {
+      continue;
+    }
+
+    const bare = bareNumberOf(line);
+
+    if (bare !== null) {
+      const key =
+        pending.length > 0
+          ? keyForName(pending.slice(-MAX_NAME_LINES).join(" "))
+          : null;
+
+      pending = [];
+
+      if (key !== null && !values.has(key)) {
+        values.set(key, { grams: bare, declared: `${bare} g` });
+      }
+
+      continue;
+    }
+
+    if (parseAmounts(line).amounts.length > 0) {
+      pending = [];
+    } else if (/\p{L}/u.test(line) && isNameFragment(line)) {
+      pending.push(line);
+    }
+  }
+
+  return { values };
 }
 
 const ENERGY_NAME = /(ενεργει|ενέργει|energy)/iu;

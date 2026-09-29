@@ -97,3 +97,59 @@ test("the explanation states the basis once", () => {
 
   assert.equal(penalty.explanation, "8g ανά 100 g");
 });
+
+/**
+ * Barcode 5214001318841: a bilingual table where every mass is printed with
+ * no unit ("13", "3,7", "32"). It used to read as no table at all, so the
+ * product stayed capped at 65 with a nutrition photo attached.
+ */
+const UNITLESS_BAR_OCR = [
+  "60g e PRODUCT OF GREECE",
+  "Διατροφική Αξία /",
+  "Nutrition Information",
+  "Per 100g",
+  "Per 60g",
+  "Ενέργεια / Energy",
+  "1536kj / 367kcal",
+  "920kj / 220kcal",
+  "Λιπαρά / Fat",
+  "13",
+  "8",
+  "εκ των οποίων / of which",
+  "κορεσμένα / saturated",
+  "3,7",
+  "2,2",
+  "Υδατάνθρακες / Carbohydrates",
+  "32",
+  "19",
+  "εκ των οποίων / of which",
+  "σάκχαρα / sugars",
+  "24",
+  "14",
+  "Εδώδιμες Ίνες / Dietary Fiber",
+  "8,7",
+  "5,2",
+  "Πρωτεΐνες / Protein",
+  "30",
+  "18",
+  "Αλάτι / Salt",
+  "0,4",
+  "0,24",
+].join("\n");
+
+test("a table with no units on its masses is read from the first column", () => {
+  const panel = readNutritionPanel(UNITLESS_BAR_OCR);
+
+  assert(panel, "no panel was read");
+
+  assert.deepEqual(
+    panel.readings.map((reading) => [reading.key, reading.gramsPer100]),
+    [
+      ["sugars", 24],
+      ["saturates", 3.7],
+      ["salt", 0.4],
+      ["fibre", 8.7],
+      ["protein", 30],
+    ],
+  );
+});
