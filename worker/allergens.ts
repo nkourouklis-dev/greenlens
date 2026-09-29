@@ -628,6 +628,40 @@ export function buildAllergenNotice(
 }
 
 /**
+ * Takes an allergen out of the notice because the pack itself declares the
+ * product free of it ("Χωρίς γλουτένη"). The matcher works on words, and a
+ * gluten-free bar listing "φυτική ίνα βρώμης" (oat fibre) matched the oat
+ * stem and was announced as containing gluten, next to the very claim that
+ * says otherwise. A free-from claim is regulated in the EU, so it outranks
+ * a stem match; it never removes an allergen the claim does not name.
+ */
+export function withoutClaimedFreeGroups(
+  notice: AllergenNotice | null,
+  freeKeys: string[],
+): AllergenNotice | null {
+  if (!notice || freeKeys.length === 0) {
+    return notice;
+  }
+
+  const kept = notice.keys
+    .map((key, index) => ({ key, label: notice.labels[index] }))
+    .filter((entry) => !freeKeys.includes(entry.key));
+
+  if (kept.length === 0) {
+    return null;
+  }
+
+  const labels = kept.map((entry) => entry.label);
+
+  return {
+    ...notice,
+    keys: kept.map((entry) => entry.key),
+    labels,
+    headline: `Περιέχει γνωστά αλλεργιογόνα: ${labels.join(", ")}`,
+  };
+}
+
+/**
  * Drops summary bullets that only repeat "contains a known allergen" — the
  * notice already says it once, in one line.
  */

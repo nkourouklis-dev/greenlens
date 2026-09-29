@@ -28,6 +28,7 @@ import {
   classifyAllergenFindings,
   withoutAllergenOnlyItems,
   withoutContradictedFreeFromClaims,
+  withoutClaimedFreeGroups,
   type AllergenNotice,
 } from "./allergens";
 import {
@@ -114,7 +115,7 @@ import {
 } from "./identify";
 import { composeDisplayTitle } from "../src/utils/productTitle";
 import { explainFoodScore, withScoreExplanation } from "./scoreExplanation";
-import { withLabelClaims } from "./labelClaims";
+import { detectLabelClaims, withLabelClaims } from "./labelClaims";
 import {
   evaluateNutrition,
   resolveNutritionEvidence,
@@ -4615,6 +4616,14 @@ async function analyzeIngredientsCore(
 
     result.ingredientFindings = allergens.findings;
 
+    // A pack that says "Χωρίς γλουτένη" outranks the oat/flour stem match.
+    const labelClaims = detectLabelClaims(labelTexts);
+
+    const allergenNotice = withoutClaimedFreeGroups(
+      allergens.notice,
+      labelClaims.noGluten ? ["gluten"] : [],
+    );
+
     result.attentionItems = withoutAllergenOnlyItems(
       result.attentionItems,
     );
@@ -4624,7 +4633,7 @@ async function analyzeIngredientsCore(
     // declared allergen from the same ingredient list.
     result.positives = withoutContradictedFreeFromClaims(
       result.positives,
-      allergens.notice?.keys ?? [],
+      allergenNotice?.keys ?? [],
     );
 
     // After allergen classification (it reads the model's wording) and
@@ -4729,7 +4738,7 @@ async function analyzeIngredientsCore(
       score,
       ingredientInsights,
       executiveSummary,
-      allergenNotice: allergens.notice,
+      allergenNotice,
       contentCategory: "ingredients" as const,
       // The exact text the score was computed from. Persisted so the PIM
       // can recompute the score after an edit without re-running OCR, and

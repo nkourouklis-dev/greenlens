@@ -32,7 +32,11 @@ const NO_PRESERVATIVES =
 /** How far a colorants/additives word may sit from the preservatives claim. */
 const CLAIM_WINDOW = 70;
 
+const GLUTEN_FREE =
+  /(?:χωρισ|ωρισ)\s+γλουτεν|gluten[- ]?free|without gluten|free from gluten|free of gluten|αδεν γλουτεν/u;
+
 export interface LabelClaims {
+  noGluten: boolean;
   noAddedSugar: boolean;
   noPreservatives: boolean;
   noColourants: boolean;
@@ -41,6 +45,7 @@ export interface LabelClaims {
 
 export function detectLabelClaims(texts: string[]): LabelClaims {
   const claims: LabelClaims = {
+    noGluten: false,
     noAddedSugar: false,
     noPreservatives: false,
     noColourants: false,
@@ -49,6 +54,10 @@ export function detectLabelClaims(texts: string[]): LabelClaims {
 
   for (const raw of texts) {
     const text = fold(raw);
+
+    if (GLUTEN_FREE.test(text)) {
+      claims.noGluten = true;
+    }
 
     if (NO_ADDED_SUGAR.test(text)) {
       claims.noAddedSugar = true;
@@ -82,6 +91,10 @@ export function detectLabelClaims(texts: string[]): LabelClaims {
 /** The positives the claims earn, in the order a shopper cares about them. */
 export function claimHighlights(claims: LabelClaims): string[] {
   const highlights: string[] = [];
+
+  if (claims.noGluten) {
+    highlights.push("Χωρίς γλουτένη");
+  }
 
   if (claims.noAddedSugar) {
     highlights.push("Χωρίς προστιθέμενη ζάχαρη");
