@@ -309,7 +309,14 @@ type JsonBody =
       pageSize: number;
       totalCount: number;
     }
-  | { product: AdminProductDetail | null }
+  | {
+      product:
+        | (AdminProductDetail & {
+            ocrTexts?: Awaited<ReturnType<typeof readOcrTexts>>;
+          })
+        | null;
+    }
+  | { changed: boolean }
   | { versions: ProductVersionSummary[] }
   | { version: ProductVersion }
   | { assistant: AssistantReply }
