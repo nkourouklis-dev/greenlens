@@ -9,6 +9,7 @@ import {
 } from "../services/captureDraftService";
 import { extractIngredientText } from "../../worker/ingredientText";
 import { detectContentCategoryHeuristic } from "../../worker/contentCategory";
+import { inspectNutritionPanel } from "../../worker/nutritionPanel";
 import type { ContentCategory } from "../types";
 
 const categoryOptions: Array<{
@@ -114,6 +115,12 @@ export default function IngredientsReview() {
 
   const [text, setText] = useState(() => {
     if (!draft) return "";
+
+    // A photo that also carries the nutrition table keeps it: the table is
+    // what the score's sugar and salt are judged from.
+    if (inspectNutritionPanel(draft.result.rawText).tableDetected) {
+      return draft.result.rawText;
+    }
 
     const isolated = extractIngredientText(
       draft.result.rawText,
@@ -273,8 +280,17 @@ export default function IngredientsReview() {
       return;
     }
 
+    // The nutrition table is the next step unless this photo already holds
+    // one (or the user chose to score it as a table alone).
+    const hasTable = inspectNutritionPanel(text).tableDetected;
+
+    const next =
+      hasTable || categoryOverride === "nutrition"
+        ? "/product-photo"
+        : "/nutrition-photo";
+
     navigate(
-      `/product-photo?barcode=${encodeURIComponent(
+      `${next}?barcode=${encodeURIComponent(
         ocrDraft.barcode,
       )}&productId=${encodeURIComponent(id)}`,
     );

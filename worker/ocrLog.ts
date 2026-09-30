@@ -10,6 +10,8 @@ export interface OcrLogEntry {
   text: string;
   labelType: string;
   confidence: number;
+  /** Photo slot it was read from ("front", "ingredients", …), when known. */
+  photoType?: string;
 }
 
 /** Enough for any label; a runaway OCR result must not bloat the row. */

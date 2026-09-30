@@ -414,6 +414,21 @@ export default {
       );
     }
 
+    // Recompute a product's score from the text already on file, for any
+    // user: pressed from the product page, and fired by it when the score
+    // says a nutrition table went unused. See runAdminRescoreProduct.
+    const rescorePublicBarcode = matchProductRescorePath(url.pathname);
+
+    if (request.method === "POST" && rescorePublicBarcode !== null) {
+      return runAdminRescoreProduct(
+        rescorePublicBarcode,
+        env,
+        origin,
+        requestId,
+        "public",
+      );
+    }
+
     // Public, unauthenticated read of a product's photo. Deliberately
     // separate from /api/admin/photos/file: that one is keyed on an R2
     // object key and gated by the admin secret, while this one takes a
@@ -467,6 +482,28 @@ function isChatPath(pathname: string): boolean {
     segments[3].length > 0 &&
     segments[4] === "chat"
   );
+}
+
+// Returns the barcode segment of /api/product/rescore/<barcode>, or null.
+function matchProductRescorePath(pathname: string): string | null {
+  const segments = pathname.split("/");
+
+  if (
+    segments.length !== 5 ||
+    segments[0] !== "" ||
+    segments[1] !== "api" ||
+    segments[2] !== "product" ||
+    segments[3] !== "rescore" ||
+    segments[4].length === 0
+  ) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(segments[4]);
+  } catch {
+    return null;
+  }
 }
 
 // Returns the barcode segment of /api/product/cache/<barcode>, or null if
@@ -2446,6 +2483,12 @@ async function runAdminRescoreProduct(
   env: Env,
   origin: string | null,
   requestId: string,
+  // "public" is the same recompute offered to every user of a product page:
+  // it reads only text already on file and runs no OCR or model to score, so
+  // it is as safe to press as it is for an admin. It differs in what it is
+  // allowed to spend (the catalogue copy refresh is a model call, so it
+  // honours the budget) and in doing nothing when nothing would change.
+  mode: "admin" | "public" = "admin",
 ): Promise<Response> {
   const product = await getAdminProduct(env.DB, barcode);
 
@@ -2599,6 +2642,29 @@ async function runAdminRescoreProduct(
       );
     }
 
+    if (mode === "public") {
+      const storedScore = isRecord(stored.score) ? stored.score : null;
+
+      const storedNoticeCodes = Array.isArray(storedScore?.notices)
+        ? (storedScore.notices as Array<{ code?: unknown }>)
+            .map((notice) => String(notice?.code))
+            .sort()
+            .join(",")
+        : "";
+
+      const newNoticeCodes = (score.notices ?? [])
+        .map((notice) => notice.code)
+        .sort()
+        .join(",");
+
+      if (
+        storedScore?.score === score.score &&
+        storedNoticeCodes === newNoticeCodes
+      ) {
+        return json({ changed: false }, 200, origin, requestId);
+      }
+    }
+
     console.log("admin_product_rescored_in_place", {
       requestId,
       barcode,
@@ -2613,10 +2679,13 @@ async function runAdminRescoreProduct(
       analysisResult: envelope,
     });
 
-    if (readCopySource(stored) !== "manual") {
-      await afterResponse(env, requestId, "auto_copy_refresh", () =>
-        autoApplyAssistantDraft(env, barcode, { includeVerified: true }),
-      );
+    // Awaited so the copy in the response already matches the new score.
+    if (
+      readCopySource(stored) !== "manual" &&
+      (mode === "admin" ||
+        (await refuseIfOverBudget(env, origin, requestId)) === null)
+    ) {
+      await autoApplyAssistantDraft(env, barcode, { includeVerified: true });
     }
 
     const updated = await getAdminProduct(env.DB, barcode);
@@ -2624,12 +2693,16 @@ async function runAdminRescoreProduct(
     if (updated) {
       await recordProductVersion(env.DB, {
         barcode,
-        source: "admin_edit",
+        source: mode === "admin" ? "admin_edit" : "user_scan",
         productName: updated.productName,
         category: updated.category,
         analysisResult: updated.analysisResult,
         applied: true,
       });
+    }
+
+    if (mode === "public") {
+      return json({ changed: true }, 200, origin, requestId);
     }
 
     return json({ product: updated }, 200, origin, requestId);
@@ -2853,6 +2926,7 @@ async function runAdminAnalyzeProduct(
           text: ocrResult.rawText,
           ocrConfidence: ocrResult.confidence,
           labelType: ocrResult.labelType,
+          photoType: photo.photoType,
         });
       }
     } catch (caughtError) {
@@ -2906,6 +2980,7 @@ async function runAdminAnalyzeProduct(
         text: visionText,
         ocrConfidence: 0.5,
         labelType: "nutrition",
+        photoType: "vision",
       });
     }
   }
@@ -2962,16 +3037,16 @@ async function runAdminAnalyzeProduct(
     );
   }
 
-  const product = await getAdminProduct(env.DB, barcode);
-
   // A fresh analysis brings fresh generic copy; write the assistant's over it
   // unless a person had written the previous words (which the analysis has
-  // just replaced — the version history keeps them).
+  // just replaced — the version history keeps them). Awaited, not deferred:
+  // the screen shows whatever this response carries, and a verdict sitting
+  // next to the old score's wording looks like nothing happened.
   if (readCopySource(previousAnalysis) !== "manual") {
-    await afterResponse(env, requestId, "auto_copy_refresh", () =>
-      autoApplyAssistantDraft(env, barcode, { includeVerified: true }),
-    );
+    await autoApplyAssistantDraft(env, barcode, { includeVerified: true });
   }
+
+  const product = await getAdminProduct(env.DB, barcode);
 
   console.log("admin_product_analyzed", {
     requestId,
@@ -3493,6 +3568,10 @@ interface AnalysisRequestBody {
   // already has an analysis, and must be merged with it rather than be
   // answered from the cache or replace it.
   mergeWithStored?: boolean;
+  // The OCR text of the product's other label photos taken in the same scan
+  // (typically the nutrition table, photographed apart from the ingredient
+  // list). Scored together with `confirmedIngredientText` as one product.
+  additionalLabelTexts?: string[];
 }
 
 function isAnalysisRequest(
@@ -3530,7 +3609,13 @@ function isAnalysisRequest(
       (typeof value.productTitle === "string" &&
         value.productTitle.length <= 200)) &&
     (value.mergeWithStored === undefined ||
-      typeof value.mergeWithStored === "boolean")
+      typeof value.mergeWithStored === "boolean") &&
+    (value.additionalLabelTexts === undefined ||
+      (Array.isArray(value.additionalLabelTexts) &&
+        value.additionalLabelTexts.length <= 3 &&
+        value.additionalLabelTexts.every(
+          (text) => typeof text === "string" && text.length <= 12_000,
+        )))
   );
 }
 
@@ -3859,6 +3944,27 @@ async function runAnalysis(
     );
   }
 
+  // Several label photos from one scan are one product: read them together,
+  // the way the admin's analysis and the "add the missing photo" merge do, so
+  // a nutrition table photographed on its own counts towards the score.
+  const extraTexts = (requestBody.additionalLabelTexts ?? []).filter(
+    (text) => text.trim().length > 0 && text.trim() !== confirmedText,
+  );
+
+  if (extraTexts.length > 0) {
+    return runFoodLabelsAnalysis(
+      requestBody,
+      extraTexts.map((text) => ({
+        text,
+        ocrConfidence: requestBody.ocrConfidence,
+        labelType: "nutrition" as LabelType,
+      })),
+      env,
+      origin,
+      requestId,
+    );
+  }
+
   const category = await timedStage(requestId, "category_resolve", () => resolveContentCategory(
     confirmedText,
     requestBody.categoryOverride,
@@ -3977,6 +4083,33 @@ async function runMergeWithStored(
     storedTextCount: previousTexts.length,
   });
 
+  return runFoodLabelsAnalysis(
+    requestBody,
+    previousTexts.map((text) => ({
+      text,
+      // Already accepted once; its own confidence was not kept.
+      ocrConfidence: requestBody.ocrConfidence,
+      labelType: "unknown" as LabelType,
+    })),
+    env,
+    origin,
+    requestId,
+  );
+}
+
+/**
+ * The request's own text plus the product's other label texts, analysed as
+ * one product and answered the way /api/analysis/run answers.
+ */
+async function runFoodLabelsAnalysis(
+  requestBody: AnalysisRequestBody,
+  otherLabels: LabelText[],
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const confirmedText = requestBody.confirmedIngredientText.trim();
+
   const food = await analyzeFoodLabels(
     requestBody.barcode,
     [
@@ -3985,12 +4118,7 @@ async function runMergeWithStored(
         ocrConfidence: requestBody.ocrConfidence,
         labelType: requestBody.ocrLabelType ?? "unknown",
       },
-      ...previousTexts.map((text) => ({
-        text,
-        // Already accepted once; its own confidence was not kept.
-        ocrConfidence: requestBody.ocrConfidence,
-        labelType: "unknown" as LabelType,
-      })),
+      ...otherLabels,
     ],
     env,
     requestId,
@@ -4197,6 +4325,8 @@ interface LabelText {
   text: string;
   ocrConfidence: number;
   labelType: LabelType;
+  /** Which photo slot the text came from, when known (admin analysis). */
+  photoType?: string;
 }
 
 type FoodAnalysisOutcome =
@@ -4246,6 +4376,7 @@ async function analyzeFoodLabels(
       text: label.text,
       labelType: label.labelType,
       confidence: label.ocrConfidence,
+      photoType: label.photoType,
     })),
   );
 

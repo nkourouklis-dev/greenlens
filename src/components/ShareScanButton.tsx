@@ -99,13 +99,12 @@ export default function ShareScanButton({
     // otherwise iOS Safari blocks it as a non-user gesture.
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
-        // A separate `url` (rather than pasting the link into `text`) is
-        // what makes the share sheet render it as an actual tappable link
-        // instead of plain text the recipient has to select and open.
+        // The link goes inside `text`, not in a separate `url` field: many
+        // targets (WhatsApp, Messenger, some Android apps) send only the
+        // `url` when both are present and silently drop the scan summary.
         await navigator.share({
           title: productName?.trim() || "GreenLens",
-          text,
-          url: GREENLENS_URL,
+          text: `${text}\nΣάρωσε κι εσύ: ${GREENLENS_URL}`,
         });
         return;
       } catch (error) {

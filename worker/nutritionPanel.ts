@@ -684,13 +684,81 @@ export function inspectNutritionPanel(
     return unitlessRead;
   }
 
+  // Bare numbers sharing a line with their row name, or OCR text with the
+  // rows run together — the layouts the line-based readers above miss.
+  // Only for a table with no mass unit anywhere: a table that does print
+  // "g" and failed the checks was misread, and must not be rebuilt from the
+  // rows that happen to lack a unit.
+  const hasMassUnit = rawText
+    .split(/\r?\n/)
+    .some((line) => parseAmounts(line).amounts.some((a) => a.grams !== null));
+
+  const runs = hasMassUnit
+    ? { values: new Map<PanelKey, PanelValue>() }
+    : readUnitlessRuns(rawText);
+
+  const runsRead =
+    runs.values.size < 3
+      ? null
+      : buildPanel(runs.values, walked.energyKcal, isBeverage, alcoholKcal);
+
+  if (runsRead?.panel) {
+    return runsRead;
+  }
+
   return {
     ...read,
     tableDetected:
       read.tableDetected ||
       (reread?.tableDetected ?? false) ||
-      (unitlessRead?.tableDetected ?? false),
+      (unitlessRead?.tableDetected ?? false) ||
+      (runsRead?.tableDetected ?? false),
   };
+}
+
+/**
+ * A run of one to three bare numbers — "33.7 20.2" — is a row's columns
+ * (per 100 g, per portion, %RI), and the words just before it are the row
+ * name. Works on the text flattened to one line, so it does not matter
+ * whether OCR put the name and the numbers on the same line, on separate
+ * ones, or ran the whole table together. A number followed directly by a
+ * unit or a percent sign is not bare and never starts a run, so ingredient
+ * percentages are not picked up; the plausibility checks still apply.
+ */
+const BARE_RUN =
+  /(?<![\d.,\p{L}])((?:\d+|[OoΟο](?=\s?[.,]\s?\d))(?:[.,]\d+)?(?:\s+(?:\d+|[OoΟο](?=\s?[.,]\s?\d))(?:[.,]\d+)?){0,2})(?!\s*(?:%|[\d\p{L}]*(?:kj|kcal|mg|g|γρ|ml)\b))/giu;
+
+function readUnitlessRuns(rawText: string): {
+  values: Map<PanelKey, PanelValue>;
+} {
+  const values = new Map<PanelKey, PanelValue>();
+
+  const flat = rawText.replace(/\s+/g, " ");
+
+  let previousEnd = 0;
+  let match: RegExpExecArray | null;
+
+  BARE_RUN.lastIndex = 0;
+
+  while ((match = BARE_RUN.exec(flat)) !== null) {
+    const name = flat.slice(previousEnd, match.index).slice(-70);
+
+    previousEnd = match.index + match[0].length;
+
+    const key = keyForName(name);
+
+    if (key === null || values.has(key)) {
+      continue;
+    }
+
+    const first = parseDeclaredNumber(match[1].split(/\s+/)[0]);
+
+    if (first !== null) {
+      values.set(key, { grams: first.value, declared: `${first.value} g` });
+    }
+  }
+
+  return { values };
 }
 
 /**

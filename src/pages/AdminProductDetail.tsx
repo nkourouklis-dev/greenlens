@@ -28,6 +28,34 @@ const SEVERITY_OPTIONS = [
   "unknown",
 ];
 
+const OCR_SOURCE_LABELS: Record<string, string> = {
+  admin_analyze: "ανάλυση από admin",
+  user_scan: "σάρωση χρήστη",
+};
+
+const OCR_PHOTO_LABELS: Record<string, string> = {
+  front: "Μπροστινή ετικέτα",
+  ingredients: "Συστατικά",
+  nutrition: "Διατροφικός πίνακας",
+  vision: "Διατροφικός πίνακας (ανάγνωση με όραση)",
+};
+
+const OCR_LABEL_TYPE_LABELS: Record<string, string> = {
+  ingredients: "συστατικά",
+  nutrition: "διατροφικός πίνακας",
+  mixed: "συστατικά + πίνακας",
+  unknown: "άγνωστο",
+};
+
+/** D1 stores CURRENT_TIMESTAMP as UTC "YYYY-MM-DD HH:MM:SS". */
+function formatOcrTime(value: string): string {
+  const parsed = new Date(`${value.replace(" ", "T")}Z`);
+
+  return Number.isNaN(parsed.getTime())
+    ? value
+    : parsed.toLocaleString("el-GR");
+}
+
 interface EditableFinding {
   ingredientName: string;
   normalizedName: string;
@@ -308,6 +336,21 @@ function AdminProductDetailContent() {
         current ? { ...current, photos: loaded.photos } : loaded,
       );
     }
+  }
+
+  /**
+   * A label photo that has just been added is read and scored straight away,
+   * so the score already reflects it instead of waiting for a second button.
+   * Skipped for a verified row, where replacing the analysis is something a
+   * person should choose (handleAnalyze asks), and for the front shot, which
+   * carries no label text.
+   */
+  async function handlePhotoAdded(type: string) {
+    if (type === "front" || !product || product.status === "verified") {
+      return;
+    }
+
+    await handleAnalyze();
   }
 
   async function handleAnalyze() {
@@ -608,6 +651,7 @@ function AdminProductDetailContent() {
           barcode={barcode}
           photos={product.photos}
           onUploaded={refreshPhotos}
+          onAdded={(type) => void handlePhotoAdded(type)}
           onOpen={openPhoto}
         />
 
@@ -740,20 +784,27 @@ function AdminProductDetailContent() {
         {product.ocrTexts && product.ocrTexts.entries.length > 0 && (
           <details className="mt-3 rounded-2xl border border-line-subtle bg-surface/70 p-4">
             <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-ink-faint">
-              Ακατέργαστο OCR ({product.ocrTexts.entries.length})
+              Κείμενο που διάβασε το OCR ({product.ocrTexts.entries.length}) ·
+              μόνο για admin
             </summary>
 
             <p className="mt-2 text-xs text-ink-faint">
-              Από την τελευταία ανάλυση ({product.ocrTexts.source},{" "}
-              {product.ocrTexts.updatedAt}). Αν ο πίνακας ή τα συστατικά
-              λείπουν από εδώ, φταίει η ανάγνωση της φωτογραφίας.
+              Από την τελευταία ανάλυση (
+              {OCR_SOURCE_LABELS[product.ocrTexts.source] ??
+                product.ocrTexts.source}
+              , {formatOcrTime(product.ocrTexts.updatedAt)}). Ο χρήστης δεν το
+              βλέπει. Αν ο πίνακας ή τα συστατικά λείπουν από εδώ, φταίει η
+              ανάγνωση της φωτογραφίας.
             </p>
 
             {product.ocrTexts.entries.map((entry, index) => (
               <div key={index} className="mt-3">
                 <p className="text-xs font-semibold text-ink-muted">
-                  #{index + 1} · {entry.labelType} ·{" "}
-                  {Math.round(entry.confidence * 100)}%
+                  {(entry.photoType && OCR_PHOTO_LABELS[entry.photoType]) ||
+                    `Κείμενο ${index + 1}`}{" "}
+                  · αναγνωρίστηκε ως{" "}
+                  {OCR_LABEL_TYPE_LABELS[entry.labelType] ?? entry.labelType}{" "}
+                  · βεβαιότητα {Math.round(entry.confidence * 100)}%
                 </p>
 
                 <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-surface-muted p-2 text-xs leading-5 text-ink-muted">

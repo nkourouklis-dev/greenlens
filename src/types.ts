@@ -412,6 +412,12 @@ export interface ScanHistoryItem {
    */
   mergeWithStored?: boolean;
   /**
+   * OCR text of other label photos taken in the same scan — the nutrition
+   * table photographed apart from the ingredient list — scored together with
+   * the main text as one product.
+   */
+  extraLabelTexts?: string[];
+  /**
    * Set while the analysis runs in the background (see analysisJobs.ts), so
    * the History list and the Product page can say so and a reload can pick
    * the work back up. Cleared on success.

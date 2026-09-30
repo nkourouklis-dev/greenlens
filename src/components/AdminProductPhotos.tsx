@@ -55,6 +55,8 @@ export default function AdminProductPhotos(props: {
   barcode: string;
   photos: AdminProductPhoto[];
   onUploaded: () => void;
+  /** After a new photo landed (not a deletion), with the slot it filled. */
+  onAdded?: (type: PhotoType) => void;
   onOpen: (r2Key: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -124,6 +126,7 @@ export default function AdminProductPhotos(props: {
     try {
       await uploadAdminPhoto(props.barcode, slot, file);
       props.onUploaded();
+      props.onAdded?.(slot);
     } catch (caughtError) {
       setUploadError(
         caughtError instanceof Error

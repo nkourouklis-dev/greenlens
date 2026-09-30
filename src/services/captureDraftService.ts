@@ -63,6 +63,22 @@ export function updateOcrDraftCategoryOverride(
   saveOcrDraft(productId, { ...draft, categoryOverride });
 }
 
+const nutritionDraftKey = (productId: string) =>
+  `greenlens.nutrition-draft.v1.${productId}`;
+
+/** The OCR text of the nutrition table photographed in this scan. */
+export function saveNutritionDraft(productId: string, text: string): void {
+  sessionStorage.setItem(nutritionDraftKey(productId), text);
+}
+
+export function getNutritionDraft(productId: string): string | null {
+  return sessionStorage.getItem(nutritionDraftKey(productId));
+}
+
+export function clearNutritionDraft(productId: string): void {
+  sessionStorage.removeItem(nutritionDraftKey(productId));
+}
+
 export interface ConfirmedIngredientsDraft {
   text: string;
   confidence: number;

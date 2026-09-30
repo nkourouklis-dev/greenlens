@@ -29,6 +29,9 @@ interface PhotoCaptureProps {
   step?: number;
   stepCount?: number;
   barcode?: string;
+  /** Lets the person move on without this photo (an optional step). */
+  onSkip?: () => void;
+  skipLabel?: string;
 }
 
 // Lines-of-text glyph shown in the guide for the ingredients step when
@@ -92,6 +95,8 @@ export default function PhotoCapture({
   step,
   stepCount,
   barcode,
+  onSkip,
+  skipLabel = "Παράλειψη",
 }: PhotoCaptureProps) {
   const {
     containerRef,
@@ -354,6 +359,16 @@ export default function PhotoCapture({
             >
               <ImageIcon size={20} />
               Επιλογή φωτογραφίας από τη συσκευή
+            </button>
+          )}
+
+          {onSkip && (
+            <button
+              type="button"
+              onClick={onSkip}
+              className="h-11 w-full rounded-xl px-4 text-sm font-semibold text-ink-muted transition active:bg-surface"
+            >
+              {skipLabel}
             </button>
           )}
         </>

@@ -195,6 +195,9 @@ async function execute(id: string): Promise<AnalysisOutcome> {
       categoryOverride,
       productTitle: item.productName,
       ...(item.mergeWithStored ? { mergeWithStored: true } : {}),
+      ...(item.extraLabelTexts?.length
+        ? { additionalLabelTexts: item.extraLabelTexts }
+        : {}),
     });
 
     // A malformed or partial response that slipped past analysisClient's own

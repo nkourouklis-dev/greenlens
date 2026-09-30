@@ -57,6 +57,9 @@ type AnalysisRequest = Omit<
 
   /** Merge this photo's text with the product's stored analysis. */
   mergeWithStored?: boolean;
+
+  /** OCR text of the scan's other label photos (e.g. the nutrition table). */
+  additionalLabelTexts?: string[];
 };
 
 const defaultScore: ScoreBreakdown = {
@@ -170,6 +173,46 @@ export interface CachedProductLookup {
   photoUrl: string | null;
   /** The label text the stored score was computed from, if recorded. */
   sourceText: string;
+}
+
+/**
+ * Asks the catalogue to recompute a product's score from the label text it
+ * already holds — no photo, no model — and says whether anything changed.
+ * Null when the request could not be made or was refused; callers treat that
+ * as "nothing to show", never as an error.
+ */
+export async function requestProductRescore(
+  barcode: string,
+): Promise<boolean | null> {
+  if (apiConfigurationError || !barcode.trim()) {
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60_000);
+
+  try {
+    const response = await fetch(
+      `${apiBaseUrl}/api/product/rescore/${encodeURIComponent(barcode)}`,
+      { method: "POST", signal: controller.signal },
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const body: unknown = await response.json().catch(() => null);
+
+    return typeof body === "object" &&
+      body !== null &&
+      (body as { changed?: unknown }).changed === true
+      ? true
+      : false;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function checkCachedProduct(

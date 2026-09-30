@@ -11,6 +11,7 @@ const Scan = lazy(() => import("./pages/Scan"));
 const AddProduct = lazy(() => import("./pages/AddProduct"));
 const ProductPhoto = lazy(() => import("./pages/ProductPhoto"));
 const IngredientsPhoto = lazy(() => import("./pages/IngredientsPhoto"));
+const NutritionPhoto = lazy(() => import("./pages/NutritionPhoto"));
 const Product = lazy(() => import("./pages/Product"));
 const History = lazy(() => import("./pages/History"));
 const IngredientsReview = lazy(() => import("./pages/IngredientsReview"));
@@ -53,6 +54,7 @@ export default function App() {
               <Route path="/scan" element={<Scan />} />
               <Route path="/add-product" element={<AddProduct />} />
               <Route path="/ingredients-photo" element={<IngredientsPhoto />} />
+              <Route path="/nutrition-photo" element={<NutritionPhoto />} />
               <Route path="/ingredients-review/:id" element={<IngredientsReview />} />
               <Route path="/product-photo" element={<ProductPhoto />} />
               <Route path="/product/:id" element={<Product />} />

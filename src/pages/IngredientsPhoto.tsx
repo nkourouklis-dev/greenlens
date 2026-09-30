@@ -11,9 +11,11 @@ import {
 import {
   compressImageForStorage,
   prepareImageForOcr,
+  updateHistoryItem,
 } from "../services/historyService";
 import { extractOcr } from "../services/ocrClient";
 import { extractIngredientText } from "../../worker/ingredientText";
+import { inspectNutritionPanel } from "../../worker/nutritionPanel";
 
 export default function IngredientsPhoto() {
   const [searchParams] =
@@ -27,6 +29,9 @@ export default function IngredientsPhoto() {
   // Set when this photo is the missing half of an existing analysis.
   const mergeInto =
     searchParams.get("mergeInto") ?? undefined;
+
+  // What the photo is wanted for when it completes an existing analysis.
+  const wantsNutrition = searchParams.get("for") === "nutrition";
 
   const [error, setError] =
     useState("");
@@ -74,6 +79,25 @@ export default function IngredientsPhoto() {
         productId,
       );
 
+      // The photo that completes an existing analysis goes straight into it:
+      // there is no front photo left to take, and the review screen is built
+      // around an ingredient list this photo usually is not. The analysis
+      // page that follows is the confirmation — it shows the new score.
+      if (mergeInto) {
+        updateHistoryItem(mergeInto, {
+          ocrRawText: result.rawText,
+          userCorrectedText: result.rawText,
+          ocrConfidence: result.confidence,
+          ocrLabelType: result.labelType,
+          categoryOverride: undefined,
+          mergeWithStored: true,
+        });
+
+        navigate(`/product/${encodeURIComponent(mergeInto)}/analysis`);
+
+        return;
+      }
+
       const extracted = extractIngredientText(
         result.rawText,
         result.confidence,
@@ -87,8 +111,13 @@ export default function IngredientsPhoto() {
           // A merge photo is kept whole: it is usually the nutrition table,
           // and cutting it down to an ingredient list would drop exactly
           // the part it was taken for.
+          //
+          // Likewise a photo that carries the nutrition table beside the
+          // list: cutting it down to the list threw the table away, so a
+          // scan from the phone never counted it.
           rawText:
             !mergeInto &&
+            !inspectNutritionPanel(result.rawText).tableDetected &&
             extracted.ingredientText &&
             extracted.isValid
               ? extracted.ingredientText
@@ -114,13 +143,27 @@ export default function IngredientsPhoto() {
   return (
     <main>
       <PhotoCapture
-        step={1}
-        stepCount={2}
+        step={mergeInto ? undefined : 1}
+        stepCount={mergeInto ? undefined : 3}
         barcode={barcode || undefined}
-        title="Φωτογράφισε τα συστατικά"
-        description="Η λίστα «Ingredients / INCI», συνήθως στο πίσω μέρος της συσκευασίας."
-        hint="Χωράει όλη η λίστα στο πλαίσιο"
-        actionLabel="Ανάγνωση συστατικών"
+        title={
+          wantsNutrition
+            ? "Φωτογράφισε τον διατροφικό πίνακα"
+            : "Φωτογράφισε τα συστατικά"
+        }
+        description={
+          wantsNutrition
+            ? "Ο πίνακας «Διατροφικές πληροφορίες / Nutrition facts», συνήθως στο πλάι ή στο πίσω μέρος."
+            : "Η λίστα «Ingredients / INCI», συνήθως στο πίσω μέρος της συσκευασίας."
+        }
+        hint={
+          wantsNutrition
+            ? "Χωράει ολόκληρος ο πίνακας στο πλαίσιο"
+            : "Χωράει όλη η λίστα στο πλαίσιο"
+        }
+        actionLabel={
+          wantsNutrition ? "Ανάγνωση πίνακα" : "Ανάγνωση συστατικών"
+        }
         icon="list"
         onContinue={readIngredients}
         isSaving={isSaving}

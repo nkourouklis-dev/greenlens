@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import PhotoCapture from "../components/PhotoCapture";
-import { clearCaptureDraft, clearOcrDraft, getIngredientsDraft, getOcrDraft } from "../services/captureDraftService";
+import { clearCaptureDraft, clearNutritionDraft, clearOcrDraft, getIngredientsDraft, getNutritionDraft, getOcrDraft } from "../services/captureDraftService";
 import { compressImageForStorage, saveHistoryItem } from "../services/historyService";
 import { identifyProduct } from "../services/identifyClient";
 import { startAnalysis } from "../services/analysisJobs";
@@ -25,6 +25,7 @@ export default function ProductPhoto() {
     setIsSaving(true);
     const scanId = productId ?? crypto.randomUUID();
     const ocrDraft = productId ? getOcrDraft(productId) : null;
+    const nutritionText = productId ? getNutritionDraft(productId) : null;
     try {
             const productPhoto =
         await compressImageForStorage(file);
@@ -41,13 +42,16 @@ export default function ProductPhoto() {
         ? composeDisplayTitle(identity.brand, identity.productName)
         : "";
 
-      const wasSaved = saveHistoryItem({ id: scanId, barcode, status: "unknown", scannedAt: new Date().toISOString(), ingredientsPhoto, productPhoto,productName: displayName || undefined,ocrRawText: ocrDraft?.result.rawText, ocrConfidence: ocrDraft?.result.confidence, categoryOverride: ocrDraft?.categoryOverride });
+      const wasSaved = saveHistoryItem({ id: scanId, barcode, status: "unknown", scannedAt: new Date().toISOString(), ingredientsPhoto, productPhoto,productName: displayName || undefined,ocrRawText: ocrDraft?.result.rawText, ocrConfidence: ocrDraft?.result.confidence, categoryOverride: ocrDraft?.categoryOverride, ...(nutritionText ? { extraLabelTexts: [nutritionText] } : {}) });
       if (!wasSaved) {
         setError("Ο χώρος αποθήκευσης της συσκευής δεν επαρκεί. Δοκίμασε μικρότερη φωτογραφία.");
         return;
       }
       clearCaptureDraft(barcode);
-      if (productId) clearOcrDraft(productId);
+      if (productId) {
+        clearOcrDraft(productId);
+        clearNutritionDraft(productId);
+      }
       // The analysis takes 15–30 s. It runs in the background: the product
       // page shows it loading and fills in when it is done, and offers
       // "scan another" for anyone who would rather not wait.
@@ -63,8 +67,8 @@ export default function ProductPhoto() {
   return (
     <main>
       <PhotoCapture
-        step={2}
-        stepCount={2}
+        step={3}
+        stepCount={3}
         barcode={barcode || undefined}
         title="Φωτογράφισε την μπροστινή όψη"
         description="Να φαίνονται η μάρκα και το όνομα του προϊόντος, για την αναγνώρισή του."

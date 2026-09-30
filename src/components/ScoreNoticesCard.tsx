@@ -26,12 +26,29 @@ function hasMissingSourceNotice(
 export default function ScoreNoticesCard(props: {
   notices: ScoreNotice[] | undefined;
   onAddPhoto?: () => void;
+  /** Recompute from the text already on file; shown beside the photo button. */
+  onRescore?: () => void;
+  isRescoring?: boolean;
 }) {
   const notices = props.notices ?? [];
 
   if (notices.length === 0) {
     return null;
   }
+
+  // Which half is missing decides what the button asks for — "add the
+  // missing photo" does not say which side of the pack to turn over to.
+  const photoLabel = notices.some((notice) =>
+    ["nutrition_not_considered", "partial_no_nutrition"].includes(notice.code),
+  )
+    ? "τον διατροφικό πίνακα"
+    : notices.some((notice) =>
+          ["ingredients_not_considered", "partial_no_ingredients"].includes(
+            notice.code,
+          ),
+        )
+      ? "τα συστατικά"
+      : null;
 
   const offerPhoto =
     props.onAddPhoto !== undefined && hasMissingSourceNotice(notices);
@@ -64,7 +81,24 @@ export default function ScoreNoticesCard(props: {
           className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-amber-300/60 px-3 py-2 text-center text-sm font-bold leading-5 text-amber-50"
         >
           <Camera size={16} className="shrink-0" />
-          <span>Πρόσθεσε φωτογραφία που λείπει</span>
+          <span>
+            {photoLabel
+              ? `Φωτογράφισε ${photoLabel}`
+              : "Πρόσθεσε φωτογραφία που λείπει"}
+          </span>
+        </button>
+      )}
+
+      {offerPhoto && props.onRescore && (
+        <button
+          type="button"
+          onClick={props.onRescore}
+          disabled={props.isRescoring}
+          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-center text-sm font-semibold leading-5 text-amber-100 disabled:opacity-60"
+        >
+          {props.isRescoring
+            ? "Επανυπολογισμός..."
+            : "Επανυπολογισμός βαθμολογίας"}
         </button>
       )}
     </section>

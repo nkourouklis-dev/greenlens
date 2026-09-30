@@ -35,7 +35,12 @@ export interface AdminProductDetail {
   photos: AdminProductPhoto[];
   /** The raw OCR behind the newest analysis, when one was recorded. */
   ocrTexts?: {
-    entries: Array<{ text: string; labelType: string; confidence: number }>;
+    entries: Array<{
+      text: string;
+      labelType: string;
+      confidence: number;
+      photoType?: string;
+    }>;
     source: string;
     updatedAt: string;
   } | null;

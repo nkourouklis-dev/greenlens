@@ -10,6 +10,7 @@ import {
 } from "react-router-dom";
 import { getHistoryItem } from "../services/historyService";
 import { refreshFromCatalogue } from "../services/catalogueRefresh";
+import { requestProductRescore } from "../services/analysisClient";
 import {
   deriveAllergenNotice,
   deriveExecutiveSummary,
@@ -48,6 +49,15 @@ const sectionTitleByCategory: Record<ContentCategory, string> = {
   unknown: "",
 };
 
+// Products already recomputed on opening in this session, so a table the
+// reader still cannot use is not retried every time the page is revisited.
+const autoRescored = new Set<string>();
+
+const NUTRITION_UNUSED_CODES = new Set([
+  "nutrition_not_considered",
+  "partial_no_nutrition",
+]);
+
 export default function Product() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -57,6 +67,7 @@ export default function Product() {
 
   // Bumped when the saved copy was replaced by the catalogue's newer one.
   const [, setRefreshed] = useState(0);
+  const [isRescoring, setIsRescoring] = useState(false);
 
   const item = getHistoryItem(id);
 
@@ -86,6 +97,54 @@ export default function Product() {
       cancelled = true;
     };
   }, [id, savedBarcode, savedRunning]);
+
+  // A score that says the nutrition table went unused is recomputed from the
+  // text on file, once per visit, without being asked: a reader fix or a
+  // photo added since may well have changed the answer, and the user should
+  // not have to know a button exists. Quiet when nothing changes.
+  const needsNutritionRescore =
+    savedItem?.analysis?.score?.notices?.some((notice) =>
+      NUTRITION_UNUSED_CODES.has(notice.code),
+    ) === true;
+
+  useEffect(() => {
+    if (
+      !savedBarcode ||
+      savedRunning ||
+      !needsNutritionRescore ||
+      autoRescored.has(savedBarcode)
+    ) {
+      return;
+    }
+
+    autoRescored.add(savedBarcode);
+    void rescoreNow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, savedBarcode, savedRunning, needsNutritionRescore]);
+
+  async function rescoreNow() {
+    const current = getHistoryItem(id);
+
+    if (!current?.barcode || isRescoring) {
+      return;
+    }
+
+    setIsRescoring(true);
+
+    try {
+      if ((await requestProductRescore(current.barcode)) === true) {
+        const latest = getHistoryItem(id);
+
+        if (latest) {
+          await refreshFromCatalogue(latest);
+        }
+
+        setRefreshed((count) => count + 1);
+      }
+    } finally {
+      setIsRescoring(false);
+    }
+  }
 
   if (!item) {
     return (
@@ -249,9 +308,11 @@ export default function Product() {
                 `/ingredients-photo?barcode=${encodeURIComponent(item.barcode)}`,
               )
             }
+            onRescore={() => void rescoreNow()}
+            isRescoring={isRescoring}
             onAddMissingPhoto={() =>
               navigate(
-                `/ingredients-photo?barcode=${encodeURIComponent(item.barcode)}&mergeInto=${encodeURIComponent(id)}`,
+                `/ingredients-photo?barcode=${encodeURIComponent(item.barcode)}&mergeInto=${encodeURIComponent(id)}${needsNutritionRescore ? "&for=nutrition" : ""}`,
               )
             }
           />
@@ -337,6 +398,8 @@ function Result(props: {
   score: ScoreBreakdown;
   onRetakePhoto: () => void;
   onAddMissingPhoto: () => void;
+  onRescore: () => void;
+  isRescoring: boolean;
 }) {
   const category = readContentCategory(props.record);
 
@@ -522,6 +585,8 @@ function Result(props: {
       <ScoreNoticesCard
         notices={props.score.notices}
         onAddPhoto={props.onAddMissingPhoto}
+        onRescore={props.onRescore}
+        isRescoring={props.isRescoring}
       />
 
       <AllergenNoticeCard notice={allergenNotice} />
