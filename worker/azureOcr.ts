@@ -3,6 +3,106 @@ import type { OcrResponse } from "./ocr";
 const AZURE_API_VERSION = "2024-02-01";
 const AZURE_TIMEOUT_MS = 25_000;
 
+export type AzureOcrErrorCode =
+  | "ocr_not_configured"
+  | "ocr_credentials_rejected"
+  | "ocr_access_blocked"
+  | "ocr_endpoint_not_found"
+  | "ocr_rate_limited"
+  | "ocr_unavailable"
+  | "ocr_timeout"
+  | "ocr_network"
+  | "ocr_no_text"
+  | "ocr_failed";
+
+// The Greek text is what the person (and the admin) sees; the code is what
+// the frontend and `wrangler tail` key on. A 401 from Azure is also what a
+// disabled subscription returns, so that wording names both causes instead
+// of sending someone to re-check secrets that were fine.
+const AZURE_OCR_ERRORS: Record<
+  AzureOcrErrorCode,
+  { message: string; status: number }
+> = {
+  ocr_not_configured: {
+    message:
+      "Η υπηρεσία OCR δεν έχει ρυθμιστεί σωστά στον διακομιστή (AZURE_VISION).",
+    status: 503,
+  },
+  ocr_credentials_rejected: {
+    message:
+      "Το Azure OCR απέρριψε το key ή το endpoint. Ελέγξτε τα secrets και ότι η συνδρομή Azure είναι ενεργή.",
+    status: 502,
+  },
+  ocr_access_blocked: {
+    message:
+      "Το Azure OCR αρνήθηκε την πρόσβαση (όριο χρήσης ή απενεργοποιημένη συνδρομή). Ελέγξτε το Azure Portal.",
+    status: 502,
+  },
+  ocr_endpoint_not_found: {
+    message:
+      "Το Azure OCR endpoint δεν βρέθηκε. Ελέγξτε το Azure resource και την περιοχή.",
+    status: 502,
+  },
+  ocr_rate_limited: {
+    message:
+      "Το Azure OCR έχει προσωρινά υπερβεί το όριο αιτημάτων. Δοκιμάστε ξανά σε λίγο.",
+    status: 429,
+  },
+  ocr_unavailable: {
+    message: "Το Azure OCR δεν είναι προσωρινά διαθέσιμο.",
+    status: 503,
+  },
+  ocr_timeout: {
+    message: "Το Azure OCR δεν απάντησε εγκαίρως.",
+    status: 504,
+  },
+  ocr_network: {
+    message: "Δεν ήταν δυνατή η σύνδεση με το Azure OCR.",
+    status: 502,
+  },
+  ocr_no_text: {
+    message:
+      "Το Azure OCR δεν εντόπισε αναγνώσιμο κείμενο στην ετικέτα.",
+    status: 422,
+  },
+  ocr_failed: {
+    message: "Το Azure OCR δεν μπόρεσε να επεξεργαστεί την εικόνα.",
+    status: 502,
+  },
+};
+
+export class AzureOcrError extends Error {
+  readonly code: AzureOcrErrorCode;
+  readonly httpStatus: number;
+
+  constructor(code: AzureOcrErrorCode) {
+    super(AZURE_OCR_ERRORS[code].message);
+    this.name = "AzureOcrError";
+    this.code = code;
+    this.httpStatus = AZURE_OCR_ERRORS[code].status;
+  }
+}
+
+export function azureOcrErrorForStatus(status: number): AzureOcrErrorCode {
+  if (status === 401) return "ocr_credentials_rejected";
+  if (status === 403) return "ocr_access_blocked";
+  if (status === 404) return "ocr_endpoint_not_found";
+  if (status === 429) return "ocr_rate_limited";
+  if (status >= 500) return "ocr_unavailable";
+
+  return "ocr_failed";
+}
+
+/** Throws before any request is made, so an empty key is never sent to Azure. */
+export function assertAzureOcrConfigured(
+  endpoint: string | undefined,
+  apiKey: string | undefined,
+): void {
+  if (!endpoint?.trim() || !apiKey?.trim()) {
+    throw new AzureOcrError("ocr_not_configured");
+  }
+}
+
 interface AzureImageAnalysisResponse {
   readResult?: {
     blocks?: Array<{
@@ -27,20 +127,10 @@ export async function extractWithAzureOcr(
   // mix Greek copy with Latin/English INCI names.
   language?: string,
 ): Promise<OcrResponse> {
+  assertAzureOcrConfigured(endpoint, apiKey);
+
   const normalizedEndpoint =
     endpoint.trim().replace(/\/+$/, "");
-
-  if (!normalizedEndpoint) {
-    throw new Error(
-      "Δεν έχει ρυθμιστεί το Azure Vision endpoint.",
-    );
-  }
-
-  if (!apiKey.trim()) {
-    throw new Error(
-      "Δεν έχει ρυθμιστεί το Azure Vision key.",
-    );
-  }
 
   const normalizedLanguage = language?.trim();
 
@@ -79,14 +169,10 @@ export async function extractWithAzureOcr(
       caughtError instanceof DOMException &&
       caughtError.name === "AbortError"
     ) {
-      throw new Error(
-        "Το Azure OCR δεν απάντησε εγκαίρως.",
-      );
+      throw new AzureOcrError("ocr_timeout");
     }
 
-    throw new Error(
-      "Δεν ήταν δυνατή η σύνδεση με το Azure OCR.",
-    );
+    throw new AzureOcrError("ocr_network");
   } finally {
     clearTimeout(timeout);
   }
@@ -95,11 +181,9 @@ export async function extractWithAzureOcr(
     await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(
-      readAzureError(
-        response.status,
-        responseBody,
-      ),
+    throw readAzureError(
+      response.status,
+      responseBody,
     );
   }
 
@@ -113,9 +197,7 @@ export async function extractWithAzureOcr(
     .trim();
 
   if (!rawText) {
-    throw new Error(
-      "Το Azure OCR δεν εντόπισε αναγνώσιμο κείμενο στην ετικέτα.",
-    );
+    throw new AzureOcrError("ocr_no_text");
   }
 
   return {
@@ -309,8 +391,9 @@ function normalizeWhitespace(
 function readAzureError(
   status: number,
   value: unknown,
-): string {
+): AzureOcrError {
   let providerMessage = "";
+  let providerCode = "";
 
   if (isRecord(value)) {
     if (
@@ -320,6 +403,10 @@ function readAzureError(
     ) {
       providerMessage =
         value.error.message;
+
+      if (typeof value.error.code === "string") {
+        providerCode = value.error.code;
+      }
     } else if (
       typeof value.message === "string"
     ) {
@@ -328,32 +415,20 @@ function readAzureError(
     }
   }
 
+  const ocrError = new AzureOcrError(
+    azureOcrErrorForStatus(status),
+  );
+
+  // Status, Azure's own error code and message — never the key or endpoint.
   console.error("azure_ocr_http_error", {
     status,
+    ocrCode: ocrError.code,
+    providerCode: providerCode.slice(0, 80),
     providerMessage:
       providerMessage.slice(0, 200),
   });
 
-  if (
-    status === 401 ||
-    status === 403
-  ) {
-    return "Το Azure OCR απέρριψε τα credentials. Ελέγξτε το endpoint και το key.";
-  }
-
-  if (status === 404) {
-    return "Το Azure OCR endpoint δεν βρέθηκε. Ελέγξτε το Azure resource και την περιοχή.";
-  }
-
-  if (status === 429) {
-    return "Το Azure OCR έχει προσωρινά υπερβεί το όριο αιτημάτων. Δοκιμάστε ξανά.";
-  }
-
-  if (status >= 500) {
-    return "Το Azure OCR δεν είναι προσωρινά διαθέσιμο.";
-  }
-
-  return "Το Azure OCR δεν μπόρεσε να επεξεργαστεί την εικόνα.";
+  return ocrError;
 }
 
 function isRecord(

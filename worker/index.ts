@@ -5,6 +5,7 @@ import {
   type OcrResponse,
 } from "./ocr";
 import {
+  AzureOcrError,
   extractWithAzureOcr,
 } from "./azureOcr";
 import {
@@ -2861,11 +2862,14 @@ async function runAdminAnalyzeProduct(
     !azureEnv.AZURE_VISION_ENDPOINT ||
     !azureEnv.AZURE_VISION_KEY
   ) {
+    const notConfigured = new AzureOcrError("ocr_not_configured");
+
     return error(
-      "Η υπηρεσία OCR δεν έχει ρυθμιστεί σωστά στον διακομιστή (AZURE_VISION).",
-      503,
+      notConfigured.message,
+      notConfigured.httpStatus,
       origin,
       requestId,
+      notConfigured.code,
     );
   }
 
@@ -2951,9 +2955,14 @@ async function runAdminAnalyzeProduct(
         caughtError instanceof Error
           ? caughtError.message
           : "Το OCR απέτυχε.",
-        502,
+        caughtError instanceof AzureOcrError
+          ? caughtError.httpStatus
+          : 502,
         origin,
         requestId,
+        caughtError instanceof AzureOcrError
+          ? caughtError.code
+          : undefined,
       );
     }
   }
@@ -3317,11 +3326,14 @@ async function runOcr(
 
     // Distinct wording from the frontend configuration message, so the two
     // can never be confused again while debugging.
+    const notConfigured = new AzureOcrError("ocr_not_configured");
+
     return error(
-      "Η υπηρεσία OCR δεν έχει ρυθμιστεί σωστά στον διακομιστή (AZURE_VISION).",
-      503,
+      notConfigured.message,
+      notConfigured.httpStatus,
       origin,
       requestId,
+      notConfigured.code,
     );
   }
 
@@ -3427,6 +3439,10 @@ async function runOcr(
         requestId,
         provider:
           "azure-ai-vision",
+        code:
+          caughtError instanceof AzureOcrError
+            ? caughtError.code
+            : undefined,
         name:
           caughtError instanceof Error
             ? caughtError.name
@@ -3439,6 +3455,16 @@ async function runOcr(
               ).slice(0, 300),
       },
     );
+
+    if (caughtError instanceof AzureOcrError) {
+      return error(
+        caughtError.message,
+        caughtError.httpStatus,
+        origin,
+        requestId,
+        caughtError.code,
+      );
+    }
 
     return error(
       caughtError instanceof Error
@@ -3504,10 +3530,12 @@ function error(
   status: number,
   origin: string | null,
   requestId?: string,
+  code?: string,
 ): Response {
   return new Response(
     JSON.stringify({
       error: message,
+      ...(code ? { code } : {}),
     }),
     {
       status,
