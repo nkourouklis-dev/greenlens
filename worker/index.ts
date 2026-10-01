@@ -191,6 +191,7 @@ import {
 import {
   buildChemicalInsights,
   buildChemicalExecutiveSummary,
+  refineChemicalPositives,
   type ChemicalInsight,
 } from "./chemicalInsights";
 
@@ -5671,6 +5672,7 @@ async function runChemicalAnalysisPath(
     "- Ignore brand names and manufacturer/legal/country-of-origin text — these are not chemical substances.",
     "- Flag concentrations that exceed a well-established safety/regulatory limit as attention or high_attention, citing the limit in referenceLimit and explanation when you do.",
     "- When you are not certain a concentration is unsafe, use severity info or unknown rather than attention — do not guess at toxicity.",
+    "- Every entry in positives and attentionItems must name a specific substance with its printed value, e.g. \"Χαμηλό νάτριο (9 mg/L)\". Never write the kind of label (e.g. \"Χημική ανάλυση\") as a positive. Leave positives empty if nothing specific stands out.",
     "- Do not calculate a score.",
     "- Do not claim unconditional product safety.",
     "- Do not provide medical advice.",
@@ -5710,9 +5712,13 @@ async function runChemicalAnalysisPath(
     const modelText = extractModelText(modelOutput);
     const cleanedText = modelText ? stripCodeFences(modelText) : null;
 
-    const result =
+    const parsedResult =
       parseChemicalAnalysis(modelOutput) ??
       (cleanedText ? parseChemicalAnalysis(cleanedText) : null);
+
+    const result = parsedResult
+      ? refineChemicalPositives(parsedResult)
+      : null;
 
     console.log("chemical_analysis_model_completed", {
       requestId,

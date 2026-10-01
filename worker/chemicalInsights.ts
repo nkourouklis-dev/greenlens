@@ -124,6 +124,75 @@ export function buildChemicalExecutiveSummary(
   };
 }
 
+// Thresholds for the positives we can state without the model: sodium at or
+// below 20 mg/L is the level natural mineral waters use for "suitable for a
+// low-sodium diet"; nitrate at or below 10 mg/L is well under the 50 mg/L
+// drinking-water limit.
+const LOW_SODIUM_MG_L = 20;
+const LOW_NITRATE_MG_L = 10;
+
+const MEASURED_UNIT = /^\s*([<≤]?)\s*(\d+(?:[.,]\d+)?)\s*(?:mg\s*\/\s*l|ppm)\s*$/i;
+
+function milligramsPerLitre(finding: ChemicalFinding): number | null {
+  const match = finding.concentration?.match(MEASURED_UNIT);
+
+  return match ? Number(match[2].replace(",", ".")) : null;
+}
+
+function describesSubstance(finding: ChemicalFinding, pattern: RegExp): boolean {
+  return pattern.test(`${finding.normalizedName} ${finding.substance}`);
+}
+
+/**
+ * A positive that only names the kind of label ("Χημική ανάλυση") says
+ * nothing about the water, so it is dropped rather than shown.
+ */
+function isGenericPositive(value: string): boolean {
+  return /^(η\s+)?χημικ[ήη]\s+(ανάλυση|σύσταση)\.?$/i.test(value.trim());
+}
+
+/**
+ * Positives backed by the printed values, followed by whatever specific
+ * positives the model gave. The model's own wording is kept only when it is
+ * not a bare category name.
+ */
+export function refineChemicalPositives(
+  analysis: WorkerChemicalResult,
+): WorkerChemicalResult {
+  const derived: string[] = [];
+
+  for (const finding of analysis.chemicalFindings) {
+    const value = milligramsPerLitre(finding);
+
+    if (value === null) {
+      continue;
+    }
+
+    const printed = finding.concentration?.trim() ?? "";
+
+    if (
+      describesSubstance(finding, /sodium|νάτρι|νατρι/i) &&
+      value <= LOW_SODIUM_MG_L
+    ) {
+      derived.push(`Χαμηλό νάτριο (${printed})`);
+    }
+
+    if (
+      describesSubstance(finding, /nitrate|νιτρικ/i) &&
+      value <= LOW_NITRATE_MG_L
+    ) {
+      derived.push(`Χαμηλά νιτρικά (${printed})`);
+    }
+  }
+
+  const positives = dedupe([
+    ...derived,
+    ...analysis.positives.filter((positive) => !isGenericPositive(positive)),
+  ]);
+
+  return { ...analysis, positives };
+}
+
 function dedupe(values: string[]): string[] {
   return Array.from(new Set(values));
 }
