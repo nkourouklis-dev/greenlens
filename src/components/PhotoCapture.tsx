@@ -308,6 +308,19 @@ export default function PhotoCapture({
               Από συλλογή
             </button>
           </div>
+
+          {/* The error text can tell the person to skip, so the way out has
+              to be reachable from the preview too, not only before a shot. */}
+          {onSkip && (
+            <button
+              type="button"
+              onClick={onSkip}
+              disabled={isSaving}
+              className="h-11 w-full rounded-xl px-4 text-sm font-semibold text-ink-muted transition active:bg-surface disabled:opacity-60"
+            >
+              {skipLabel}
+            </button>
+          )}
         </>
       ) : (
         <>
