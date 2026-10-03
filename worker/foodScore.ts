@@ -96,11 +96,28 @@ export const INTRINSIC_SUGAR_WEIGHT = 0.5;
 /** From this share of the sugars on, the note says "mostly from fruit". */
 export const MOSTLY_INTRINSIC_SHARE = 0.5;
 
-export const MOSTLY_INTRINSIC_SUGAR_NOTICE: ScoreNotice = {
-  code: "sugar_mostly_intrinsic",
-  title: "Η ζάχαρη προέρχεται κυρίως από φρούτα",
-  body: `Τα σάκχαρα προέρχονται από φρούτα (π.χ. χουρμάδες) και όχι από προστιθέμενη ζάχαρη ή σιρόπια. Στη βαθμολογία μας προσμετρούνται στο ${Math.round(INTRINSIC_SUGAR_WEIGHT * 100)}% σε σχέση με την προστιθέμενη ζάχαρη. Το επίσημο Nutri-Score δεν αλλάζει.`,
-};
+/** Sugar points from which the quantity itself is called out (> 10 g/100 g). */
+const LARGE_SUGAR_POINTS = 4;
+
+export function mostlyIntrinsicSugarNotice(
+  sugarsGrams: number | null,
+  largeQuantity: boolean,
+): ScoreNotice {
+  const grams =
+    sugarsGrams === null
+      ? ""
+      : ` (${String(Math.round(sugarsGrams * 10) / 10).replace(".", ",")} g ανά 100 g)`;
+
+  return {
+    code: "sugar_mostly_intrinsic",
+    title: "Τα σάκχαρα προέρχονται κυρίως από φρούτα",
+    body: `Τα σάκχαρα προέρχονται από φρούτα (π.χ. χουρμάδες) και όχι από προστιθέμενα σάκχαρα ή σιρόπια. Στη βαθμολογία μας προσμετρούνται στο ${Math.round(INTRINSIC_SUGAR_WEIGHT * 100)}%. Το επίσημο Nutri-Score δεν αλλάζει.${
+      largeQuantity
+        ? ` Προσοχή: η ποσότητα σακχάρων είναι μεγάλη${grams}.`
+        : ""
+    }`,
+  };
+}
 
 const NUTRIENT_NAMES: Record<MissingNutrient | UncreditedNutrient, string> = {
   energy: "ενέργεια",
@@ -457,7 +474,13 @@ export function scoreFood(input: FoodScoreInput): FoodWorkerScore {
     evaluation?.sugarOrigin?.determined &&
     evaluation.sugarOrigin.intrinsicShare >= MOSTLY_INTRINSIC_SHARE
   ) {
-    extraNotices.push(MOSTLY_INTRINSIC_SUGAR_NOTICE);
+    extraNotices.push(
+      mostlyIntrinsicSugarNotice(
+        input.nutrition?.facts.sugars ?? null,
+        (evaluation.components.find((c) => c.key === "sugars")?.points ?? 0) >=
+          LARGE_SUGAR_POINTS,
+      ),
+    );
   }
 
   let afterCap = blended;

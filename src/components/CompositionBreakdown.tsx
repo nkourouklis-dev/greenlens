@@ -275,7 +275,7 @@ export default function CompositionBreakdown(props: {
                       Περίπου{" "}
                       {Math.round(evaluation.sugarOrigin.intrinsicShare * 100)}
                       % των σακχάρων προέρχεται από φρούτα, όχι από
-                      προστιθέμενη ζάχαρη. Στη βαθμολογία μας μετράνε στο{" "}
+                      προστιθέμενα σάκχαρα. Στη βαθμολογία μας μετράνε στο{" "}
                       {Math.round((evaluation.intrinsicSugarWeight ?? 0.5) * 100)}
                       %· οι επίσημοι πόντοι δεν αλλάζουν.
                     </p>

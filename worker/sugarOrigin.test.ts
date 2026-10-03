@@ -417,7 +417,8 @@ test("the blended score is built from our grade, and says so in a notice", () =>
     score.notices?.some(
       (notice) =>
         notice.code === "sugar_mostly_intrinsic" &&
-        notice.title === "Η ζάχαρη προέρχεται κυρίως από φρούτα",
+        notice.title === "Τα σάκχαρα προέρχονται κυρίως από φρούτα" &&
+        notice.body.includes("Προσοχή: η ποσότητα σακχάρων είναι μεγάλη (29,5 g ανά 100 g)"),
     ),
   );
 });
