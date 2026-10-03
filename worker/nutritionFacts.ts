@@ -347,7 +347,11 @@ export function detectNutriScoreCategory(
 /** Everything the Nutri-Score needs, from evidence plus what the ingredients say. */
 export function nutriScoreInputFor(
   evidence: NutritionEvidence,
-  options?: { nonNutritiveSweetener?: boolean | null },
+  options?: {
+    nonNutritiveSweetener?: boolean | null;
+    /** Read off the ingredient list; used only when the evidence has none. */
+    fruitVegLegumesPct?: number | null;
+  },
 ): NutriScoreInput {
   const { facts } = evidence;
 
@@ -361,7 +365,8 @@ export function nutriScoreInputFor(
     carbohydrate: facts.carbohydrate,
     fibre: facts.fibre,
     protein: facts.protein,
-    fruitVegLegumesPct: facts.fruitVegLegumesPct,
+    fruitVegLegumesPct:
+      facts.fruitVegLegumesPct ?? options?.fruitVegLegumesPct ?? null,
     nonNutritiveSweetener: options?.nonNutritiveSweetener ?? null,
   };
 }

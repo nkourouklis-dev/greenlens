@@ -121,9 +121,25 @@ export interface NutriScoreComponent {
 export type NutritionSource = "label" | "openfoodfacts";
 
 /** What the nutrition half of a food's score was graded from. */
+export type SugarOrigin =
+  | {
+      determined: true;
+      basis: "no_free_sugar_listed" | "estimated_from_declared_shares";
+      intrinsicGrams: number;
+      freeGrams: number;
+      intrinsicShare: number;
+    }
+  | { determined: false; reason: string };
+
 export interface NutritionEvaluation {
   source: NutritionSource;
+  /** The official Nutri-Score class. */
   grade: "A" | "B" | "C" | "D" | "E";
+  /** The class our score was built from (differs when sugars are mostly fruit's). */
+  scoredGrade?: "A" | "B" | "C" | "D" | "E";
+  sugarOrigin?: SugarOrigin;
+  intrinsicSugarWeight?: number;
+  fruitVegLegumesFrom?: "openfoodfacts" | "ingredient_list" | null;
   points: number | null;
   category: string;
   components: NutriScoreComponent[];
@@ -138,6 +154,7 @@ export interface ScoreComposition {
     score: number;
     weight: number;
     grade: "A" | "B" | "C" | "D" | "E";
+    scoredGrade?: "A" | "B" | "C" | "D" | "E";
     source: NutritionSource;
   } | null;
   ingredients: { score: number; weight: number } | null;

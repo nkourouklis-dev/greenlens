@@ -135,6 +135,7 @@ import {
   sweetenerFrom,
   addedSugarFrom,
 } from "./foodScore";
+import { ingredientListFromLabel } from "./ingredientShares";
 import type { NutritionFacts } from "./nutritionFacts";
 import {
   hasIdentity,
@@ -5026,6 +5027,7 @@ async function analyzeIngredientsCore(
             nutrition: nutritionEvidence,
             nonNutritiveSweetener: sweetenerFrom(ruleMatches),
             addedSugar: addedSugarFrom(ruleMatches),
+            ingredientText: scoredText,
             alcohol,
             notices,
           });
@@ -5431,6 +5433,7 @@ async function analyzeNutritionCore(
       ocrConfidence,
       analysis: result,
       extractionConfidence: extraction.confidence,
+      ingredientText: ingredientListFromLabel(modelInputText),
     });
 
     const nutritionInsights = buildNutritionInsights(

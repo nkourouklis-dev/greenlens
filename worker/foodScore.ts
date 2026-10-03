@@ -41,6 +41,12 @@ import {
 import type { NutritionPanel } from "./nutritionPanel";
 import type { RuleMatch } from "./ingredientRules";
 import type { WorkerNutritionResult } from "./nutritionAnalysis";
+import {
+  declaredFruitVegLegumes,
+  parseIngredientList,
+  splitSugarOrigin,
+  type SugarOrigin,
+} from "./ingredientShares";
 import { scoreNutrition } from "./nutritionScoring";
 import {
   bandForScore,
@@ -78,6 +84,24 @@ export const PARTIAL_NO_INGREDIENTS_NOTICE: ScoreNotice = {
   body: "Η βαθμολογία βασίζεται μόνο στη διατροφική σύσταση. Πρόσθεσε φωτογραφία των συστατικών για πλήρη αξιολόγηση.",
 };
 
+/**
+ * How much of a sugar that comes from whole or dried fruit counts towards OUR
+ * score, relative to a free (added) sugar at 1. The WHO's limit is on free
+ * sugars; the sugars inside whole fruit are not part of it, so they are
+ * discounted — but not forgiven: a date bar is still energy-dense and the
+ * sugar is concentrated, and the official sugar points are untouched.
+ */
+export const INTRINSIC_SUGAR_WEIGHT = 0.5;
+
+/** From this share of the sugars on, the note says "mostly from fruit". */
+export const MOSTLY_INTRINSIC_SHARE = 0.5;
+
+export const MOSTLY_INTRINSIC_SUGAR_NOTICE: ScoreNotice = {
+  code: "sugar_mostly_intrinsic",
+  title: "Η ζάχαρη προέρχεται κυρίως από φρούτα",
+  body: `Τα σάκχαρα προέρχονται από φρούτα (π.χ. χουρμάδες) και όχι από προστιθέμενη ζάχαρη ή σιρόπια. Στη βαθμολογία μας προσμετρούνται στο ${Math.round(INTRINSIC_SUGAR_WEIGHT * 100)}% σε σχέση με την προστιθέμενη ζάχαρη. Το επίσημο Nutri-Score δεν αλλάζει.`,
+};
+
 const NUTRIENT_NAMES: Record<MissingNutrient | UncreditedNutrient, string> = {
   energy: "ενέργεια",
   saturates: "κορεσμένα λιπαρά",
@@ -103,7 +127,20 @@ function incompleteNutritionNotice(missing: MissingNutrient[]): ScoreNotice {
 /** What the nutrition half looked at, kept on the result for the UI. */
 export interface NutritionEvaluation {
   source: NutritionSource;
+  /** The official Nutri-Score class, exactly as the algorithm gives it. */
   grade: NutriGrade;
+  /**
+   * The class our score is built from. Equals `grade` unless the sugars were
+   * shown to be mostly intrinsic to fruit, when they are weighted down
+   * (INTRINSIC_SUGAR_WEIGHT). The official grade and points are not changed.
+   */
+  scoredGrade: NutriGrade;
+  /** Where the sugars come from, when the ingredient list settles it. */
+  sugarOrigin?: SugarOrigin;
+  /** The weight the intrinsic sugars carried in `scoredGrade` (free sugar = 1). */
+  intrinsicSugarWeight?: number;
+  /** Where the fruit/veg/legumes share came from, when it is known. */
+  fruitVegLegumesFrom?: "openfoodfacts" | "ingredient_list" | null;
   /** The Nutri-Score value itself; null for water. */
   points: number | null;
   category: string;
@@ -124,7 +161,10 @@ export interface ScoreComposition {
   nutrition: {
     score: number;
     weight: number;
+    /** The official class. */
     grade: NutriGrade;
+    /** The class the score was built from; differs when sugars are mostly fruit's. */
+    scoredGrade: NutriGrade;
     source: NutritionSource;
   } | null;
   ingredients: { score: number; weight: number } | null;
@@ -151,6 +191,8 @@ export interface FoodScoreInput {
   nonNutritiveSweetener: boolean | null;
   /** See NutritionEvaluation.addedSugar; absent means unchecked. */
   addedSugar?: boolean | null;
+  /** The label's ingredient list: the fruit share and the sugars' origin. */
+  ingredientText?: string | null;
   alcohol: AlcoholInfo | null;
   notices: ScoreNotice[];
 }
@@ -178,17 +220,46 @@ export function addedSugarFrom(ruleMatches: RuleMatch[]): boolean | null {
 export function evaluateNutrition(
   evidence: NutritionEvidence | null,
   nonNutritiveSweetener: boolean | null,
+  ingredientText?: string | null,
 ): { result: NutriScoreResult | null; evaluation: NutritionEvaluation | null } {
   if (evidence === null) {
     return { result: null, evaluation: null };
   }
 
-  const result = computeNutriScore(
-    nutriScoreInputFor(evidence, { nonNutritiveSweetener }),
-  );
+  const listed = ingredientText ? parseIngredientList(ingredientText) : null;
+
+  // The share of fruit, vegetables and pulses: Open Food Facts' estimate when
+  // the evidence has one, else what the list declares. Never invented.
+  const declared = listed ? declaredFruitVegLegumes(listed) : null;
+
+  const input = nutriScoreInputFor(evidence, {
+    nonNutritiveSweetener,
+    fruitVegLegumesPct: declared?.percent ?? null,
+  });
+
+  const result = computeNutriScore(input);
 
   if (!result.computable) {
     return { result, evaluation: null };
+  }
+
+  // Our own score only: the same algorithm with the fruit-intrinsic share of
+  // the sugars discounted. `result` (the official one) is left as it is.
+  const sugarOrigin = splitSugarOrigin(listed, evidence.facts.sugars);
+
+  let scoredGrade = result.grade;
+
+  if (sugarOrigin.determined && sugarOrigin.intrinsicGrams > 0) {
+    const adjusted = computeNutriScore({
+      ...input,
+      sugars:
+        sugarOrigin.freeGrams +
+        INTRINSIC_SUGAR_WEIGHT * sugarOrigin.intrinsicGrams,
+    });
+
+    if (adjusted.computable) {
+      scoredGrade = adjusted.grade;
+    }
   }
 
   return {
@@ -196,6 +267,15 @@ export function evaluateNutrition(
     evaluation: {
       source: evidence.source,
       grade: result.grade,
+      scoredGrade,
+      sugarOrigin,
+      intrinsicSugarWeight: INTRINSIC_SUGAR_WEIGHT,
+      fruitVegLegumesFrom:
+        evidence.facts.fruitVegLegumesPct !== null
+          ? "openfoodfacts"
+          : declared
+            ? "ingredient_list"
+            : null,
       points: result.points,
       category: result.category,
       components: result.components,
@@ -319,6 +399,7 @@ export function scoreFood(input: FoodScoreInput): FoodWorkerScore {
   const { result, evaluation } = evaluateNutrition(
     input.nutrition,
     input.nonNutritiveSweetener,
+    input.ingredientText,
   );
 
   const ingredientScore =
@@ -344,7 +425,7 @@ export function scoreFood(input: FoodScoreInput): FoodWorkerScore {
   }
 
   const nutritionScore = evaluation
-    ? nutriScoreTo100(evaluation.grade)
+    ? nutriScoreTo100(evaluation.scoredGrade)
     : null;
 
   let blended: number;
@@ -370,6 +451,13 @@ export function scoreFood(input: FoodScoreInput): FoodWorkerScore {
     );
   } else if (ingredientScore === null) {
     extraNotices.push(PARTIAL_NO_INGREDIENTS_NOTICE);
+  }
+
+  if (
+    evaluation?.sugarOrigin?.determined &&
+    evaluation.sugarOrigin.intrinsicShare >= MOSTLY_INTRINSIC_SHARE
+  ) {
+    extraNotices.push(MOSTLY_INTRINSIC_SUGAR_NOTICE);
   }
 
   let afterCap = blended;
@@ -427,6 +515,7 @@ export function scoreFood(input: FoodScoreInput): FoodWorkerScore {
               score: nutritionScore,
               weight: ingredientScore ? NUTRITION_WEIGHT : 1,
               grade: evaluation.grade,
+              scoredGrade: evaluation.scoredGrade,
               source: evaluation.source,
             }
           : null,
@@ -464,6 +553,8 @@ export function scoreNutritionOnly(params: {
   ocrConfidence: number;
   analysis: WorkerNutritionResult;
   extractionConfidence: number;
+  /** An ingredient list found on the same photo, if any (not scored itself). */
+  ingredientText?: string | null;
 }): WorkerScore {
   const graded = evaluateNutrition(params.evidence, null).evaluation !== null;
 
@@ -472,6 +563,7 @@ export function scoreNutritionOnly(params: {
       ingredientScore: null,
       nutrition: params.evidence,
       nonNutritiveSweetener: null,
+      ingredientText: params.ingredientText ?? null,
       alcohol: params.alcohol,
       notices: params.notices,
     });

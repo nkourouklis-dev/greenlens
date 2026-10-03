@@ -51,6 +51,7 @@ import {
   addedSugarFrom,
   type FoodWorkerScore,
 } from "./foodScore";
+import { ingredientListFromLabel } from "./ingredientShares";
 import {
   parseNutritionEvidence,
   type NutritionEvidence,
@@ -309,7 +310,8 @@ export async function rescoreFoodIngredients(
           ingredientScore,
           nutrition: evidence,
           nonNutritiveSweetener: sweetenerFrom(ruleMatches),
-            addedSugar: addedSugarFrom(ruleMatches),
+          addedSugar: addedSugarFrom(ruleMatches),
+          ingredientText: cleanedText,
           alcohol: context.alcohol,
           notices: graded ? [] : context.notices,
         });
@@ -343,6 +345,7 @@ export function rescoreFoodNutrition(
     ocrConfidence: HUMAN_VERIFIED_CONFIDENCE,
     analysis: result,
     extractionConfidence: HUMAN_VERIFIED_CONFIDENCE,
+    ingredientText: ingredientListFromLabel(sourceText),
   });
 
   return {
