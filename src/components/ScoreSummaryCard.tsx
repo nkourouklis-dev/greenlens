@@ -70,7 +70,8 @@ export function subScoresFor(
 
   const bars: SubScore[] = [];
 
-  if (composition.nutrition) {
+  // A plain water has no nutrition to speak of; its grade is not a bar.
+  if (composition.nutrition && score.nutritionEvaluation?.category !== "water") {
     bars.push({ label: "Θρεπτικά", value: composition.nutrition.score });
   }
 

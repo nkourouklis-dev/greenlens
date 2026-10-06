@@ -48,6 +48,7 @@ import {
   type SugarOrigin,
 } from "./ingredientShares";
 import { scoreNutrition } from "./nutritionScoring";
+import { isPlainWaterLabel, PLAIN_WATER_EVIDENCE } from "./plainWater";
 import {
   bandForScore,
   insufficientDataScore,
@@ -413,8 +414,15 @@ export function scoreForProductType(
 }
 
 export function scoreFood(input: FoodScoreInput): FoodWorkerScore {
+  // A plain water has no table to find; without a record saying so, it is
+  // graded as the water it is instead of capped as an unfinished food.
+  const nutritionEvidence =
+    input.nutrition === null && isPlainWaterLabel(input.ingredientText)
+      ? PLAIN_WATER_EVIDENCE
+      : input.nutrition;
+
   const { result, evaluation } = evaluateNutrition(
-    input.nutrition,
+    nutritionEvidence,
     input.nonNutritiveSweetener,
     input.ingredientText,
   );
