@@ -5967,41 +5967,66 @@ async function runIdentify(
       }
     }
 
-    // Fall back to AI if barcode lookup didn't find result
-    if (!identity) {
+    // The front photo is read when the barcode lookup found nothing, and
+    // also when it found a product but no brand (Open Food Facts often
+    // leaves the brand inside the name, which drops it as a field). In that
+    // case only the brand is taken from the photo; a failed read there must
+    // never fail an identification that already succeeded.
+    if (!identity || !identity.brand) {
       const imageDataUri =
         await fileToDataUri(image);
 
       const startedAt = Date.now();
 
-      const modelOutput = await timedStage(requestId, "model_identify", () => env.AI.run(
-        visionModel,
-        {
-          task: "query",
-          image: imageDataUri,
-          question: identifyPrompt,
-          reasoning: false,
-          temperature: 0,
-          max_tokens: 256,
-          stream: false,
-        },
-      ));
+      let visionIdentity: ProductIdentity | null = null;
 
-      await recordUsage(env.DB, "workers_ai_vision");
+      try {
+        const modelOutput = await timedStage(requestId, "model_identify", () => env.AI.run(
+          visionModel,
+          {
+            task: "query",
+            image: imageDataUri,
+            question: identifyPrompt,
+            reasoning: false,
+            temperature: 0,
+            max_tokens: 256,
+            stream: false,
+          },
+        ));
 
-      identity =
-        parseProductIdentity(modelOutput);
+        await recordUsage(env.DB, "workers_ai_vision");
+
+        visionIdentity =
+          parseProductIdentity(modelOutput);
+      } catch (caughtError) {
+        if (!identity) {
+          throw caughtError;
+        }
+
+        console.error("identify_brand_read_failed", {
+          requestId,
+          message:
+            caughtError instanceof Error
+              ? caughtError.message
+              : String(caughtError).slice(0, 300),
+        });
+      }
 
       console.log("identify_completed", {
         requestId,
         endpoint: "/api/product/identify",
         model: visionModel,
         durationMs: Date.now() - startedAt,
-        found: identity !== null,
-        hasName: Boolean(identity?.productName),
-        hasBrand: Boolean(identity?.brand),
+        found: visionIdentity !== null,
+        brandOnly: identity !== null,
+        hasName: Boolean(visionIdentity?.productName),
+        hasBrand: Boolean(visionIdentity?.brand),
         status: "success",
       });
+
+      identity = identity
+        ? { ...identity, brand: visionIdentity?.brand ?? identity.brand }
+        : visionIdentity;
     }
 
     if (!identity) {
