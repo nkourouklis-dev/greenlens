@@ -11,6 +11,7 @@ import AdminGate from "../components/AdminGate";
 import AdminPhotoThumbnail from "../components/AdminPhotoThumbnail";
 import { AssistantReportPanel } from "../components/AdminAssistantPanel";
 import {
+  backfillProductBrands,
   getAdminUsage,
   listAdminProducts,
   type AdminProductListItem,
@@ -53,6 +54,8 @@ function AdminProductsContent() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [brandStatus, setBrandStatus] = useState("");
+  const [isFillingBrands, setIsFillingBrands] = useState(false);
 
   const [items, setItems] = useState<AdminProductListItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -132,6 +135,40 @@ function AdminProductsContent() {
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
+  // Batches of ten until none are left: each product is one paid vision call
+  // on its stored front photo, so it stops at the first error or refusal.
+  async function fillBrands() {
+    setIsFillingBrands(true);
+    setBrandStatus("Διαβάζω επωνυμίες…");
+
+    let found = 0;
+
+    try {
+      for (;;) {
+        const batch = await backfillProductBrands();
+
+        found += batch.found;
+
+        setBrandStatus(
+          `${found} επωνυμίες βρέθηκαν, απομένουν ${batch.remaining}…`,
+        );
+
+        if (batch.remaining === 0 || batch.processed === 0) {
+          setBrandStatus(`Τέλος: ${found} επωνυμίες συμπληρώθηκαν.`);
+          break;
+        }
+      }
+    } catch (caughtError) {
+      setBrandStatus(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Η συμπλήρωση επωνυμιών απέτυχε.",
+      );
+    } finally {
+      setIsFillingBrands(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-canvas px-4 pb-28 pt-5 text-ink">
       <section className="mx-auto max-w-2xl">
@@ -146,6 +183,23 @@ function AdminProductsContent() {
             <Camera size={16} />
             Λήψη
           </button>
+        </div>
+
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void fillBrands()}
+            disabled={isFillingBrands}
+            className="h-10 shrink-0 rounded-xl border border-slate-700 px-3 text-sm font-semibold disabled:opacity-50"
+          >
+            Συμπλήρωση επωνυμιών
+          </button>
+
+          {brandStatus && (
+            <p role="status" className="text-xs text-slate-400">
+              {brandStatus}
+            </p>
+          )}
         </div>
 
         {usage && usage.level !== "ok" && (

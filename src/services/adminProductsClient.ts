@@ -612,6 +612,22 @@ export async function updateAdminProductName(
   return body.product;
 }
 
+export interface BrandBackfillBatch {
+  processed: number;
+  found: number;
+  unreadable: number;
+  remaining: number;
+}
+
+/** Reads the brand off the stored front photos, one small batch at a time. */
+export async function backfillProductBrands(): Promise<BrandBackfillBatch> {
+  return adminRequest<BrandBackfillBatch>(
+    "/api/admin/products/backfill-brands?limit=10",
+    { method: "POST" },
+    "Η συμπλήρωση επωνυμιών απέτυχε.",
+  );
+}
+
 export async function listProductVersions(
   barcode: string,
 ): Promise<AdminProductVersion[]> {
