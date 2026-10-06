@@ -313,6 +313,7 @@ export default function Scan() {
         ...(cached.productName
           ? { productName: cached.productName }
           : {}),
+        ...(cached.brand ? { productBrand: cached.brand } : {}),
         ...(cached.photoUrl ? { productPhoto: cached.photoUrl } : {}),
         ...(cached.sourceText
           ? {

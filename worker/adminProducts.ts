@@ -530,6 +530,41 @@ export async function fillMissingProductName(
 }
 
 /**
+ * Records a brand read from the front photo on a row that has none. Like
+ * the name, it only ever fills a NULL: a brand already on the row never
+ * gives way to a fresh read of a photo. Never throws.
+ */
+export async function fillMissingProductBrand(
+  db: D1Like,
+  barcode: string,
+  brand: string,
+): Promise<void> {
+  const normalized = brand.trim().replace(/\s+/g, " ").slice(0, 60);
+
+  if (!normalized) {
+    return;
+  }
+
+  try {
+    await db
+      .prepare(
+        `UPDATE products
+         SET brand = ?
+         WHERE barcode = ? AND (brand IS NULL OR brand = '')`,
+      )
+      .bind(normalized, barcode)
+      .run();
+  } catch (caughtError) {
+    console.error("product_brand_fill_failed", {
+      message:
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError).slice(0, 300),
+    });
+  }
+}
+
+/**
  * Deletes the product row and every one of its photos, both the D1 rows
  * and the underlying R2 objects — a hard delete, not a soft/deferred one.
  * Tradeoff considered: deferring R2 cleanup (e.g. leaving orphaned objects

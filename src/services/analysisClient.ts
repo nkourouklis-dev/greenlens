@@ -169,6 +169,8 @@ export interface CachedProductLookup {
   result: AnalysisApiResult;
   /** From the products row, not the analysis envelope. */
   productName: string | null;
+  /** The brand on its own, when the catalogue has read it. */
+  brand: string | null;
   /** Public URL of a photo someone already took for this barcode. */
   photoUrl: string | null;
   /** The label text the stored score was computed from, if recorded. */
@@ -278,6 +280,10 @@ export async function checkCachedProduct(
     result: parsed,
     productName:
       typeof meta.productName === "string" ? meta.productName : null,
+    brand:
+      typeof meta.brand === "string" && meta.brand.trim()
+        ? meta.brand.trim()
+        : null,
     photoUrl: typeof meta.photoUrl === "string" ? meta.photoUrl : null,
     sourceText:
       typeof envelope.sourceText === "string" ? envelope.sourceText : "",

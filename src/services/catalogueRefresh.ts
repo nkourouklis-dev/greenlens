@@ -40,7 +40,8 @@ export async function refreshFromCatalogue(
     current?.score !== fresh.score ||
     current?.band !== fresh.band ||
     current?.scoringVersion !== fresh.scoringVersion ||
-    (item.productName ?? "") !== (cached.productName ?? item.productName ?? "");
+    (item.productName ?? "") !== (cached.productName ?? item.productName ?? "") ||
+    (cached.brand !== null && (item.productBrand ?? "") !== cached.brand);
 
   if (!changed) {
     return null;
@@ -58,6 +59,7 @@ export async function refreshFromCatalogue(
   const updated = updateHistoryItem(item.id, {
     analysis,
     ...(cached.productName ? { productName: cached.productName } : {}),
+    ...(cached.brand ? { productBrand: cached.brand } : {}),
   });
 
   return updated ? (getHistoryItem(item.id) ?? null) : null;

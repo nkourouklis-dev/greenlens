@@ -74,6 +74,7 @@ import {
   normalizeProductName,
   updateProductName,
   fillMissingProductName,
+  fillMissingProductBrand,
   applyAssistantDraftCopy,
   PRODUCT_NAME_MAX_LENGTH,
   type AdminProductListItem,
@@ -320,6 +321,7 @@ type JsonBody =
         | null;
     }
   | { changed: boolean }
+  | { processed: number; found: number; unreadable: number; remaining: number }
   | { versions: ProductVersionSummary[] }
   | { version: ProductVersion }
   | { assistant: AssistantReply }
@@ -690,6 +692,7 @@ async function runProductCacheLookup(
       found: true,
       result: cached.analysisResult as JsonBody,
       productName: cached.productName,
+      brand: cached.brand,
       photoUrl,
     },
     200,
@@ -1563,6 +1566,13 @@ async function runAdminRequest(
     url.pathname === "/api/admin/usage"
   ) {
     return runAdminUsage(env, origin, requestId);
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/api/admin/products/backfill-brands"
+  ) {
+    return runAdminBackfillBrands(url, env, origin, requestId);
   }
 
   const rescoreBarcode = matchAdminProductRescorePath(
@@ -2488,6 +2498,122 @@ async function evidenceForRecompute(
  * categories now score deterministically from text, so both can simply be
  * recomputed.
  */
+/**
+ * POST /api/admin/products/backfill-brands?limit=N — reads the brand off the
+ * stored front photo of products that have none (everything scanned before
+ * the brand column existed). One vision call per product, so it works in
+ * small batches and honours the spending budget; call it again until
+ * `remaining` is 0. A product whose photo shows no readable brand is marked
+ * with an empty string so it is not paid for again.
+ */
+async function runAdminBackfillBrands(
+  url: URL,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const overBudget = await refuseIfOverBudget(env, origin, requestId);
+
+  if (overBudget) {
+    return overBudget;
+  }
+
+  const requested = Number(url.searchParams.get("limit"));
+
+  const limit =
+    Number.isFinite(requested) && requested >= 1
+      ? Math.min(Math.floor(requested), 15)
+      : 10;
+
+  const missingBrand = `FROM products p
+       WHERE p.brand IS NULL
+         AND EXISTS (
+           SELECT 1 FROM product_photos f
+           WHERE f.barcode = p.barcode AND f.photo_type = 'front'
+         )`;
+
+  const pending = await env.DB
+    .prepare(`SELECT p.barcode AS barcode ${missingBrand} ORDER BY p.barcode LIMIT ?`)
+    .bind(limit)
+    .all<{ barcode: string }>();
+
+  let found = 0;
+  let unreadable = 0;
+
+  for (const { barcode } of pending.results) {
+    const photos = await listProductPhotos(env.DB, barcode);
+
+    const front = photos.find((photo) => photo.photoType === "front");
+
+    const object = front ? await env.PHOTOS.get(front.r2Key) : null;
+
+    let brand: string | null = null;
+
+    if (object) {
+      try {
+        const file = new File(
+          [await object.arrayBuffer()],
+          "front.jpg",
+          { type: object.httpMetadata?.contentType || "image/jpeg" },
+        );
+
+        const modelOutput = await env.AI.run(visionModel, {
+          task: "query",
+          image: await fileToDataUri(file),
+          question: identifyPrompt,
+          reasoning: false,
+          temperature: 0,
+          max_tokens: 256,
+          stream: false,
+        });
+
+        await recordUsage(env.DB, "workers_ai_vision");
+
+        brand = parseProductIdentity(modelOutput)?.brand ?? null;
+      } catch (caughtError) {
+        console.error("brand_backfill_read_failed", {
+          requestId,
+          barcode,
+          message:
+            caughtError instanceof Error
+              ? caughtError.message
+              : String(caughtError).slice(0, 300),
+        });
+
+        // A failed call is retried by the next batch, not marked as done.
+        continue;
+      }
+    }
+
+    if (brand) {
+      await fillMissingProductBrand(env.DB, barcode, brand);
+      found += 1;
+    } else {
+      await env.DB
+        .prepare("UPDATE products SET brand = '' WHERE barcode = ? AND brand IS NULL")
+        .bind(barcode)
+        .run();
+      unreadable += 1;
+    }
+  }
+
+  const remaining = await env.DB
+    .prepare(`SELECT COUNT(*) AS count ${missingBrand}`)
+    .first<{ count: number }>();
+
+  return json(
+    {
+      processed: pending.results.length,
+      found,
+      unreadable,
+      remaining: remaining?.count ?? 0,
+    },
+    200,
+    origin,
+    requestId,
+  );
+}
+
 async function runAdminRescoreProduct(
   barcode: string,
   env: Env,
@@ -6045,6 +6171,10 @@ async function runIdentify(
         barcode,
         composeDisplayTitle(identity.brand, identity.productName),
       );
+
+      if (identity.brand) {
+        await fillMissingProductBrand(env.DB, barcode, identity.brand);
+      }
     }
 
     return json(

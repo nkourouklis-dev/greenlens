@@ -37,6 +37,8 @@ export type ProductCacheSource =
 export interface CachedProduct {
   barcode: string;
   productName: string | null;
+  /** The brand on its own; null until identify or the backfill read it. */
+  brand: string | null;
   category: ProductCacheCategory;
   // The exact JSON response envelope the ingredients/nutrition/chemical
   // endpoints already return today — deliberately untyped here (the same
@@ -66,6 +68,7 @@ export interface D1Like {
 interface ProductRow {
   barcode: string;
   product_name: string | null;
+  brand: string | null;
   category: string;
   analysis_result: string;
   status: string;
@@ -115,7 +118,7 @@ export async function lookupCachedProduct(
   try {
     const row = await db
       .prepare(
-        "SELECT barcode, product_name, category, analysis_result, status, source, scan_count FROM products WHERE barcode = ?",
+        "SELECT barcode, product_name, brand, category, analysis_result, status, source, scan_count FROM products WHERE barcode = ?",
       )
       .bind(barcode)
       .first<ProductRow>();
@@ -143,6 +146,7 @@ export async function lookupCachedProduct(
     return {
       barcode: row.barcode,
       productName: row.product_name,
+      brand: row.brand ? row.brand : null,
       category: row.category,
       analysisResult,
       status: row.status,
