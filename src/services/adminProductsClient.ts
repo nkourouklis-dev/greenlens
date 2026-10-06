@@ -628,6 +628,25 @@ export async function backfillProductBrands(): Promise<BrandBackfillBatch> {
   );
 }
 
+export interface RescoreBatch {
+  processed: number;
+  rescored: number;
+  skipped: string[];
+  remaining: number;
+  nextAfter: string | null;
+}
+
+/** Rescores a few non-verified products and refreshes their copy. */
+export async function rescoreUnverifiedBatch(
+  after: string,
+): Promise<RescoreBatch> {
+  return adminRequest<RescoreBatch>(
+    `/api/admin/products/rescore-unverified?limit=3&after=${encodeURIComponent(after)}`,
+    { method: "POST" },
+    "Ο μαζικός επανυπολογισμός απέτυχε.",
+  );
+}
+
 export async function listProductVersions(
   barcode: string,
 ): Promise<AdminProductVersion[]> {

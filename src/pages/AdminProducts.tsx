@@ -14,6 +14,7 @@ import {
   backfillProductBrands,
   getAdminUsage,
   listAdminProducts,
+  rescoreUnverifiedBatch,
   type AdminProductListItem,
   type AdminUsage,
 } from "../services/adminProductsClient";
@@ -56,6 +57,8 @@ function AdminProductsContent() {
   const [page, setPage] = useState(1);
   const [brandStatus, setBrandStatus] = useState("");
   const [isFillingBrands, setIsFillingBrands] = useState(false);
+  const [rescoreStatus, setRescoreStatus] = useState("");
+  const [isRescoringAll, setIsRescoringAll] = useState(false);
 
   const [items, setItems] = useState<AdminProductListItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -169,6 +172,52 @@ function AdminProductsContent() {
     }
   }
 
+  // Every product that is not verified: rescored from its stored text, with
+  // the suggested copy applied to its fields (hand-written copy is left
+  // alone). Statuses are kept; a refusal or error stops the loop.
+  async function rescoreAllUnverified() {
+    setIsRescoringAll(true);
+    setRescoreStatus("Επανυπολογισμός…");
+
+    let rescored = 0;
+    const skipped: string[] = [];
+    let after = "";
+
+    try {
+      for (;;) {
+        const batch = await rescoreUnverifiedBatch(after);
+
+        rescored += batch.rescored;
+        skipped.push(...batch.skipped);
+
+        setRescoreStatus(
+          `${rescored} έγιναν, απομένουν ${batch.remaining}…`,
+        );
+
+        if (batch.nextAfter === null) {
+          break;
+        }
+
+        after = batch.nextAfter;
+      }
+
+      setRescoreStatus(
+        `Τέλος: ${rescored} επανυπολογίστηκαν` +
+          (skipped.length > 0
+            ? `, ${skipped.length} δεν άλλαξαν (${skipped.join(", ")})`
+            : "."),
+      );
+    } catch (caughtError) {
+      setRescoreStatus(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Ο μαζικός επανυπολογισμός απέτυχε.",
+      );
+    } finally {
+      setIsRescoringAll(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-canvas px-4 pb-28 pt-5 text-ink">
       <section className="mx-auto max-w-2xl">
@@ -198,6 +247,23 @@ function AdminProductsContent() {
           {brandStatus && (
             <p role="status" className="text-xs text-slate-400">
               {brandStatus}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void rescoreAllUnverified()}
+            disabled={isRescoringAll}
+            className="h-10 shrink-0 rounded-xl border border-slate-700 px-3 text-sm font-semibold disabled:opacity-50"
+          >
+            Επανυπολογισμός μη verified
+          </button>
+
+          {rescoreStatus && (
+            <p role="status" className="text-xs text-slate-400">
+              {rescoreStatus}
             </p>
           )}
         </div>

@@ -322,6 +322,13 @@ type JsonBody =
     }
   | { changed: boolean }
   | { processed: number; found: number; unreadable: number; remaining: number }
+  | {
+      processed: number;
+      rescored: number;
+      skipped: string[];
+      remaining: number;
+      nextAfter: string | null;
+    }
   | { versions: ProductVersionSummary[] }
   | { version: ProductVersion }
   | { assistant: AssistantReply }
@@ -1570,6 +1577,13 @@ async function runAdminRequest(
 
   if (
     request.method === "POST" &&
+    url.pathname === "/api/admin/products/rescore-unverified"
+  ) {
+    return runAdminRescoreUnverified(url, env, origin, requestId);
+  }
+
+  if (
+    request.method === "POST" &&
     url.pathname === "/api/admin/products/backfill-brands"
   ) {
     return runAdminBackfillBrands(url, env, origin, requestId);
@@ -2607,6 +2621,102 @@ async function runAdminBackfillBrands(
       found,
       unreadable,
       remaining: remaining?.count ?? 0,
+    },
+    200,
+    origin,
+    requestId,
+  );
+}
+
+/**
+ * POST /api/admin/products/rescore-unverified?after=<barcode>&limit=N — the
+ * admin rescore (which also regenerates and applies the catalogue copy,
+ * except where a person wrote it) for every product that is not verified,
+ * a few per call, in barcode order. `nextAfter` is the cursor for the next
+ * call; null means the end was reached.
+ *
+ * Each product keeps the status it had: the single-product rescore saves
+ * through saveVerifiedProduct, which would otherwise sign off every row
+ * this touches as verified.
+ */
+async function runAdminRescoreUnverified(
+  url: URL,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const overBudget = await refuseIfOverBudget(env, origin, requestId);
+
+  if (overBudget) {
+    return overBudget;
+  }
+
+  const requested = Number(url.searchParams.get("limit"));
+
+  const limit =
+    Number.isFinite(requested) && requested >= 1
+      ? Math.min(Math.floor(requested), 5)
+      : 3;
+
+  const after = url.searchParams.get("after") ?? "";
+
+  const batch = await env.DB
+    .prepare(
+      `SELECT barcode, status FROM products
+       WHERE status != 'verified'
+         AND analysis_result IS NOT NULL
+         AND barcode > ?
+       ORDER BY barcode
+       LIMIT ?`,
+    )
+    .bind(after, limit)
+    .all<{ barcode: string; status: string }>();
+
+  let rescored = 0;
+  const skipped: string[] = [];
+
+  for (const { barcode, status } of batch.results) {
+    const response = await runAdminRescoreProduct(
+      barcode,
+      env,
+      origin,
+      requestId,
+    );
+
+    if (!response.ok) {
+      // Nothing was saved: the stored row stays as it was.
+      skipped.push(barcode);
+      continue;
+    }
+
+    await env.DB
+      .prepare("UPDATE products SET status = ? WHERE barcode = ?")
+      .bind(status, barcode)
+      .run();
+
+    rescored += 1;
+  }
+
+  const last = batch.results[batch.results.length - 1]?.barcode ?? null;
+
+  const remaining = last
+    ? await env.DB
+        .prepare(
+          `SELECT COUNT(*) AS count FROM products
+           WHERE status != 'verified' AND analysis_result IS NOT NULL
+             AND barcode > ?`,
+        )
+        .bind(last)
+        .first<{ count: number }>()
+    : null;
+
+  return json(
+    {
+      processed: batch.results.length,
+      rescored,
+      skipped,
+      remaining: remaining?.count ?? 0,
+      nextAfter: last && (remaining?.count ?? 0) > 0 ? last : null,
     },
     200,
     origin,
