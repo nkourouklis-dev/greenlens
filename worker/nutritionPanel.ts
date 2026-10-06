@@ -249,9 +249,21 @@ function readPanelValues(rawText: string): {
       continue;
     }
 
-    const printedName = isNameFragment(head)
-      ? head
-      : pending.slice(-MAX_NAME_LINES).join(" ");
+    // "Λιπαρά, εκ των οποίων 80g": the comma is the table's own sub-row
+    // wording, not an ingredient list, so it must not disqualify the name.
+    const tableHead = head.replace(/,\s*(?=εκ των|of which)/iu, " ");
+
+    // The name is the last line before the numbers; the line above it is
+    // only borrowed when that one says nothing ("εκ των οποίων" + "σάκχαρα").
+    // Joined first, an unrelated line above ("... Ολικά λιπαρά 80% ...")
+    // outranked the row's own name ("Υδατάνθρακες,").
+    const lastPending = pending[pending.length - 1] ?? "";
+
+    const printedName = isNameFragment(tableHead)
+      ? tableHead
+      : keyForName(lastPending) !== null
+        ? lastPending
+        : pending.slice(-MAX_NAME_LINES).join(" ");
 
     // When OCR interleaves the ingredient list with the table, the row name
     // arrives glued to the end of a line of ingredients: "cake (egg, wheat
