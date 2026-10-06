@@ -408,6 +408,8 @@ export interface ScanHistoryItem {
   scannedAt: string;
   productId?: string;
   productName?: string;
+  /** The brand as identified, kept apart so the page can show it under the name. */
+  productBrand?: string;
   ingredientsPhoto?: string;
   productPhoto?: string;
   ocrRawText?: string;

@@ -42,7 +42,7 @@ export default function ProductPhoto() {
         ? composeDisplayTitle(identity.brand, identity.productName)
         : "";
 
-      const wasSaved = saveHistoryItem({ id: scanId, barcode, status: "unknown", scannedAt: new Date().toISOString(), ingredientsPhoto, productPhoto,productName: displayName || undefined,ocrRawText: ocrDraft?.result.rawText, ocrConfidence: ocrDraft?.result.confidence, categoryOverride: ocrDraft?.categoryOverride, ...(nutritionText ? { extraLabelTexts: [nutritionText] } : {}) });
+      const wasSaved = saveHistoryItem({ id: scanId, barcode, status: "unknown", scannedAt: new Date().toISOString(), ingredientsPhoto, productPhoto,productName: displayName || undefined,...(identity?.brand?.trim() ? { productBrand: identity.brand.trim() } : {}),ocrRawText: ocrDraft?.result.rawText, ocrConfidence: ocrDraft?.result.confidence, categoryOverride: ocrDraft?.categoryOverride, ...(nutritionText ? { extraLabelTexts: [nutritionText] } : {}) });
       if (!wasSaved) {
         setError("Ο χώρος αποθήκευσης της συσκευής δεν επαρκεί. Δοκίμασε μικρότερη φωτογραφία.");
         return;

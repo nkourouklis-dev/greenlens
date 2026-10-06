@@ -16,7 +16,6 @@ import {
   deriveExecutiveSummary,
   deriveIngredientInsights,
 } from "../utils/ingredientInsights";
-import { scoreBandMeta } from "../utils/scoreBand";
 import type {
   ContentCategory,
   IngredientRating,
@@ -32,6 +31,8 @@ import NutritionCard from "../components/NutritionCard";
 import SectionDrawer from "../components/SectionDrawer";
 import ChemicalCard from "../components/ChemicalCard";
 import ScoreBreakdownPanel from "../components/ScoreBreakdownPanel";
+import ScoreSummaryCard, { subScoresFor } from "../components/ScoreSummaryCard";
+import NutritionFactsTable from "../components/NutritionFactsTable";
 import ScoreNoticesCard from "../components/ScoreNoticesCard";
 
 // Records saved before contentCategory existed predate every path except
@@ -181,6 +182,17 @@ export default function Product() {
     scoringVersion: "unknown",
   };
 
+  // The title is "Brand Name"; with the brand known separately it moves to
+  // the line below, so the name is not read twice.
+  const brand = item.productBrand?.trim() ?? "";
+
+  const fullName = item.productName ?? "";
+
+  const nameWithoutBrand =
+    brand && fullName.toLowerCase().startsWith(brand.toLowerCase())
+      ? fullName.slice(brand.length).replace(/^[\s\-–·,:]+/, "")
+      : fullName;
+
   const photoSource =
     item.productPhoto ?? item.ingredientsPhoto ?? "";
 
@@ -196,57 +208,30 @@ export default function Product() {
       : sectionTitleByCategory[category!] || "Άγνωστο περιεχόμενο"
     : null;
 
-  const meta = scoreBandMeta[score.band];
-
   return (
     <main className="min-h-screen bg-canvas pb-5 text-ink">
       <section className="mx-auto max-w-md">
-        {/* min-h, not h: a long product name grows the header downwards
-            instead of climbing out of it under the back button and the
-            status bar (a three-line Garnier name did exactly that). The top
-            padding keeps the text clear of the floating back button. */}
-        <div className="relative flex min-h-64 w-full flex-col justify-end overflow-hidden bg-slate-800 px-4 pb-4 pt-16">
-          {photoSource ? (
+        {/* Compact header: a thumbnail beside the name, so the score is on
+            screen without scrolling. The top padding keeps the text clear
+            of the floating back button; min-h lets a long name grow
+            downwards instead of climbing out under the status bar. */}
+        <div className="flex items-start gap-4 px-4 pb-4 pt-16">
+          {photoSource && (
             <img
               src={photoSource}
               alt="Φωτογραφία προϊόντος"
-              className="absolute inset-0 h-full w-full object-cover"
+              className="h-24 w-20 shrink-0 rounded-xl bg-white object-contain shadow-sm"
             />
-          ) : (
-            <div className="absolute inset-0 bg-gradient-to-br from-emerald-800 via-slate-800 to-slate-900" />
           )}
 
-          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
-
-          {record && score.score != null && (
-            <div className="absolute right-4 top-4 flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-lg">
-              <strong className={`text-lg font-extrabold ${meta.vividTextClass}`}>
-                {score.score}
-              </strong>
-            </div>
-          )}
-
-          <div className="relative pr-16">
-            {categoryChip && (
-              <span className="mb-2 inline-block rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur-sm">
-                {categoryChip}
-              </span>
-            )}
-
-            <h1 className="line-clamp-3 text-2xl font-bold leading-tight text-white drop-shadow-sm">
-              {item.productName || "Νέο προϊόν"}
+          <div className="min-w-0 flex-1">
+            <h1 className="line-clamp-3 text-2xl font-bold leading-tight">
+              {nameWithoutBrand || fullName || "Νέο προϊόν"}
             </h1>
 
-            <p className="mt-1 text-sm text-white/75">
-              {item.barcode}
+            <p className="mt-1 text-sm text-slate-400">
+              {[brand, categoryChip, item.barcode].filter(Boolean).join(" · ")}
             </p>
-
-            {record && (
-              <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-black/35 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur-sm">
-                <span className={`h-2 w-2 rounded-full ${meta.dotClass}`} />
-                {meta.label}
-              </span>
-            )}
           </div>
         </div>
 
@@ -401,6 +386,8 @@ function Result(props: {
   onRescore: () => void;
   isRescoring: boolean;
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
   const category = readContentCategory(props.record);
 
   if (category === "unknown") {
@@ -449,9 +436,6 @@ function Result(props: {
       </section>
     );
   }
-
-  const { label, textClass: color, borderClass: borderColor } =
-    scoreBandMeta[props.score.band];
 
   const ingredientInsights =
     category === "ingredients"
@@ -563,6 +547,27 @@ function Result(props: {
 
   const groupOrder: IngredientRating[] = ["caution", "good", "neutral"];
 
+  // The counts under the score come from the worker's own severity split
+  // when it sent one; a scan without it (nutrition-only, older records)
+  // falls back to the ratings, where "caution" is the only flagged tier.
+  const severityTotal =
+    executiveSummary.safeIngredients +
+    executiveSummary.cautionIngredients +
+    executiveSummary.highImpactIngredients;
+
+  const counts =
+    severityTotal > 0
+      ? {
+          clean: executiveSummary.safeIngredients,
+          caution: executiveSummary.cautionIngredients,
+          flagged: executiveSummary.highImpactIngredients,
+        }
+      : {
+          clean: groups.good.length + groups.neutral.length,
+          caution: groups.caution.length,
+          flagged: 0,
+        };
+
   const groupTitle: Record<IngredientRating, string> = {
     caution: "Χρειάζονται προσοχή",
     good: "Θετικά",
@@ -571,16 +576,35 @@ function Result(props: {
 
   return (
     <>
-      <section
-        className={`flex items-center justify-between gap-3 rounded-2xl border bg-slate-900 p-4 shadow-sm ${borderColor}`}
-      >
-        <div className="min-w-0">
-          <p className={`text-base font-bold ${color}`}>
-            {label}
-          </p>
+      <ScoreSummaryCard
+        score={props.score}
+        bars={subScoresFor(props.score, ingredientInsights)}
+        counts={counts}
+        analysedCount={itemCount}
+        detailsOpen={detailsOpen}
+        onToggleDetails={() => setDetailsOpen((open) => !open)}
+      />
 
-        </div>
-      </section>
+      {detailsOpen && (
+        <>
+          <ScoreBreakdownPanel
+            score={props.score}
+            insights={category === "ingredients" ? ingredientInsights : []}
+          />
+
+          <ExecutiveSummaryCard summary={executiveSummary} />
+
+          {summary && (
+            <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
+              <h2 className="font-bold">Περίληψη</h2>
+
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                {summary}
+              </p>
+            </section>
+          )}
+        </>
+      )}
 
       <ScoreNoticesCard
         notices={props.score.notices}
@@ -591,15 +615,14 @@ function Result(props: {
 
       <AllergenNoticeCard notice={allergenNotice} />
 
+      <NutritionFactsTable evaluation={props.score.nutritionEvaluation} />
+
       <section>
         <div className="flex items-baseline justify-between px-1">
           <h2 className="font-bold">
             {sectionTitleByCategory[category]}
           </h2>
 
-          <span className="text-xs text-slate-400">
-            {itemCount} αναλύθηκαν
-          </span>
         </div>
 
         {/* Attention items stay open and lead; positives and neutrals sit
@@ -634,32 +657,6 @@ function Result(props: {
             </SectionDrawer>
           );
         })}
-      </section>
-
-      <ExecutiveSummaryCard summary={executiveSummary} />
-
-      {summary && (
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
-          <h2 className="font-bold">Περίληψη</h2>
-
-          <p className="mt-2 text-sm leading-6 text-slate-300">
-            {summary}
-          </p>
-        </section>
-      )}
-
-      <ScoreBreakdownPanel
-        score={props.score}
-        insights={category === "ingredients" ? ingredientInsights : []}
-      />
-
-      <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
-        <h2 className="font-bold">Σύγκριση</h2>
-
-        <p className="mt-2 text-sm text-slate-400">
-          Δεν υπάρχουν ακόμη αρκετά συγκρίσιμα
-          προϊόντα.
-        </p>
       </section>
     </>
   );
