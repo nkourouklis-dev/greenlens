@@ -459,7 +459,14 @@ export default function Scan() {
                   existingItem.barcode;
 
                 setExistingItem(null);
-                continueWithBarcode(value);
+                // An explicit re-registration: skip the catalogue shortcut in
+                // continueWithBarcode, which would just copy the existing
+                // entry again and never reach the photo flow.
+                navigate(
+                  `/add-product?barcode=${encodeURIComponent(
+                    value,
+                  )}`,
+                );
               }}
               className="h-12 w-full rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink-muted transition active:scale-[0.98]"
             >
