@@ -1,13 +1,14 @@
 import type { OcrResult } from "../types";
 import { apiBaseUrl, apiConfigurationError } from "../config";
 
-export async function extractOcr(image: string, barcode: string, productId: string): Promise<OcrResult> {
+export async function extractOcr(image: string, barcode: string, productId: string, expect?: "nutrition"): Promise<OcrResult> {
   if (apiConfigurationError) throw new Error(apiConfigurationError);
   const formData = new FormData();
   const imageBlob = await (await fetch(image)).blob();
   formData.append("image", imageBlob, "ingredients.jpg");
   formData.append("barcode", barcode);
   formData.append("productId", productId);
+  if (expect) formData.append("expect", expect);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);

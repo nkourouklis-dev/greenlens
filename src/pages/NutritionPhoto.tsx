@@ -35,7 +35,12 @@ export default function NutritionPhoto() {
     try {
       const ocrImage = await prepareImageForOcr(file);
 
-      const result = await extractOcr(ocrImage, barcode, crypto.randomUUID());
+      const result = await extractOcr(
+        ocrImage,
+        barcode,
+        crypto.randomUUID(),
+        "nutrition",
+      );
 
       const read = inspectNutritionPanel(result.rawText);
 

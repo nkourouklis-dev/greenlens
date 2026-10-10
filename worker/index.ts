@@ -146,6 +146,7 @@ import {
   cleanIngredientText,
   extractIngredientText,
 } from "./ingredientText";
+import { detectProductType } from "./productType";
 import {
   inspectNutritionPanel,
   type NutritionPanelRead,
@@ -3578,7 +3579,7 @@ async function runOcr(
   try {
     const startedAt = Date.now();
 
-    const result =
+    const azureResult =
       await timedStage(requestId, "ocr_azure", () => extractWithAzureOcr(
         image,
         azureEnv.AZURE_VISION_ENDPOINT,
@@ -3590,6 +3591,31 @@ async function runOcr(
     // threw before Azure answered was never billed, and a counter that
     // guesses high is a false alarm on the page meant to prevent them.
     await recordUsage(env.DB, "azure_ocr");
+
+    let result = azureResult;
+
+    // The shopper said this photo is the nutrition table, and OCR could not
+    // make a usable one of it (glare, a curved can, coloured rows). One
+    // second look by the vision model, whose rows replace the OCR text only
+    // if they pass the very same plausibility checks.
+    if (
+      readTextField(formData, "expect") === "nutrition" &&
+      inspectNutritionPanel(result.rawText).panel === null
+    ) {
+      const visionText = await readNutritionTableWithVision(
+        env,
+        image,
+        requestId,
+      );
+
+      if (visionText && inspectNutritionPanel(visionText).panel !== null) {
+        result = {
+          ...result,
+          rawText: visionText,
+          labelType: "nutrition",
+        };
+      }
+    }
 
     const evaluation =
       evaluateLabelText(result.rawText);
@@ -6871,104 +6897,3 @@ function isNutritionRejectionReason(
   );
 }
 
-function detectProductType(
-  text: string,
-): "food" | "cosmetic" | "unknown" {
-  const normalized = text.toLowerCase();
-
-  const foodMarkers = [
-    "ξύδι",
-    "ξυδι",
-    "vinegar",
-    "οίνο",
-    "οινο",
-    "wine",
-    "αλεύρι",
-    "αλευρι",
-    "flour",
-    "ζάχαρη",
-    "ζαχαρη",
-    "sugar",
-    "γάλα",
-    "γαλα",
-    "milk",
-    "τυρί",
-    "τυρι",
-    "cheese",
-    "ελαιόλαδο",
-    "ελαιολαδο",
-    "olive oil",
-    "ντομάτα",
-    "ντοματα",
-    "tomato",
-    "κρεμμύδι",
-    "κρεμμυδι",
-    "onion",
-    "σκόρδο",
-    "σκορδο",
-    "garlic",
-    "αλάτι",
-    "αλατι",
-    "salt",
-    "πιπέρι",
-    "πιπερι",
-    "pepper",
-    "κακάο",
-    "κακαο",
-    "cocoa",
-    "σιτάρι",
-    "σιταρι",
-    "wheat",
-    "βούτυρο",
-    "βουτυρο",
-    "yeast",
-    "μαγιά",
-    "μαγια",
-    "starch",
-    "άμυλο",
-    "αμυλο",
-  ];
-
-  const cosmeticMarkers = [
-    "aqua",
-    "cetearyl",
-    "phenoxyethanol",
-    "dimethicone",
-    "parfum",
-    "sodium laureth",
-    "sodium lauryl",
-    "panthenol",
-    "tocopheryl",
-    "butyrospermum",
-    "hyaluronic",
-    "niacinamide",
-    "isohexadecane",
-    "cocamidopropyl",
-    "benzyl alcohol",
-    "linalool",
-    "limonene",
-    "citronellol",
-  ];
-
-  const foodScore = foodMarkers.filter(
-    (marker) => normalized.includes(marker),
-  ).length;
-
-  const cosmeticScore = cosmeticMarkers.filter(
-    (marker) => normalized.includes(marker),
-  ).length;
-
-  if (foodScore === 0 && cosmeticScore === 0) {
-    return "unknown";
-  }
-
-  if (foodScore > cosmeticScore) {
-    return "food";
-  }
-
-  if (cosmeticScore > foodScore) {
-    return "cosmetic";
-  }
-
-  return "unknown";
-}

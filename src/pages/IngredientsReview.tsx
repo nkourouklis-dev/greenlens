@@ -10,6 +10,7 @@ import {
 import { extractIngredientText } from "../../worker/ingredientText";
 import { detectContentCategoryHeuristic } from "../../worker/contentCategory";
 import { inspectNutritionPanel } from "../../worker/nutritionPanel";
+import { detectProductType } from "../../worker/productType";
 import type { ContentCategory } from "../types";
 
 const categoryOptions: Array<{
@@ -281,11 +282,16 @@ export default function IngredientsReview() {
     }
 
     // The nutrition table is the next step unless this photo already holds
-    // one (or the user chose to score it as a table alone).
+    // one, the user chose to score it as a table alone, or the product is not
+    // a food at all — a cream or a water analysis has no table to photograph.
     const hasTable = inspectNutritionPanel(text).tableDetected;
 
+    const takesNoTable =
+      categoryOverride === "chemical_composition" ||
+      (isIngredientsIntent && detectProductType(text) === "cosmetic");
+
     const next =
-      hasTable || categoryOverride === "nutrition"
+      hasTable || takesNoTable || categoryOverride === "nutrition"
         ? "/product-photo"
         : "/nutrition-photo";
 
