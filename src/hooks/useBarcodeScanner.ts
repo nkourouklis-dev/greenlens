@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import type {
-  BrowserMultiFormatReader,
-  IScannerControls,
-} from "@zxing/browser";
+import {
+  startBarcodeLoop,
+  type BarcodeLoopControls,
+} from "../services/barcodeLoop";
 
 // Same rule as Scan.tsx: a single frame can misread digits and still pass
 // the EAN-13 checksum, so a value is only accepted once this many
@@ -22,8 +22,7 @@ const VALID_BARCODE = /^\d{8,14}$/;
 export function useBarcodeScanner(
   videoRef: RefObject<HTMLVideoElement | null>,
 ) {
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
-  const controlsRef = useRef<IScannerControls | null>(null);
+  const controlsRef = useRef<BarcodeLoopControls | null>(null);
   const runRef = useRef(0);
   const pendingRef = useRef<{ value: string; count: number } | null>(null);
 
@@ -53,19 +52,14 @@ export function useBarcodeScanner(
       setIsScanning(true);
 
       try {
-        if (!readerRef.current) {
-          const { BrowserMultiFormatReader } = await import("@zxing/browser");
-          readerRef.current = new BrowserMultiFormatReader();
-        }
-
-        const controls = await readerRef.current.decodeFromVideoElement(
+        const controls = await startBarcodeLoop(
           video,
-          (result) => {
-            if (run !== runRef.current || !result) {
+          (text) => {
+            if (run !== runRef.current) {
               return;
             }
 
-            const value = result.getText().trim();
+            const value = text.trim();
 
             if (!VALID_BARCODE.test(value)) {
               return;

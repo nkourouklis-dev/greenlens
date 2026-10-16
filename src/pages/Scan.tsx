@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type {
-  BrowserMultiFormatReader,
-  IScannerControls,
-} from "@zxing/browser";
+import {
+  startBarcodeLoop,
+  type BarcodeLoopControls,
+} from "../services/barcodeLoop";
 import { useNavigate } from "react-router-dom";
 import { findProductByBarcode } from "../data/productRepository";
 import {
@@ -38,11 +38,8 @@ export default function Scan() {
     videoElement,
   } = useCameraViewport();
 
-  const codeReaderRef =
-    useRef<BrowserMultiFormatReader | null>(null);
-
   const controlsRef =
-    useRef<IScannerControls | null>(null);
+    useRef<BarcodeLoopControls | null>(null);
 
   const decodeStartingRef = useRef(false);
   const detectedRef = useRef(false);
@@ -132,33 +129,18 @@ export default function Scan() {
     setIsScanning(true);
 
     try {
-      if (!codeReaderRef.current) {
-        const { BrowserMultiFormatReader } = await import(
-          "@zxing/browser"
-        );
-
-        codeReaderRef.current =
-          new BrowserMultiFormatReader();
-      }
-
-      // decodeFromVideoElement scans an existing, already-playing video
-      // element and never touches its MediaStream — unlike
-      // decodeFromConstraints/decodeFromStream, controls.stop() here only
-      // stops the scan loop, so the shared camera stream survives.
+      // The loop only reads frames from the already-playing video (downscaled,
+      // see barcodeLoop.ts); stopping it leaves the shared camera stream alone.
       const controls =
-        await codeReaderRef.current.decodeFromVideoElement(
+        await startBarcodeLoop(
           videoRef.current,
-          (result) => {
+          (scannedBarcode) => {
             if (
               scanRun !== scanRunRef.current ||
-              !result ||
               detectedRef.current
             ) {
               return;
             }
-
-            const scannedBarcode =
-              result.getText();
 
             if (!scannedBarcode) {
               return;
