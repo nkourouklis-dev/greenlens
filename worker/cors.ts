@@ -4,7 +4,14 @@ export function isAllowedOrigin(origin: string): boolean {
   if (localOrigins.has(origin)) return true;
   try {
     const url = new URL(origin);
-    return url.protocol === "https:" && (url.hostname === "greenlens.pages.dev" || url.hostname.endsWith(".greenlens.pages.dev"));
+    if (url.protocol !== "https:") return false;
+    // greenlens.pages.dev stays allowed temporarily until the stoaops.com
+    // migration is done and the old host redirects everywhere.
+    return (
+      url.hostname === "greenlens.stoaops.com" ||
+      url.hostname === "greenlens.pages.dev" ||
+      url.hostname.endsWith(".greenlens.pages.dev")
+    );
   } catch {
     return false;
   }
