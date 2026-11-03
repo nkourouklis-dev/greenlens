@@ -1,5 +1,6 @@
 import type { OcrResult } from "../types";
 import { apiBaseUrl, apiConfigurationError } from "../config";
+import { logServerFailure, networkFailureMessage } from "./errors";
 
 export async function extractOcr(image: string, barcode: string, productId: string, expect?: "nutrition"): Promise<OcrResult> {
   if (apiConfigurationError) throw new Error(apiConfigurationError);
@@ -13,9 +14,9 @@ export async function extractOcr(image: string, barcode: string, productId: stri
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
   let response: Response;
-  try { response = await fetch(`${apiBaseUrl}/api/ocr/extract`, { method: "POST", body: formData, signal: controller.signal }); } catch (error) { throw new Error(error instanceof DOMException && error.name === "AbortError" ? "Η υπηρεσία ανάλυσης δεν είναι προσωρινά διαθέσιμη." : "Δεν ήταν δυνατή η σύνδεση με την υπηρεσία ανάλυσης."); } finally { clearTimeout(timeout); }
+  try { response = await fetch(`${apiBaseUrl}/api/ocr/extract`, { method: "POST", body: formData, signal: controller.signal }); } catch (error) { throw new Error(networkFailureMessage(error, "ocr_extract")); } finally { clearTimeout(timeout); }
   const body: unknown = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(readError(body));
+  if (!response.ok) { logServerFailure("ocr_extract", response.status); throw new Error(readError(body)); }
   if (!isOcrResult(body)) throw new Error("Η υπηρεσία επέστρεψε μη έγκυρη ανάγνωση ετικέτας.");
   return body;
 }

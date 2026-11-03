@@ -44,6 +44,7 @@ interface CameraContextValue {
 // flags clearly soft frames) since it isn't calibrated against real device
 // cameras — tune if it proves noisy in practice.
 const BLUR_VARIANCE_THRESHOLD = 15;
+const MAX_CAPTURE_SIDE = 2400;
 
 // Exported so PhotoCapture.tsx can reuse the same gradient-variance metric
 // for its live "too far to read" framing hint — same signal, sampled more
@@ -483,8 +484,26 @@ export function CameraProvider({ children }: { children: ReactNode }) {
       sourceHeight,
     });
 
+    // A full-resolution iPhone frame at 0.92 can reach the 5 MB server limit
+    // and is slow or unreliable to upload over mobile data. 2400 px on the
+    // long side is plenty for OCR and keeps the file around 1 MB.
+    const longSide = Math.max(canvas.width, canvas.height);
+    let output = canvas;
+    if (longSide > MAX_CAPTURE_SIDE) {
+      const scale = MAX_CAPTURE_SIDE / longSide;
+      const scaled = document.createElement("canvas");
+      scaled.width = Math.round(canvas.width * scale);
+      scaled.height = Math.round(canvas.height * scale);
+      const scaledCtx = scaled.getContext("2d");
+      if (scaledCtx) {
+        scaledCtx.imageSmoothingQuality = "high";
+        scaledCtx.drawImage(canvas, 0, 0, scaled.width, scaled.height);
+        output = scaled;
+      }
+    }
+
     return new Promise((resolve) => {
-      canvas.toBlob(
+      output.toBlob(
         (blob) =>
           resolve(
             blob
@@ -499,7 +518,7 @@ export function CameraProvider({ children }: { children: ReactNode }) {
               : null,
           ),
         "image/jpeg",
-        0.92,
+        0.88,
       );
     });
   }, []);

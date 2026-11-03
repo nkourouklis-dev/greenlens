@@ -1,5 +1,5 @@
 import { analysisVersion, apiBaseUrl, apiConfigurationError } from "../config";
-import { UserFacingError } from "./errors";
+import { UserFacingError, logServerFailure, networkFailureMessage } from "./errors";
 import type {
   AllergenNotice,
   ChemicalInsight,
@@ -473,11 +473,7 @@ async function requestJson<T>(
       signal: controller.signal,
     });
   } catch (error) {
-    throw new UserFacingError(
-      error instanceof DOMException && error.name === "AbortError"
-        ? "Η ανάλυση καθυστέρησε υπερβολικά. Δοκιμάστε ξανά."
-        : "Δεν ήταν δυνατή η σύνδεση με την υπηρεσία ανάλυσης.",
-    );
+    throw new UserFacingError(networkFailureMessage(error, path));
   } finally {
     clearTimeout(timeout);
   }
@@ -485,6 +481,7 @@ async function requestJson<T>(
   const result: unknown = await response.json().catch(() => null);
 
   if (!response.ok) {
+    logServerFailure(path, response.status);
     throw new UserFacingError(
       typeof result === "object" &&
         result !== null &&
