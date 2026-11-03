@@ -4,7 +4,7 @@ export function isAllowedOrigin(origin: string): boolean {
   if (localOrigins.has(origin)) return true;
   try {
     const url = new URL(origin);
-    return url.protocol === "https:" && (url.hostname === "greenlens.pages.dev" || url.hostname.endsWith(".greenlens.pages.dev"));
+    return url.protocol === "https:" && (url.hostname === "greenlens.stoaops.com" || url.hostname === "greenlens.pages.dev" || url.hostname.endsWith(".greenlens.pages.dev"));
   } catch {
     return false;
   }
