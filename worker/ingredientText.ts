@@ -674,6 +674,41 @@ function indexOfSplitTableHeading(text: string): number {
   return -1;
 }
 
+/**
+ * Where a nutrition table (or the net-weight line printed just before it)
+ * begins inside text that follows an ingredient heading, or -1. Tolerant of
+ * OCR damage: it keys on the shape of the table, not on exact wording.
+ */
+function indexOfNutritionTableStart(text: string): number {
+  // Lowercased and accent-stripped one character at a time, so an index found
+  // here is an index into `text` (normalize() collapses whitespace).
+  const normalized = Array.from(text)
+    .map((character) => character.normalize("NFD")[0].toLowerCase())
+    .join("");
+
+  const patterns = [
+    // Net weight / drained weight line.
+    /(?:^|\n)\s*(?:καθαρο βαρος|βαρος (?:αποστ|καθαρο)|net w(?:eigh)?t)/u,
+    // "Διατροφική Δήλωση/Επισήμανση/Αξία", including garbled spellings.
+    /(?:^|\n|\s)δια[τθ]ρ?[οε]?φ\p{L}*\s+(?:δηλωση|επισημανση|αξια|πληροφοριες)/u,
+    /nutrition(?:al)?\s+(?:declaration|information|facts)/u,
+    // First energy row: "Ενέργεια 2339 kJ / 560 kcal" (value on this or the next lines).
+    /(?:^|\n)\s*(?:ενεργεια|energy)[^\n]{0,20}(?:\n[^\n]{0,20}){0,2}?\d+(?:[.,]\d+)?\s*(?:kj|kcal)/u,
+  ];
+
+  let best = -1;
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(normalized);
+
+    if (match && (best < 0 || match.index < best)) {
+      best = match.index;
+    }
+  }
+
+  return best;
+}
+
 function extractIngredientBlockAtHeading(
   rawText: string,
   headingIdx: number,
@@ -726,6 +761,16 @@ function extractIngredientBlockAtHeading(
     if (boundaries.length > 0) {
       endIdx = boundaries[0].idx;
     }
+  }
+
+  // The table is where the list ends even when OCR garbled its heading
+  // ("Διαθρεπτική Επισήμανση" for "Διατροφική"), which no fixed boundary
+  // phrase can anticipate: a net-weight line, a misspelt nutrition heading or
+  // the first energy row (a number with kJ/kcal) all say the list is over.
+  const tableStartIdx = indexOfNutritionTableStart(contentAfterStart);
+
+  if (tableStartIdx >= 0 && tableStartIdx < endIdx) {
+    endIdx = tableStartIdx;
   }
 
   const splitHeadingIdx = indexOfSplitTableHeading(contentAfterStart);
