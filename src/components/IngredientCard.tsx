@@ -63,12 +63,14 @@ export default function IngredientCard(props: {
         aria-expanded={open}
         className="flex w-full items-start justify-between gap-2 text-left"
       >
-        <div className="min-w-0">
-          <h3 className="flex items-center gap-2 break-words text-sm font-semibold leading-tight text-slate-100">
+        <div className="min-w-0 flex-1">
+          <h3 className="flex items-start gap-2 text-sm font-semibold leading-tight text-slate-100">
             <span
-              className={`h-2 w-2 shrink-0 rounded-full ${ratingDotClass[insight.rating]}`}
+              className={`mt-1 h-2 w-2 shrink-0 rounded-full ${ratingDotClass[insight.rating]}`}
             />
-            {insight.name}
+            <span className="min-w-0 [overflow-wrap:anywhere]">
+              {insight.name}
+            </span>
           </h3>
 
           <p className="mt-1 pl-4 text-xs text-slate-500">

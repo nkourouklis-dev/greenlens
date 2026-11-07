@@ -1,4 +1,7 @@
 User-agent: *
 Allow: /
+Disallow: /admin
+Disallow: /product/
+Disallow: /history
 
-Sitemap: https://greenlens.app/sitemap.xml
+Sitemap: https://greenlens.stoaops.com/sitemap.xml

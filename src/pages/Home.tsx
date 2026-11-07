@@ -356,6 +356,18 @@ export default function Home() {
             <span>{scale[scale.length - 1].label}</span>
           </div>
         </div>
+
+        <p className="pb-2 text-center text-xs text-ink-faint">
+          Φτιάχτηκε από το{" "}
+          <a
+            href="https://stoaops.com"
+            target="_blank"
+            rel="noopener"
+            className="font-semibold text-accent-strong underline-offset-2 hover:underline"
+          >
+            Stoa Ops
+          </a>
+        </p>
       </section>
     </main>
   );

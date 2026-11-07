@@ -9,10 +9,10 @@
   "display_override": ["standalone", "minimal-ui", "browser"],
   "orientation": "portrait",
   "theme_color": "#10B981",
-  "background_color": "#0F172A",
+  "background_color": "#F4F6F3",
   "lang": "el",
   "dir": "ltr",
-  "categories": ["health", "lifestyle", "shopping", "medical"],
+  "categories": ["lifestyle", "shopping", "food"],
   "icons": [
     {
       "src": "/icons/favicon-192.png",
