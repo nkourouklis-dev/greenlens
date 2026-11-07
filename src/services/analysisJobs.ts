@@ -18,8 +18,8 @@ import type { ContentCategory } from "../types";
 const GENERIC_ANALYSIS_ERROR =
   "Κάτι πήγε στραβά κατά την ανάλυση. Δοκιμάστε ξανά.";
 
-// Workers AI answers each one in 15–30 s; a couple in parallel keeps a burst
-// of scans moving without hammering the daily budget guard.
+// A couple in parallel keeps a burst of scans moving without hammering the
+// daily budget guard.
 const MAX_CONCURRENT_ANALYSES = 2;
 
 export type AnalysisOutcome =

@@ -289,6 +289,17 @@ async function requestCameraStream(): Promise<MediaStream> {
       return await navigator.mediaDevices.getUserMedia(constraints);
     } catch (caughtError) {
       lastError = caughtError;
+
+      // A refusal or a missing camera is not a resolution problem: asking
+      // again with smaller constraints only delays the message.
+      if (
+        caughtError instanceof DOMException &&
+        ["NotAllowedError", "SecurityError", "NotFoundError"].includes(
+          caughtError.name,
+        )
+      ) {
+        break;
+      }
     }
   }
 
@@ -296,6 +307,30 @@ async function requestCameraStream(): Promise<MediaStream> {
     lastError ??
     new Error("Δεν ήταν δυνατή η πρόσβαση στην κάμερα.")
   );
+}
+
+/** What went wrong, in words that say what to do about it on this phone. */
+function cameraErrorMessage(caughtError: unknown): string {
+  const name = caughtError instanceof DOMException ? caughtError.name : "";
+  const isIos =
+    typeof navigator !== "undefined" &&
+    /iPhone|iPad|iPod/.test(navigator.userAgent);
+
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return isIos
+      ? "Δεν δόθηκε άδεια για την κάμερα. Άνοιξε Ρυθμίσεις > Εφαρμογές > Safari > Κάμερα και επίλεξε «Να επιτρέπεται», ή πάτα «aA» στη γραμμή διεύθυνσης > Ρυθμίσεις ιστότοπου. Μπορείς και να επιλέξεις φωτογραφία από τη συλλογή."
+      : "Δεν δόθηκε άδεια για την κάμερα. Πάτα το εικονίδιο δίπλα στη διεύθυνση > Άδειες > Κάμερα > Να επιτρέπεται. Μπορείς και να επιλέξεις φωτογραφία από τη συλλογή.";
+  }
+
+  if (name === "NotFoundError" || name === "OverconstrainedError") {
+    return "Δεν βρέθηκε κάμερα σε αυτή τη συσκευή. Επίλεξε φωτογραφία από τη συλλογή.";
+  }
+
+  if (name === "NotReadableError" || name === "AbortError") {
+    return "Η κάμερα χρησιμοποιείται από άλλη εφαρμογή. Κλείσ' την και δοκίμασε ξανά.";
+  }
+
+  return "Δεν ήταν δυνατή η πρόσβαση στην κάμερα. Δοκίμασε ξανά ή επίλεξε φωτογραφία από τη συλλογή.";
 }
 
 const CameraContext = createContext<CameraContextValue | null>(null);
@@ -364,10 +399,9 @@ export function CameraProvider({ children }: { children: ReactNode }) {
         }
 
         setIsActive(true);
-      } catch {
-        setError(
-          "Δεν ήταν δυνατή η πρόσβαση στην κάμερα. Έλεγξε ότι έχεις δώσει άδεια στον browser.",
-        );
+      } catch (caughtError) {
+        console.error("camera_start_failed", caughtError);
+        setError(cameraErrorMessage(caughtError));
         setIsActive(false);
       } finally {
         startingRef.current = null;
@@ -522,6 +556,38 @@ export function CameraProvider({ children }: { children: ReactNode }) {
       );
     });
   }, []);
+
+  // iOS ends the camera track when the phone locks or the app goes to the
+  // background, and Android can pause the video. Coming back to an open camera
+  // screen must show a live picture again, not a frozen or black frame.
+  useEffect(() => {
+    if (!viewport) return;
+
+    const revive = () => {
+      if (document.visibilityState !== "visible") return;
+
+      const track = streamRef.current?.getVideoTracks()[0];
+
+      if (!track || track.readyState === "ended") {
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        void start();
+        return;
+      }
+
+      if (videoRef.current?.paused) {
+        videoRef.current.play().catch(() => {});
+      }
+    };
+
+    document.addEventListener("visibilitychange", revive);
+    window.addEventListener("pageshow", revive);
+
+    return () => {
+      document.removeEventListener("visibilitychange", revive);
+      window.removeEventListener("pageshow", revive);
+    };
+  }, [viewport, start]);
 
   // The camera is released as soon as a camera page closes (see
   // useCameraViewport) and on app teardown. The browser remembers the

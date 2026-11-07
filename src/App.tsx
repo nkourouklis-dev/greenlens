@@ -37,6 +37,10 @@ function PageFallback() {
 export default function App() {
   useEffect(() => {
     resumePendingAnalyses();
+
+    // A scan started without signal finishes by itself once it comes back.
+    window.addEventListener("online", resumePendingAnalyses);
+    return () => window.removeEventListener("online", resumePendingAnalyses);
   }, []);
 
   return (

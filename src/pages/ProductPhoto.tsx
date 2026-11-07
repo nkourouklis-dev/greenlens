@@ -52,7 +52,7 @@ export default function ProductPhoto() {
         clearOcrDraft(productId);
         clearNutritionDraft(productId);
       }
-      // The analysis takes 15–30 s. It runs in the background: the product
+      // The analysis runs in the background: the product
       // page shows it loading and fills in when it is done, and offers
       // "scan another" for anyone who would rather not wait.
       void startAnalysis(scanId, { notify: true });
