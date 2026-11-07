@@ -73,7 +73,7 @@ const errorBox =
   "rounded-xl border border-red-400/40 bg-red-950/40 p-2.5 text-xs text-red-100";
 
 const secondaryButton =
-  "flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-line bg-surface text-sm font-semibold text-ink disabled:opacity-50";
+  "flex h-11 flex-1 items-center justify-center gap-2 rounded-full border border-line bg-surface text-sm font-semibold text-ink disabled:opacity-50";
 
 /**
  * A photo step (ingredients list, front of pack) on the shared full-screen
@@ -293,7 +293,7 @@ export default function PhotoCapture({
             type="button"
             disabled={!file || isSaving}
             onClick={() => file && onContinue(file)}
-            className="h-12 w-full rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+            className="h-12 w-full rounded-full bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
           >
             {isSaving ? "Αποθήκευση..." : actionLabel}
           </button>
@@ -316,7 +316,7 @@ export default function PhotoCapture({
               type="button"
               onClick={onSkip}
               disabled={isSaving}
-              className="h-11 w-full rounded-xl px-4 text-sm font-semibold text-ink-muted transition active:bg-surface disabled:opacity-60"
+              className="h-11 w-full rounded-full px-4 text-sm font-semibold text-ink-muted transition active:bg-surface disabled:opacity-60"
             >
               {skipLabel}
             </button>
@@ -368,7 +368,7 @@ export default function PhotoCapture({
             <button
               type="button"
               onClick={filePicker.open}
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-accent px-5 text-base font-bold text-on-accent"
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-accent px-5 text-base font-bold text-on-accent"
             >
               <ImageIcon size={20} />
               Επιλογή φωτογραφίας από τη συσκευή
@@ -379,7 +379,7 @@ export default function PhotoCapture({
             <button
               type="button"
               onClick={onSkip}
-              className="h-11 w-full rounded-xl px-4 text-sm font-semibold text-ink-muted transition active:bg-surface"
+              className="h-11 w-full rounded-full px-4 text-sm font-semibold text-ink-muted transition active:bg-surface"
             >
               {skipLabel}
             </button>

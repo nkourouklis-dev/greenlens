@@ -389,7 +389,7 @@ export default function AdminCapture() {
               type="button"
               onClick={handlePasswordSubmit}
               disabled={!passwordInput.trim() || isVerifying}
-              className="h-14 w-full rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+              className="h-14 w-full rounded-full bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
             >
               {isVerifying ? "Έλεγχος..." : "Είσοδος"}
             </button>
@@ -421,7 +421,7 @@ export default function AdminCapture() {
           <button
             type="button"
             onClick={openBarcodeScanner}
-            className="mt-6 flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98]"
+            className="mt-6 flex h-14 w-full items-center justify-center gap-2 rounded-full bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98]"
           >
             <ScanBarcode size={22} />
             Σάρωση με κάμερα
@@ -479,7 +479,7 @@ export default function AdminCapture() {
               return (
                 <div
                   key={slot.type}
-                  className="flex items-center gap-3 rounded-2xl border border-line-subtle bg-surface/70 p-3"
+                  className="flex items-center gap-3 rounded-3xl border border-line-subtle bg-surface/70 p-3"
                 >
                   {photo ? (
                     <img
@@ -585,7 +585,7 @@ export default function AdminCapture() {
                   type="button"
                   onClick={handleSubmit}
                   disabled={takenCount === 0 || isSubmitting}
-                  className="h-14 w-full rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+                  className="h-14 w-full rounded-full bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
                 >
                   {isSubmitting
                     ? "Αποθήκευση..."

@@ -123,7 +123,7 @@ export default function CompositionBreakdown(props: {
           }));
 
   return (
-    <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
+    <section className="rounded-3xl border border-slate-800 bg-slate-900 shadow-sm p-4">
       <h2 className="font-bold">Ανάλυση βαθμολογίας</h2>
 
       <div className="mt-3 divide-y divide-slate-800 text-sm">

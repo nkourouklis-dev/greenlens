@@ -90,7 +90,7 @@ export default function AdminGate({
             type="button"
             onClick={handleSubmit}
             disabled={!passwordInput.trim() || isVerifying}
-            className="h-14 w-full rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+            className="h-14 w-full rounded-full bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
           >
             {isVerifying ? "Έλεγχος..." : "Είσοδος"}
           </button>

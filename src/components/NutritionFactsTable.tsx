@@ -47,7 +47,7 @@ export default function NutritionFactsTable(props: {
   }
 
   return (
-    <section className="rounded-2xl border border-slate-800 bg-slate-900 p-4 shadow-sm">
+    <section className="rounded-3xl border border-slate-800 bg-slate-900 p-4 shadow-sm">
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="font-bold">Διατροφικά στοιχεία</h2>
 

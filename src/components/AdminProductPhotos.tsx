@@ -176,7 +176,7 @@ export default function AdminProductPhotos(props: {
           return (
             <div
               key={slot.type}
-              className="flex items-center gap-3 rounded-2xl border border-line-subtle bg-surface/70 p-3"
+              className="flex items-center gap-3 rounded-3xl border border-line-subtle bg-surface/70 p-3"
             >
               {photo ? (
                 <AdminPhotoThumbnail

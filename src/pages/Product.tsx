@@ -158,7 +158,7 @@ export default function Product() {
           <button
             type="button"
             onClick={() => navigate("/scan")}
-            className="mt-5 h-12 rounded-xl bg-emerald-500 px-4 font-bold text-on-accent"
+            className="mt-5 h-12 rounded-full bg-emerald-500 px-4 font-bold text-on-accent"
           >
             Νέα σάρωση
           </button>
@@ -220,12 +220,12 @@ export default function Product() {
             <img
               src={photoSource}
               alt="Φωτογραφία προϊόντος"
-              className="h-24 w-20 shrink-0 rounded-xl bg-white object-contain shadow-sm"
+              className="h-28 w-24 shrink-0 rounded-2xl border border-line-subtle bg-white object-contain p-1 shadow-md"
             />
           )}
 
           <div className="min-w-0 flex-1">
-            <h1 className="line-clamp-3 text-2xl font-bold leading-tight">
+            <h1 className="line-clamp-3 text-2xl font-extrabold leading-tight tracking-tight">
               {nameWithoutBrand || fullName || "Νέο προϊόν"}
             </h1>
 
@@ -239,7 +239,7 @@ export default function Product() {
         {!record && item.analysisState === "running" ? (
           <section
             role="status"
-            className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4"
+            className="rounded-3xl border border-slate-800 bg-slate-900 shadow-sm p-4"
           >
             <span className="block h-3 w-3 animate-pulse rounded-full bg-emerald-500" />
 
@@ -254,13 +254,13 @@ export default function Product() {
             <button
               type="button"
               onClick={() => navigate("/scan")}
-              className="mt-4 h-12 w-full rounded-xl border border-slate-700 font-semibold"
+              className="mt-4 h-12 w-full rounded-full border border-slate-700 font-semibold"
             >
               Σάρωση άλλου προϊόντος
             </button>
           </section>
         ) : !record ? (
-          <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
+          <section className="rounded-3xl border border-slate-800 bg-slate-900 shadow-sm p-4">
             <p className="font-semibold">
               {item.analysisState === "failed"
                 ? "Η ανάλυση δεν ολοκληρώθηκε"
@@ -278,7 +278,7 @@ export default function Product() {
                   `/product/${id}/analysis`,
                 )
               }
-              className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 font-bold text-on-accent"
+              className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-emerald-500 font-bold text-on-accent shadow-lg shadow-emerald-500/25"
             >
               <RefreshCw size={18} />
               Ανάλυση συστατικών
@@ -351,7 +351,7 @@ export default function Product() {
           <button
             type="button"
             onClick={() => navigate("/scan")}
-            className="h-12 rounded-xl border border-slate-700 font-semibold"
+            className="h-12 rounded-full border border-slate-700 font-semibold"
           >
             Νέα σάρωση
           </button>
@@ -359,7 +359,7 @@ export default function Product() {
           <button
             type="button"
             onClick={() => navigate("/history")}
-            className="h-12 rounded-xl border border-slate-700 font-semibold"
+            className="h-12 rounded-full border border-slate-700 font-semibold"
           >
             Ιστορικό
           </button>
@@ -401,7 +401,7 @@ function Result(props: {
         <button
           type="button"
           onClick={props.onRetakePhoto}
-          className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 font-bold text-on-accent"
+          className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-emerald-500 font-bold text-on-accent"
         >
           <Camera size={18} />
           Ξαναπροσπάθησε
@@ -428,7 +428,7 @@ function Result(props: {
         <button
           type="button"
           onClick={props.onRetakePhoto}
-          className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 font-bold text-on-accent"
+          className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-emerald-500 font-bold text-on-accent"
         >
           <Camera size={18} />
           Ξαναπροσπάθησε
@@ -595,7 +595,7 @@ function Result(props: {
           <ExecutiveSummaryCard summary={executiveSummary} />
 
           {summary && (
-            <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
+            <section className="rounded-3xl border border-slate-800 bg-slate-900 shadow-sm p-4">
               <h2 className="font-bold">Περίληψη</h2>
 
               <p className="mt-2 text-sm leading-6 text-slate-300">

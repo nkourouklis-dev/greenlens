@@ -11,7 +11,7 @@ export default function ExecutiveSummaryCard(props: {
   const watchOutFor = usableCopyLines(summary.watchOutFor);
 
   return (
-    <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
+    <section className="rounded-3xl border border-slate-800 bg-slate-900 shadow-sm p-4">
       <div className="flex flex-col gap-1">
         <h2 className="font-bold">Με μια ματιά</h2>
         <span className="text-sm font-semibold text-emerald-300">

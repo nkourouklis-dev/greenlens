@@ -43,7 +43,7 @@ export default function NutritionCard(props: {
   const [open, setOpen] = useState(false);
 
   return (
-    <article className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
+    <article className="rounded-3xl border border-slate-800 bg-slate-900 shadow-sm p-4">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}

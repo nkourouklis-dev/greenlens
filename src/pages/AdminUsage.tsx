@@ -33,7 +33,7 @@ function BudgetBar({ budget }: { budget: AdminUsageBudget }) {
   const percent = percentOf(budget.ratio);
 
   return (
-    <article className="rounded-2xl border border-line-subtle bg-surface/70 p-4">
+    <article className="rounded-3xl border border-line-subtle bg-surface/70 p-4">
       <div className="flex flex-wrap items-baseline gap-x-2">
         <h2 className="text-base font-bold">{budget.label}</h2>
 
@@ -86,7 +86,7 @@ function HistoryChart({ usage }: { usage: AdminUsageData }) {
   );
 
   return (
-    <section className="mt-6 rounded-2xl border border-line-subtle bg-surface/70 p-4">
+    <section className="mt-6 rounded-3xl border border-line-subtle bg-surface/70 p-4">
       <h2 className="text-base font-bold">Τελευταίες 30 ημέρες</h2>
 
       <p className="mt-1 text-sm leading-6 text-ink-muted">

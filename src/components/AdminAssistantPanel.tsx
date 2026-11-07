@@ -217,7 +217,7 @@ export function AssistantReportPanel() {
           type="button"
           onClick={() => ask(question)}
           disabled={isRunning}
-          className="h-11 rounded-xl bg-accent px-4 text-sm font-semibold text-on-accent disabled:opacity-50"
+          className="h-11 rounded-full bg-accent px-4 text-sm font-semibold text-on-accent disabled:opacity-50"
         >
           {isRunning ? "..." : "Ρώτα"}
         </button>

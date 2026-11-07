@@ -22,7 +22,7 @@ export default function ManualBarcodeInput({
   hint = "Χρησιμοποίησέ την αν η κάμερα δεν αναγνωρίζει το barcode.",
 }: ManualBarcodeInputProps) {
   return (
-    <div className="rounded-2xl border border-line-subtle bg-surface/70 p-4">
+    <div className="rounded-3xl border border-line-subtle bg-surface/70 p-4">
       <label
         htmlFor="manual-barcode"
         className="text-sm font-semibold text-ink-muted"
@@ -63,7 +63,7 @@ export default function ManualBarcodeInput({
           onClick={() => onSubmit(value)}
           disabled={!value.trim()}
           aria-label="Συνέχεια με barcode"
-          className="h-12 shrink-0 rounded-xl bg-accent px-4 font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+          className="h-12 shrink-0 rounded-full bg-accent px-4 font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
         >
           Συνέχεια
         </button>

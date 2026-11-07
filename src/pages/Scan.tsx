@@ -14,6 +14,7 @@ import { refreshFromCatalogue } from "../services/catalogueRefresh";
 import { buildAnalysisRecord } from "../services/analysisRecord";
 import ManualBarcodeInput from "../components/ManualBarcodeInput";
 import CameraScreen from "../components/CameraScreen";
+import FlowHeader from "../components/FlowHeader";
 import { Keyboard, ScanLine } from "lucide-react";
 import type { ScanHistoryItem } from "../types";
 import { useCameraViewport } from "../contexts/CameraContext";
@@ -360,20 +361,17 @@ export default function Scan() {
       existingItem.analysis?.score.score ?? null;
 
     return (
-      <main className="min-h-screen bg-canvas px-4 pb-28 pt-5 text-ink">
+      <main className="min-h-screen bg-canvas px-4 pb-28 text-ink">
+        <FlowHeader
+          eyebrow="Υπάρχουσα καταχώρηση"
+          title="Το προϊόν υπάρχει ήδη"
+        />
+
         <section className="mx-auto max-w-md">
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-accent-strong">
-            Υπάρχουσα καταχώρηση
-          </p>
-
-          <h1 className="mt-1 text-2xl font-bold">
-            Το προϊόν υπάρχει ήδη
-          </h1>
-
-          <div className="mt-4 rounded-2xl border border-emerald-500/40 bg-emerald-950/20 p-4">
+          <div className="rounded-3xl border border-line-subtle bg-surface p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-xs font-semibold text-emerald-300">
+                <p className="text-xs font-semibold text-accent-strong">
                   Σαρώθηκε ξανά
                 </p>
 
@@ -384,12 +382,12 @@ export default function Scan() {
               </div>
 
               {scoreValue !== null && (
-                <div className="shrink-0 rounded-xl bg-emerald-500/15 px-3 py-2 text-center">
-                  <p className="text-[10px] uppercase tracking-wide text-emerald-300">
+                <div className="shrink-0 rounded-2xl bg-emerald-500/15 px-3 py-2 text-center">
+                  <p className="text-[10px] uppercase tracking-wide text-accent-strong">
                     Score
                   </p>
 
-                  <p className="text-lg font-bold text-emerald-100">
+                  <p className="text-lg font-bold text-ink">
                     {scoreValue}
                   </p>
                 </div>
@@ -429,7 +427,7 @@ export default function Scan() {
                   `/product/${existingItem.id}`,
                 )
               }
-              className="h-14 w-full rounded-2xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98]"
+              className="h-14 w-full rounded-full bg-accent px-5 text-base font-bold text-on-accent shadow-lg shadow-emerald-500/25 transition active:scale-[0.98]"
             >
               Προβολή καταχώρησης
             </button>
@@ -450,7 +448,7 @@ export default function Scan() {
                   )}`,
                 );
               }}
-              className="h-12 w-full rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink-muted transition active:scale-[0.98]"
+              className="h-12 w-full rounded-full border border-line bg-surface px-4 text-sm font-semibold text-ink-muted transition active:scale-[0.98]"
             >
               Νέα καταχώρηση ίδιου προϊόντος
             </button>
@@ -463,7 +461,7 @@ export default function Scan() {
                 setManualBarcode("");
                 startDecoding();
               }}
-              className="h-12 w-full rounded-xl px-4 text-sm font-semibold text-ink-muted transition active:bg-surface"
+              className="h-12 w-full rounded-full px-4 text-sm font-semibold text-ink-muted transition active:bg-surface"
             >
               Σάρωση άλλου προϊόντος
             </button>
@@ -523,7 +521,7 @@ export default function Scan() {
           <button
             type="button"
             onClick={() => handleBarcode(barcode)}
-            className="h-12 w-full rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.99]"
+            className="h-12 w-full rounded-full bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.99]"
           >
             Συνέχεια
           </button>
@@ -531,7 +529,7 @@ export default function Scan() {
           <button
             type="button"
             onClick={startDecoding}
-            className="h-11 w-full rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink"
+            className="h-11 w-full rounded-full border border-line bg-surface px-4 text-sm font-semibold text-ink"
           >
             Νέα σάρωση
           </button>
@@ -551,7 +549,7 @@ export default function Scan() {
           <button
             type="button"
             onClick={pauseScanning}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink"
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-full border border-line bg-surface px-4 text-sm font-semibold text-ink"
           >
             <Keyboard size={16} />
             Πληκτρολόγηση barcode
@@ -570,7 +568,7 @@ export default function Scan() {
           <button
             type="button"
             onClick={resumeScanning}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink"
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-full border border-line bg-surface px-4 text-sm font-semibold text-ink"
           >
             <ScanLine size={16} />
             {error ? "Δοκιμή ξανά" : "Σάρωση με κάμερα"}

@@ -117,3 +117,31 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 	50% { top: 90%; }
 }
 .gl-scan-line { animation: gl-scan-sweep 2.8s ease-in-out infinite; }
+
+/* Home hero motion (pages/Home.tsx). All stilled by the reduced-motion rule. */
+@keyframes gl-float {
+	0%, 100% { transform: translateY(0); }
+	50% { transform: translateY(-8px); }
+}
+@keyframes gl-ring-fill {
+	from { stroke-dashoffset: var(--ring-len); }
+	to { stroke-dashoffset: var(--ring-to); }
+}
+@keyframes gl-fade-up {
+	from { opacity: 0; transform: translateY(14px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+@keyframes gl-drift {
+	0%, 100% { transform: translate(0, 0) scale(1); }
+	50% { transform: translate(20px, 16px) scale(1.12); }
+}
+@keyframes gl-pulse-ring {
+	0% { box-shadow: 0 0 0 0 rgb(16 185 129 / 0.5); }
+	100% { box-shadow: 0 0 0 18px rgb(16 185 129 / 0); }
+}
+.gl-float { animation: gl-float 5s ease-in-out infinite; }
+.gl-float-slow { animation: gl-float 7s ease-in-out infinite reverse; }
+.gl-ring-fill { animation: gl-ring-fill 1.6s 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.gl-fade-up { animation: gl-fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.gl-drift { animation: gl-drift 12s ease-in-out infinite; }
+.gl-pulse-ring { animation: gl-pulse-ring 2.2s ease-out infinite; }

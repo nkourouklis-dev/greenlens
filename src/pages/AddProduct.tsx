@@ -1,4 +1,6 @@
+import { Barcode, Camera, Check } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import FlowHeader from "../components/FlowHeader";
 
 export default function AddProduct() {
   const [searchParams] = useSearchParams();
@@ -7,28 +9,41 @@ export default function AddProduct() {
   const barcode = searchParams.get("barcode") ?? "";
 
   return (
-    <main className="min-h-screen bg-canvas px-4 py-8 pb-20 text-ink">
-      <section className="mx-auto max-w-md rounded-3xl border border-line bg-surface p-6">
+    <main className="min-h-dvh bg-canvas px-4 pb-24 text-ink">
+      <FlowHeader
+        eyebrow="Νέο προϊόν"
+        title="Δεν το ξέρουμε ακόμα"
+        subtitle="Θα το προσθέσεις με μία φωτογραφία της ετικέτας."
+      />
 
-        <p className="text-sm font-semibold uppercase tracking-wide text-accent-strong">
-          Βήμα 1 ολοκληρώθηκε
-        </p>
-
-        <h1 className="mt-2 text-3xl font-bold text-ink">
-          Νέο προϊόν
-        </h1>
-
-        <div className="mt-6 rounded-2xl bg-surface-muted p-4">
-          <p className="text-sm text-ink-faint">Barcode</p>
-
-          <p className="mt-1 break-all text-xl font-bold text-ink">
-            {barcode || "Δεν έχει δοθεί barcode"}
-          </p>
+      <section className="mx-auto flex max-w-md flex-col gap-4">
+        <div className="flex items-center gap-4 rounded-3xl border border-line-subtle bg-surface p-4 shadow-sm">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/15 text-accent-strong">
+            <Barcode size={24} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1.5 text-xs font-semibold text-accent-strong">
+              <Check size={14} strokeWidth={3} />
+              Barcode αναγνωρίστηκε
+            </p>
+            <p className="mt-0.5 break-all text-xl font-bold tabular-nums tracking-wide">
+              {barcode || "Δεν έχει δοθεί barcode"}
+            </p>
+          </div>
         </div>
 
-        <p className="mt-6 text-ink-muted">
-          Επόμενο βήμα: φωτογραφία της λίστας συστατικών.
-        </p>
+        <div className="flex items-start gap-3 rounded-3xl border border-line-subtle bg-surface p-4 shadow-sm">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/15 text-accent-strong">
+            <Camera size={22} />
+          </span>
+          <div>
+            <p className="font-bold">Επόμενο βήμα</p>
+            <p className="mt-0.5 text-sm leading-5 text-ink-muted">
+              Φωτογραφία της λίστας συστατικών. Αν υπάρχει και πίνακας
+              διατροφικής αξίας, θα τον ζητήσουμε μετά.
+            </p>
+          </div>
+        </div>
 
         <button
           type="button"
@@ -37,11 +52,11 @@ export default function AddProduct() {
               `/ingredients-photo?barcode=${encodeURIComponent(barcode)}`,
             )
           }
-          className="mt-6 w-full rounded-2xl bg-accent py-4 font-semibold text-on-accent"
+          className="flex h-14 w-full items-center justify-center gap-2 rounded-full bg-accent text-base font-bold text-on-accent shadow-lg shadow-emerald-500/25 transition active:scale-[0.98]"
         >
+          <Camera size={20} />
           Συνέχεια στη φωτογράφιση
         </button>
-
       </section>
     </main>
   );

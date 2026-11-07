@@ -100,7 +100,7 @@ function AdminScanFailuresContent() {
           {failures.map((failure) => (
             <article
               key={failure.id}
-              className="rounded-2xl border border-line-subtle bg-surface/70 p-3"
+              className="rounded-3xl border border-line-subtle bg-surface/70 p-3"
             >
               <div className="flex flex-wrap items-center gap-2">
                 <span

@@ -136,7 +136,7 @@ export default function ShareScanButton({
       <button
         type="button"
         onClick={share}
-        className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 transition active:scale-[0.98]"
+        className="flex h-12 w-full items-center justify-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 transition active:scale-[0.98]"
       >
         <svg
           aria-hidden="true"

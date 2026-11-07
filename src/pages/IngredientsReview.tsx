@@ -23,7 +23,7 @@ import {
   splitAroundBlock,
   type ReviewStateKind,
 } from "../utils/reviewState";
-import PageHeader from "../components/PageHeader";
+import FlowHeader from "../components/FlowHeader";
 import type { ContentCategory } from "../types";
 
 const categoryOptions: Array<{
@@ -107,7 +107,7 @@ export default function IngredientsReview() {
   if (!draft) {
     return (
       <main className="bg-canvas px-4 text-ink">
-        <PageHeader eyebrow="Ανάγνωση ετικέτας" title="Έλεγχος ετικέτας" />
+        <FlowHeader eyebrow="Ανάγνωση ετικέτας" title="Έλεγχος ετικέτας" />
         <section className="mx-auto flex max-w-md flex-col gap-3">
           <p className="text-sm text-ink-muted">
             Δεν βρέθηκε ανάγνωση ετικέτας. Ξεκίνα μια νέα σάρωση.
@@ -115,7 +115,7 @@ export default function IngredientsReview() {
           <button
             type="button"
             onClick={() => navigate("/scan")}
-            className="mt-2 h-12 rounded-xl bg-accent font-bold text-on-accent"
+            className="mt-2 h-12 rounded-full bg-accent font-bold text-on-accent"
           >
             Νέα σάρωση
           </button>
@@ -200,17 +200,21 @@ export default function IngredientsReview() {
 
   return (
     <main className="bg-canvas px-4 text-ink">
-      <PageHeader eyebrow="Ανάγνωση ετικέτας" title="Έλεγχος κειμένου" />
+      <FlowHeader
+        eyebrow="Ανάγνωση ετικέτας"
+        title="Έλεγχος κειμένου"
+        subtitle="Έλεγξε ότι διαβάστηκε σωστά πριν την ανάλυση."
+      />
 
       <section className="mx-auto flex max-w-md flex-col gap-4">
         <img
           src={ocrDraft.image}
           alt="Η φωτογραφία της ετικέτας"
-          className="max-h-[32dvh] w-full rounded-2xl border border-line bg-surface object-contain"
+          className="max-h-[32dvh] w-full rounded-3xl border border-line-subtle bg-surface object-contain shadow-sm"
         />
 
         <div
-          className={`flex gap-3 rounded-2xl border p-4 ${style.box}`}
+          className={`flex gap-3 rounded-3xl border p-4 ${style.box}`}
           role="status"
           aria-live="polite"
         >
@@ -235,7 +239,7 @@ export default function IngredientsReview() {
               <button
                 type="button"
                 onClick={retake}
-                className="flex h-12 items-center justify-center gap-2 rounded-xl bg-accent font-bold text-on-accent"
+                className="flex h-14 items-center justify-center gap-2 rounded-full bg-accent font-bold text-on-accent shadow-lg shadow-emerald-500/25 transition active:scale-[0.98]"
               >
                 <Camera size={18} aria-hidden />
                 {state.kind === "table_only"
@@ -246,7 +250,7 @@ export default function IngredientsReview() {
                 <button
                   type="button"
                   onClick={confirm}
-                  className="h-12 rounded-xl border border-line bg-surface font-semibold text-ink"
+                  className="h-12 rounded-full border border-line bg-surface font-semibold text-ink"
                 >
                   {state.kind === "table_only"
                     ? "Συνέχεια μόνο με τον πίνακα"
@@ -259,14 +263,14 @@ export default function IngredientsReview() {
               <button
                 type="button"
                 onClick={confirm}
-                className="h-12 rounded-xl bg-accent font-bold text-on-accent"
+                className="h-14 rounded-full bg-accent font-bold text-on-accent shadow-lg shadow-emerald-500/25 transition active:scale-[0.98]"
               >
                 Συνέχεια
               </button>
               <button
                 type="button"
                 onClick={retake}
-                className="flex h-12 items-center justify-center gap-2 rounded-xl border border-line bg-surface font-semibold text-ink-muted"
+                className="flex h-12 items-center justify-center gap-2 rounded-full border border-line bg-surface font-semibold text-ink-muted"
               >
                 <Camera size={18} aria-hidden />
                 Νέα φωτογραφία
@@ -277,7 +281,7 @@ export default function IngredientsReview() {
 
         <section
           aria-labelledby="ocr-text-title"
-          className="rounded-2xl border border-line bg-surface"
+          className="rounded-3xl border border-line-subtle bg-surface shadow-sm"
         >
           <div className="flex items-center justify-between gap-2 px-4 pt-2">
             <h2 id="ocr-text-title" className="py-2 text-sm font-semibold text-ink">

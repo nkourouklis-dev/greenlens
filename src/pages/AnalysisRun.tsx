@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Loader2, WifiOff } from "lucide-react";
 import { startAnalysis } from "../services/analysisJobs";
-import PageHeader from "../components/PageHeader";
+import FlowHeader from "../components/FlowHeader";
 
 type Phase = "running" | "offline" | "failed";
 
@@ -75,7 +75,11 @@ export default function AnalysisRun() {
 
   return (
     <main className="min-h-dvh bg-canvas px-4 text-ink">
-      <PageHeader eyebrow="GreenLens" title="Ανάλυση προϊόντος" />
+      <FlowHeader
+        eyebrow="GreenLens"
+        title="Ανάλυση προϊόντος"
+        subtitle="Διαβάζουμε την ετικέτα και υπολογίζουμε τη βαθμολογία."
+      />
 
       <section className="mx-auto flex max-w-md flex-col gap-4">
         {phase === "running" && (
@@ -83,13 +87,15 @@ export default function AnalysisRun() {
             <div
               role="status"
               aria-live="polite"
-              className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-4"
+              className="flex items-center gap-3 rounded-3xl border border-line-subtle bg-surface p-4 shadow-sm"
             >
-              <Loader2
-                size={22}
-                className="shrink-0 animate-spin text-accent-strong"
-                aria-hidden
-              />
+              <span className="gl-pulse-ring flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
+                <Loader2
+                  size={22}
+                  className="animate-spin text-accent-strong"
+                  aria-hidden
+                />
+              </span>
               <div className="min-w-0">
                 <p className="font-semibold text-ink">
                   Διαβάζω τα συστατικά και υπολογίζω τη βαθμολογία
@@ -106,7 +112,7 @@ export default function AnalysisRun() {
               <button
                 type="button"
                 onClick={() => navigate("/scan")}
-                className="h-12 rounded-xl border border-line bg-surface font-semibold text-ink"
+                className="h-12 rounded-full border border-line bg-surface font-semibold text-ink"
               >
                 Συνέχισε να σκανάρεις, θα σε ειδοποιήσω
               </button>
@@ -114,7 +120,7 @@ export default function AnalysisRun() {
 
             {/* The shape of the result, so the wait reads as "almost there". */}
             <div aria-hidden className="flex flex-col gap-3">
-              <div className="flex items-center gap-4 rounded-2xl border border-line-subtle bg-surface p-4">
+              <div className="flex items-center gap-4 rounded-3xl border border-line-subtle bg-surface p-4">
                 <div className="h-16 w-16 animate-pulse rounded-full bg-surface-muted" />
                 <div className="flex flex-1 flex-col gap-2">
                   <div className="h-4 w-2/3 animate-pulse rounded bg-surface-muted" />
@@ -170,7 +176,7 @@ export default function AnalysisRun() {
               <button
                 type="button"
                 onClick={() => navigate(`/product/${id}`)}
-                className="h-12 rounded-xl border border-line bg-surface font-semibold text-ink-muted"
+                className="h-12 rounded-full border border-line bg-surface font-semibold text-ink-muted"
               >
                 Πίσω στο προϊόν
               </button>
@@ -178,7 +184,7 @@ export default function AnalysisRun() {
               <button
                 type="button"
                 onClick={performAnalysis}
-                className="h-12 rounded-xl bg-accent font-bold text-on-accent"
+                className="h-12 rounded-full bg-accent font-bold text-on-accent shadow-lg shadow-emerald-500/25"
               >
                 Δοκιμή ξανά
               </button>

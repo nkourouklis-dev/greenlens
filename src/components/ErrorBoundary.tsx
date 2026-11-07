@@ -49,7 +49,7 @@ export default class ErrorBoundary extends Component<
                 this.setState({ hasError: false });
                 window.location.assign("/");
               }}
-              className="mt-5 h-14 w-full rounded-xl bg-accent font-bold text-on-accent"
+              className="mt-5 h-14 w-full rounded-full bg-accent font-bold text-on-accent"
             >
               Αρχική οθόνη
             </button>

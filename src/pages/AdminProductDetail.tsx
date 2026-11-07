@@ -625,7 +625,7 @@ function AdminProductDetailContent() {
                 isSavingName ||
                 nameDraft.trim() === (product.productName ?? "")
               }
-              className="h-12 shrink-0 rounded-xl bg-accent px-4 text-sm font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+              className="h-12 shrink-0 rounded-full bg-accent px-4 text-sm font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
             >
               {isSavingName ? "..." : "Αποθήκευση"}
             </button>
@@ -675,7 +675,7 @@ function AdminProductDetailContent() {
               type="button"
               onClick={() => handleAnalyze()}
               disabled={isAnalyzing}
-              className="mt-3 h-14 w-full rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+              className="mt-3 h-14 w-full rounded-full bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
             >
               {isAnalyzing ? "Ανάλυση..." : "Ανάλυση τώρα"}
             </button>
@@ -733,7 +733,7 @@ function AdminProductDetailContent() {
         )}
 
         {product.status !== "draft" && (
-          <div className="mt-5 rounded-2xl border border-line-subtle bg-surface/70 p-4">
+          <div className="mt-5 rounded-3xl border border-line-subtle bg-surface/70 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
               Ανάλυση ξανά
             </p>
@@ -763,7 +763,7 @@ function AdminProductDetailContent() {
               type="button"
               onClick={() => void handleRescore()}
               disabled={isRescoring || isAnalyzing}
-              className="mt-3 h-12 w-full rounded-xl border border-line px-4 text-sm font-semibold text-ink transition active:scale-[0.98] disabled:cursor-not-allowed disabled:text-ink-faint"
+              className="mt-3 h-12 w-full rounded-full border border-line px-4 text-sm font-semibold text-ink transition active:scale-[0.98] disabled:cursor-not-allowed disabled:text-ink-faint"
             >
               {isRescoring
                 ? "Επανυπολογισμός..."
@@ -774,7 +774,7 @@ function AdminProductDetailContent() {
               type="button"
               onClick={() => void handleAnalyze()}
               disabled={isAnalyzing || isRescoring}
-              className="mt-3 h-12 w-full rounded-xl bg-accent px-4 text-sm font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+              className="mt-3 h-12 w-full rounded-full bg-accent px-4 text-sm font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
             >
               {isAnalyzing ? "Ανάλυση..." : "Ανάλυση (όλες οι φωτογραφίες)"}
             </button>
@@ -782,7 +782,7 @@ function AdminProductDetailContent() {
         )}
 
         {product.ocrTexts && product.ocrTexts.entries.length > 0 && (
-          <details className="mt-3 rounded-2xl border border-line-subtle bg-surface/70 p-4">
+          <details className="mt-3 rounded-3xl border border-line-subtle bg-surface/70 p-4">
             <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-ink-faint">
               Κείμενο που διάβασε το OCR ({product.ocrTexts.entries.length}) ·
               μόνο για admin
@@ -1168,7 +1168,7 @@ function AdminProductDetailContent() {
                 type="button"
                 onClick={handleSave}
                 disabled={isSaving}
-                className="h-14 w-full rounded-xl bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+                className="h-14 w-full rounded-full bg-accent px-5 text-base font-bold text-on-accent transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
               >
                 {isSaving ? "Αποθήκευση..." : "Αποθήκευση"}
               </button>
@@ -1206,7 +1206,7 @@ function AdminProductDetailContent() {
           aria-modal="true"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
         >
-          <div className="w-full max-w-sm rounded-2xl border border-line bg-surface p-5">
+          <div className="w-full max-w-sm rounded-3xl border border-line bg-surface p-5">
             <h2 className="text-lg font-bold text-ink">
               Διαγραφή προϊόντος;
             </h2>
@@ -1230,7 +1230,7 @@ function AdminProductDetailContent() {
                 type="button"
                 onClick={() => setShowDeleteConfirm(false)}
                 disabled={isDeleting}
-                className="h-12 flex-1 rounded-xl border border-line text-sm font-semibold text-ink-muted"
+                className="h-12 flex-1 rounded-full border border-line text-sm font-semibold text-ink-muted"
               >
                 Άκυρο
               </button>
@@ -1239,7 +1239,7 @@ function AdminProductDetailContent() {
                 type="button"
                 onClick={handleDelete}
                 disabled={isDeleting}
-                className="h-12 flex-1 rounded-xl bg-red-500 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                className="h-12 flex-1 rounded-full bg-red-500 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isDeleting ? "Διαγραφή..." : "Διαγραφή"}
               </button>

@@ -227,7 +227,7 @@ function AdminProductsContent() {
           <button
             type="button"
             onClick={() => navigate("/admin/capture")}
-            className="flex h-11 shrink-0 items-center gap-2 rounded-xl bg-accent px-4 text-sm font-bold text-on-accent"
+            className="flex h-11 shrink-0 items-center gap-2 rounded-full bg-accent px-4 text-sm font-bold text-on-accent"
           >
             <Camera size={16} />
             Λήψη
@@ -371,7 +371,7 @@ function AdminProductsContent() {
                     `/admin/products/${encodeURIComponent(item.barcode)}`,
                   )
                 }
-                className="flex flex-col items-start gap-2 rounded-2xl border border-line-subtle bg-surface/70 p-3 text-left active:scale-[0.98]"
+                className="flex flex-col items-start gap-2 rounded-3xl border border-line-subtle bg-surface/70 p-3 text-left active:scale-[0.98]"
               >
                 <AdminPhotoThumbnail
                   r2Key={item.thumbnailR2Key}
@@ -414,7 +414,7 @@ function AdminProductsContent() {
                 setPage((current) => Math.max(1, current - 1))
               }
               disabled={page <= 1}
-              className="flex h-11 items-center gap-1 rounded-xl border border-line px-4 text-sm font-semibold text-ink-muted disabled:cursor-not-allowed disabled:text-ink-faintest"
+              className="flex h-11 items-center gap-1 rounded-full border border-line px-4 text-sm font-semibold text-ink-muted disabled:cursor-not-allowed disabled:text-ink-faintest"
             >
               <ChevronLeft size={16} />
               Προηγούμενη
@@ -432,7 +432,7 @@ function AdminProductsContent() {
                 )
               }
               disabled={page >= totalPages}
-              className="flex h-11 items-center gap-1 rounded-xl border border-line px-4 text-sm font-semibold text-ink-muted disabled:cursor-not-allowed disabled:text-ink-faintest"
+              className="flex h-11 items-center gap-1 rounded-full border border-line px-4 text-sm font-semibold text-ink-muted disabled:cursor-not-allowed disabled:text-ink-faintest"
             >
               Επόμενη
               <ChevronRight size={16} />

@@ -17,7 +17,7 @@ export default function ScoreBreakdownPanel(props: {
 
   if (score.score === null) {
     return (
-      <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
+      <section className="rounded-3xl border border-slate-800 bg-slate-900 shadow-sm p-4">
         <h2 className="font-bold">Ανάλυση βαθμολογίας</h2>
 
         <p className="mt-2 text-sm leading-6 text-slate-400">
@@ -86,7 +86,7 @@ export default function ScoreBreakdownPanel(props: {
     score.score !== null && rawComputedScore !== score.score;
 
   return (
-    <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
+    <section className="rounded-3xl border border-slate-800 bg-slate-900 shadow-sm p-4">
       <h2 className="font-bold">Ανάλυση βαθμολογίας</h2>
 
       <div className="mt-3 flex items-center justify-between text-sm">

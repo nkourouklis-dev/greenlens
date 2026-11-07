@@ -193,7 +193,8 @@ export default function CameraScreen({
       </div>
 
       {/* Bottom sheet — kept compact so the camera gets the height. */}
-      <div className="relative -mt-6 rounded-t-[24px] bg-canvas px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 text-ink">
+      <div className="relative -mt-6 rounded-t-[28px] bg-canvas px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 text-ink shadow-[0_-8px_30px_rgb(0_0_0/0.25)]">
+        <span aria-hidden className="mx-auto mb-3 block h-1 w-10 rounded-full bg-line" />
         <div className="mx-auto flex max-w-md flex-col gap-3">{children}</div>
       </div>
     </div>
