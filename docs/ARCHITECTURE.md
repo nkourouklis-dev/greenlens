@@ -120,7 +120,9 @@ front photo (identification + catalogue thumbnail) → one back-label photo (ing
 requested once per session. Captures are downscaled to ≤ 2400 px long side, JPEG 0.88 (≈ 1 MB). A gallery picker
 is available wherever a photo is requested. Results carry a share action.
 
-**Content categories** (`contentCategory.ts`): keyword heuristic, AI fallback, user override →
+**Ingredient analysis has no language model** (`deterministicAnalysis.ts`, 2026-11-07): names come from the label list, ranking from curated rules + `ingredient_knowledge`, summary is a fixed Greek sentence. Catalogue copy (summary/verdict) is drafted after the response via `afterResponse`. Works for food and cosmetic (INCI) lists. Nutrition-only and chemical paths still call Workers AI.
+
+**Content categories** (`contentCategory.ts`): a printed "Συστατικά/Ingredients" heading always routes to `ingredients` (which reads list + table together via `analyzeFoodLabels`); otherwise keyword heuristic, AI fallback, user override →
 `ingredients` | `nutrition` | `chemical_composition` | `unknown`. Each has its own extraction/scoring/insights path
 (water mineral analysis must not be scored with cosmetic-ingredient logic). Content gates reject text with no real
 measurements/ingredients and log the refusal to `scan_failures`.

@@ -147,6 +147,7 @@ import {
   extractIngredientText,
 } from "./ingredientText";
 import { detectProductType } from "./productType";
+import { buildDeterministicAnalysis } from "./deterministicAnalysis";
 import {
   inspectNutritionPanel,
   type NutritionPanelRead,
@@ -1299,58 +1300,6 @@ function withDraftCopy(
           : executiveSummary.watchOutFor,
     },
   };
-}
-
-/**
- * Puts the assistant's copy into a scan's result *before* it is saved and
- * returned, so every user who scans sees the written summary, verdict and
- * cautions on their own screen — not only the next person, after a
- * background write.
- *
- * Skipped when the catalogue already holds a person's word for this barcode
- * (a verified row, or copy marked manual), which a user's scan must not
- * replace. Never allowed to fail the scan: a model hiccup returns the
- * analysis exactly as it was, with the model's own copy.
- */
-async function withAssistantCopy<T extends Record<string, unknown>>(
-  env: Env,
-  barcode: string,
-  productName: string | null,
-  responseBody: T,
-): Promise<T> {
-  if (!barcode) {
-    return responseBody;
-  }
-
-  try {
-    const existing = await getAdminProduct(env.DB, barcode);
-
-    if (
-      existing &&
-      (existing.status === "verified" ||
-        readCopySource(existing.analysisResult) === "manual")
-    ) {
-      return responseBody;
-    }
-
-    const draft = await generateAssistantDraftFromAnalysis(
-      env,
-      productName ?? existing?.productName ?? null,
-      responseBody,
-    );
-
-    return withDraftCopy(responseBody, draft) as T;
-  } catch (caughtError) {
-    console.error("scan_copy_draft_failed", {
-      barcode,
-      message:
-        caughtError instanceof Error
-          ? caughtError.message
-          : String(caughtError).slice(0, 300),
-    });
-
-    return responseBody;
-  }
 }
 
 async function autoApplyAssistantDraft(
@@ -4470,6 +4419,16 @@ async function resolveContentCategory(
     return { category: categoryOverride, confidence: 1, source: "override" };
   }
 
+  // A printed "Συστατικά:" / "Ingredients:" heading means there is an
+  // ingredient list on this photo, however many nutrition or mineral words
+  // surround it. analyzeFoodLabels reads the list and any table together and
+  // falls back to the table alone when the list is unusable, so routing such
+  // a label anywhere else only loses the list (chocolate, schnitzel, yoghurt
+  // and a beer were all scored as a bare table or a water analysis).
+  if (evaluateLabelText(confirmedText).hasIngredientHeading) {
+    return { category: "ingredients", confidence: 0.9, source: "heuristic" };
+  }
+
   const heuristic = detectContentCategoryHeuristic(confirmedText);
 
   if (heuristic.category !== "unknown") {
@@ -5047,130 +5006,40 @@ async function analyzeIngredientsCore(
     });
   }
 
-  const prompt = [
-    "Analyze the confirmed ingredient list below.",
-    "",
-    "Return ONLY this exact JSON structure:",
-    "{",
-    '  "productType": "food",',
-    '  "summary": "short neutral summary in Greek",',
-    '  "positives": ["short Greek phrase"],',
-    '  "attentionItems": ["short Greek phrase"],',
-    '  "potentialAllergens": ["ingredient name"],',
-    '  "ingredientFindings": [',
-    "    {",
-    '      "ingredientName": "AQUA",',
-    '      "normalizedName": "aqua",',
-    '      "severity": "info",',
-    '      "title": "short Greek title",',
-    '      "explanation": "short Greek explanation"',
-    "    }",
-    "  ],",
-    '  "insufficientDataReasons": [],',
-    '  "confidence": 0.6',
-    "}",
-    "",
-    "Field rules:",
-    "- productType must be exactly one of: food, cosmetic, unknown.",
-    "- Use food for anything edible or drinkable, including vinegar, oil, sauces, drinks and snacks.",
-    "- Use cosmetic for creams, lotions, shampoos, soaps and skincare.",
-    "- Use unknown only when the category is genuinely unclear.",
-    "- Determine productType from the actual ingredients, not from the example above.",
-    "- severity must be exactly one of: positive, info, attention, high_attention, unknown.",
-    "- In each finding, leave out sourceName, sourceUrl, confidence and evidenceType entirely. Add them only when you have verified evidence: then evidenceType is one of regulatory, scientific, label, and confidence is a number between 0 and 1.",
-    "- The top-level confidence must be a number between 0 and 1.",
-    "- Never leave a title or explanation empty, and never put an empty string in positives or attentionItems: leave the array empty instead.",
-    "",
-    "Content rules:",
-    "- Only analyze ingredients that appear in the provided text.",
-    "- Never add ingredients that are not in the provided list.",
-    "- Ignore any nutrition declaration values (energy, fat, carbohydrates, protein, vitamins with amounts).",
-    "- If the provided text contains no actual ingredient names, return empty arrays and explain in insufficientDataReasons.",
-    "- Ignore brand names, manufacturer/legal/country-of-origin text, and meaningless short codes or symbols — these are not ingredients.",
-    "- Being a recognised EU allergen (gluten/cereals, milk, egg, sulphites, nuts, peanuts, sesame, soy, fish, crustaceans, molluscs, celery, mustard, lupin) is NOT by itself a problem.",
-    '- For such an ingredient use severity "info" and describe what it is, not that it can cause an allergy — the app shows the allergen list separately.',
-    "- Reserve attention/high_attention for a real problem: artificial additives, excessive sugar/salt/fat, a substance with a documented safety concern, or an undeclared quantity.",
-    '- Naturally occurring sugar from an ingredient like dates, honey, fruit or fruit concentrate is not the same claim as added/refined sugar: phrase it as \"υψηλά φυσικά σάκχαρα (από [ingredient])\", never as a bare \"ζάχαρη\"/\"sugar\" claim that would read as contradicting a \"χωρίς ζάχαρη\"/\"no added sugar\" label.',
-    "- Standard food-safety processing named on the label — pasteurization, UHT/high heat treatment, sterilization, homogenization — is not itself a problem: use severity \"info\" for it, never attention/high_attention. These make a product safer to consume, not more concerning.",
-    "- Do not calculate a score.",
-    "- Do not claim unconditional product safety.",
-    "- Do not provide medical advice.",
-    "- Do not make pregnancy or child-safety conclusions.",
-    "- Do not claim toxicity or carcinogenicity without verified evidence.",
-    "- Do not invent regulatory status.",
-    "- Do not invent source names or URLs.",
-    '- Use severity "unknown" and evidenceType "none" when evidence is unavailable.',
-    "- Write summary, title and explanation in Greek.",
-    "- ingredientFindings has AT MOST 12 entries, however long the ingredient list is. Never write one entry per ingredient.",
-    "- Choose the entries in this order: first every ingredient with severity attention or high_attention, then preservatives, fragrances and additives, then notable active ingredients. Skip plain water, solvents and common fillers.",
-    "- potentialAllergens still lists every declared allergen; an allergen does not need its own entry in ingredientFindings.",
-    "- Keep title under 30 characters.",
-    "- Keep explanation under 90 characters.",
-    "- Return ONLY the JSON object. No commentary. No Markdown. No code fences.",
-    "",
-    "Confirmed ingredients:",
-    filteredModelInputText,
-  ].join("\n");
-
   try {
-    const startedAt = Date.now();
+    // Deductions come from the label text matched against curated rules, not
+    // from any model: the same rules also decide which ingredients get a card.
+    const ruleSet = await loadScoringRules(env.DB);
 
-    const modelOutput = await timedStage(requestId, "model_ingredients", () => env.AI.run(
-      textModel,
-      {
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are an ingredient analysis assistant. You always return a single valid JSON object and nothing else.",
-          },
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-        max_tokens: 2048,
-        temperature: 0.2,
-      },
-    ));
+    const ruleMatches = matchScoringRules(
+      scoredText,
+      ruleSet,
+    );
 
-    await recordUsage(env.DB, "workers_ai_text");
-
-    const modelText =
-      extractModelText(modelOutput);
-
-    const cleanedText = modelText
-      ? stripCodeFences(modelText)
-      : null;
-
-    const result =
-      parseAnalysis(modelOutput) ??
-      (cleanedText
-        ? parseAnalysis(cleanedText)
-        : null);
-
-    console.log("analysis_model_completed", {
+    console.log("scoring_rules_matched", {
       requestId,
       endpoint: "/api/analysis/run",
-      model: textModel,
-      durationMs: Date.now() - startedAt,
-      outputType: typeof modelOutput,
-      outputKeys:
-        typeof modelOutput === "object" &&
-        modelOutput !== null
-          ? Object.keys(modelOutput)
-          : [],
-      parsed: result !== null,
-      findings:
-        result?.ingredientFindings?.length ?? 0,
-      extractedLength: modelText?.length ?? 0,
-      sample: modelText?.slice(0, 400) ?? null,
-      status: "success",
+      aliasesLoaded: ruleSet.aliases.length,
+      matched: ruleMatches.map((match) => ({
+        ingredient: match.rule.normalizedName,
+        position: match.position,
+        points: match.weightedPoints,
+      })),
     });
 
-    if (!result) {
-      return { ok: false, kind: "model_failed" };
-    }
+    // No language model on this path: it cost 10-20 s per scan and a
+    // malformed reply lost the whole analysis, while everything it wrote was
+    // replaced by curated text or ignored by the scoring anyway.
+    const result = await timedStage(requestId, "build_analysis", () =>
+      buildDeterministicAnalysis({
+        ingredientText: filteredModelInputText,
+        ruleMatches,
+        productType: detectProductType(analysisText),
+        confidence: ocrConfidence,
+        db: env.DB,
+      }),
+    );
+
 
     const detectedType =
       detectProductType(analysisText);
@@ -5232,26 +5101,6 @@ async function analyzeIngredientsCore(
     // evidence" state left to flag — a caller only ever sees a full score
     // (this path) or the gate's rejection reasons (the early return above),
     // never both.
-    // Deductions come from the label text matched against curated rules, not
-    // from the model's severities — see ingredientRules.ts for why.
-    const ruleSet = await loadScoringRules(env.DB);
-
-    const ruleMatches = matchScoringRules(
-      scoredText,
-      ruleSet,
-    );
-
-    console.log("scoring_rules_matched", {
-      requestId,
-      endpoint: "/api/analysis/run",
-      aliasesLoaded: ruleSet.aliases.length,
-      matched: ruleMatches.map((match) => ({
-        ingredient: match.rule.normalizedName,
-        position: match.position,
-        points: match.weightedPoints,
-      })),
-    });
-
     // A table that was on the label but could not be trusted is said so,
     // next to the score, instead of silently scoring the list alone — the
     // way Kaiser pilsner came out at 100. Open Food Facts (or the label)
@@ -5351,12 +5200,7 @@ async function analyzeIngredientsCore(
 
     // The written summary, verdict and cautions are part of what the user
     // gets back, not a later background write.
-    const responseBody =
-      score.score === null
-        ? scanBody
-        : await timedStage(requestId, "scan_copy", () =>
-            withAssistantCopy(env, barcode, productTitle ?? null, scanBody),
-          );
+    const responseBody = scanBody;
 
     // Only cache a genuinely complete, scored result — score.score can
     // still be null here (insufficient_data band) even after a valid AI
@@ -5372,6 +5216,12 @@ async function analyzeIngredientsCore(
         analysisResult: responseBody,
         versionSource,
       }));
+
+      // The written summary and verdict are drafted after the answer is sent;
+      // waiting for a second model call here doubled every scan's latency.
+      await afterResponse(env, requestId, "scan_copy", () =>
+        autoApplyAssistantDraft(env, barcode),
+      );
     }
 
     return { ok: true, responseBody };
@@ -5729,12 +5579,7 @@ async function analyzeNutritionCore(
     };
 
     // See the matching step on the ingredients path.
-    const responseBody =
-      score.score === null
-        ? scanBody
-        : await timedStage(requestId, "scan_copy", () =>
-            withAssistantCopy(env, barcode, productTitle ?? null, scanBody),
-          );
+    const responseBody = scanBody;
 
     // A table the reader could not vouch for is exactly the case worth a
     // regression fixture, and without its OCR text there is nothing to
@@ -5762,6 +5607,12 @@ async function analyzeNutritionCore(
         analysisResult: responseBody,
         versionSource,
       }));
+
+      // The written summary and verdict are drafted after the answer is sent;
+      // waiting for a second model call here doubled every scan's latency.
+      await afterResponse(env, requestId, "scan_copy", () =>
+        autoApplyAssistantDraft(env, barcode),
+      );
     }
 
     return { ok: true, responseBody };
