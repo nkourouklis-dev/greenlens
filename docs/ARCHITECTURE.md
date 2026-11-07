@@ -116,7 +116,7 @@ Every response carries `x-request-id`; `wrangler tail` plus stage-timing lines r
 **Consumer scan:** barcode (native `BarcodeDetector` first, ZXing fallback, decode from downscaled frames, 3 matching
 reads) → `identify` → D1 `products` cache hit returns the stored result with **no photography at all** → otherwise
 front photo (identification + catalogue thumbnail) → one back-label photo (ingredients, nutrition, or both) →
-`ocr/extract` → review screen (optional category override) → `analysis/run` → product page. Camera permission is
+`ocr/extract` → review screen → `analysis/run` → product page. The review screen (`src/utils/reviewState.ts`) shows exactly one verdict (ready / incomplete / table only / nothing usable) with one next step; the category it implies is what the analysis is asked for, and an override is still possible. Verdicts are pinned against real production failures in `worker/fixtures/scanFailures.json`. Camera permission is
 requested once per session. Captures are downscaled to ≤ 2400 px long side, JPEG 0.88 (≈ 1 MB). A gallery picker
 is available wherever a photo is requested. Results carry a share action.
 
@@ -206,6 +206,8 @@ nutrition step skipped for non-foods with vision fallback (10-10); barcode decod
 σύνδεση με την υπηρεσία ανάλυσης" because the Worker's CORS allow-list only knew `pages.dev` (403 → browser network
 error). Fixed in `c0fb453` and the Worker redeployed (version `afa14c2a`). Same day: captured photos downscaled, and
 client errors now distinguish offline / timeout / connection failure and log server status codes (`88ab4f7`).
+
+**Phase 8 — Speed, routing and mobile UX (11-07).** Ingredient analysis no longer calls a model (`deterministicAnalysis.ts`); catalogue copy is drafted after the response; a printed "Συστατικά" heading always routes to the ingredients path; the ingredient block ends at a garbled nutrition heading, a net-weight line or any kJ row. Review screen rebuilt as a single-verdict state machine; `viewport-fit=cover` with a status-bar strip, nav hidden while typing, 16 px fields; the analysis wait shows elapsed time and survives going offline; the camera stream is re-acquired after iOS ends it.
 
 ## 8. Known open items and decisions pending
 
