@@ -367,9 +367,33 @@ export function CameraProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const start = useCallback(async () => {
-    if (streamRef.current) {
-      setIsActive(true);
-      return;
+    // A paused stream (see stop) is switched back on: no new getUserMedia,
+    // so no new permission prompt. One whose track was ended by the system
+    // (phone locked, app switched) cannot be revived and is asked for again.
+    const existing = streamRef.current;
+
+    if (existing) {
+      const track = existing.getVideoTracks()[0];
+
+      if (track && track.readyState === "live") {
+        existing.getVideoTracks().forEach((t) => {
+          t.enabled = true;
+        });
+
+        if (videoRef.current) {
+          if (videoRef.current.srcObject !== existing) {
+            videoRef.current.srcObject = existing;
+          }
+
+          await videoRef.current.play().catch(() => {});
+        }
+
+        setIsActive(true);
+        return;
+      }
+
+      existing.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     }
     if (startingRef.current) {
       return startingRef.current;
@@ -412,12 +436,17 @@ export function CameraProvider({ children }: { children: ReactNode }) {
     return attempt;
   }, []);
 
+  // "Stop" pauses: the video track is disabled, which switches the camera
+  // hardware (and the browser's recording indicator) off, but the stream and
+  // the permission grant are kept. Closing it for real made iPhone Safari and
+  // the home-screen app ask for camera access again on every new scan.
   const stop = useCallback(() => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
+    streamRef.current?.getVideoTracks().forEach((track) => {
+      track.enabled = false;
+    });
 
     if (videoRef.current) {
-      videoRef.current.srcObject = null;
+      videoRef.current.pause();
     }
 
     setIsActive(false);
