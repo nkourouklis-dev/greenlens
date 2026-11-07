@@ -1,3 +1,4 @@
+import { isUnusableCopy } from "./copyQuality";
 /**
  * The admin/PIM assistant. Two jobs, one endpoint:
  *
@@ -283,6 +284,8 @@ export function buildDraftPrompt(params: {
     "- overallVerdict: μία πρόταση που δικαιολογεί τη βαθμολογία, με βάση το «ΤΙ ΕΠΗΡΕΑΣΕ ΤΗ ΒΑΘΜΟΛΟΓΙΑ» όπου υπάρχει.",
     "- highlights: 2 έως 4 θετικά, το καθένα το πολύ 8 λέξεις.",
     "- watchOutFor: 0 έως 3 σημεία προσοχής, μόνο όσα προκύπτουν από τα ευρήματα.",
+    "- Κάθε σημείο στο watchOutFor λέει ποιο συστατικό και γιατί. Ποτέ γενικόλογες φράσεις όπως «Χημικές ουσίες»· αν δεν υπάρχει συγκεκριμένο σημείο, άφησε τη λίστα κενή.",
+    "- Γράψε σωστά ελληνικά ή τα ονόματα συστατικών όπως τυπώνονται στην ετικέτα. Μην ανακατεύεις ελληνικά και λατινικά μέσα στην ίδια λέξη.",
     "- Μην αναφέρεις συστατικό που δεν υπάρχει παραπάνω. Χωρίς διατροφικούς ισχυρισμούς υγείας.",
   ].join("\n");
 }
@@ -320,10 +323,13 @@ export function parseAssistantDraft(
   const record = parsed as Record<string, unknown>;
 
   const summary =
-    typeof record.summary === "string" ? record.summary.trim() : "";
+    typeof record.summary === "string" && !isUnusableCopy(record.summary)
+      ? record.summary.trim()
+      : "";
 
   const overallVerdict =
-    typeof record.overallVerdict === "string"
+    typeof record.overallVerdict === "string" &&
+    !isUnusableCopy(record.overallVerdict)
       ? record.overallVerdict.trim()
       : "";
 
@@ -347,6 +353,6 @@ function toStringList(value: unknown): string[] {
   return value
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
-    .filter((item) => item.length > 0)
+    .filter((item) => item.length > 0 && !isUnusableCopy(item))
     .slice(0, 6);
 }

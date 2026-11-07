@@ -1,10 +1,14 @@
 import { CheckCircle2, AlertTriangle } from "lucide-react";
 import type { ExecutiveSummary } from "../types";
+import { usableCopyLines } from "../../worker/copyQuality";
 
 export default function ExecutiveSummaryCard(props: {
   summary: ExecutiveSummary;
 }) {
   const { summary } = props;
+  // Old records can still hold broken or empty-sounding lines from a model.
+  const highlights = usableCopyLines(summary.highlights);
+  const watchOutFor = usableCopyLines(summary.watchOutFor);
 
   return (
     <section className="rounded-2xl border border-slate-800 bg-slate-900 shadow-sm p-4">
@@ -38,9 +42,9 @@ export default function ExecutiveSummaryCard(props: {
         </div>
       </div>
 
-      {summary.highlights.length > 0 && (
+      {highlights.length > 0 && (
         <ul className="mt-4 space-y-2 text-sm leading-6 text-slate-300">
-          {summary.highlights.map((highlight) => (
+          {highlights.map((highlight) => (
             <li key={highlight} className="flex items-start gap-2">
               <CheckCircle2
                 size={16}
@@ -52,9 +56,9 @@ export default function ExecutiveSummaryCard(props: {
         </ul>
       )}
 
-      {summary.watchOutFor.length > 0 && (
+      {watchOutFor.length > 0 && (
         <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-300">
-          {summary.watchOutFor.map((item) => (
+          {watchOutFor.map((item) => (
             <li key={item} className="flex items-start gap-2">
               <AlertTriangle
                 size={16}

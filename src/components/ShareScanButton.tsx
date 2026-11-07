@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { ScoreBreakdown } from "../types";
+import { isUnusableCopy } from "../../worker/copyQuality";
 
 type ShareScanButtonProps = {
   productName?: string;
@@ -13,7 +14,7 @@ type ShareScanButtonProps = {
   allergens?: string[];
 };
 
-const GREENLENS_URL = "https://greenlens.pages.dev";
+const GREENLENS_URL = "https://greenlens.stoaops.com";
 
 // Mirrors the dot colors in scoreBand.ts, so a shared scan reads the same
 // verdict color as the app itself; insufficient_data gets no emoji since
@@ -65,7 +66,7 @@ export default function ShareScanButton({
     const bullets = (label: string, items?: string[]) => {
       const clean = (items ?? [])
         .map((item) => item?.trim())
-        .filter(Boolean)
+        .filter((item): item is string => Boolean(item) && !isUnusableCopy(item as string))
         .slice(0, 4);
 
       if (clean.length === 0) {
