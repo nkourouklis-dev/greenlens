@@ -37,6 +37,29 @@ export default function MobileNav() {
     };
   }, [hidesOnScroll]);
 
+  // With the on-screen keyboard open the floating bar would sit on top of the
+  // field being typed into (iOS keeps fixed elements above the keyboard).
+  const [typing, setTyping] = useState(false);
+
+  useEffect(() => {
+    const isTextField = (target: EventTarget | null) =>
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLInputElement &&
+        !["button", "checkbox", "radio", "submit", "file", "range"].includes(target.type));
+
+    const onFocusIn = (event: FocusEvent) => setTyping(isTextField(event.target));
+    const onFocusOut = () => setTyping(false);
+
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+    };
+  }, []);
+
   // The camera screens (CameraScreen.tsx) are full-screen with their own
   // back button and controls; the floating nav would sit on the shutter.
   if (chromeHidden) {
@@ -45,6 +68,7 @@ export default function MobileNav() {
 
   return (
     <>
+      <div aria-hidden className="gl-status-scrim" />
       {canGoBack && <div aria-hidden className="h-[calc(3.75rem+env(safe-area-inset-top))]" />}
       {canGoBack && (
         <button
@@ -62,6 +86,7 @@ export default function MobileNav() {
       )}
       <nav
         aria-label="Κύρια πλοήγηση"
+        hidden={typing}
         className="fixed inset-x-4 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 mx-auto max-w-md rounded-full border border-line-subtle bg-surface/90 p-1.5 shadow-xl shadow-black/10 backdrop-blur"
       >
         <div className="flex items-center justify-around">

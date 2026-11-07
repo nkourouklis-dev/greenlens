@@ -694,6 +694,9 @@ function indexOfNutritionTableStart(text: string): number {
     /nutrition(?:al)?\s+(?:declaration|information|facts)/u,
     // First energy row: "Ενέργεια 2339 kJ / 560 kcal" (value on this or the next lines).
     /(?:^|\n)\s*(?:ενεργεια|energy)[^\n]{0,20}(?:\n[^\n]{0,20}){0,2}?\d+(?:[.,]\d+)?\s*(?:kj|kcal)/u,
+    // Any line carrying an energy value in kJ, whatever script OCR used for
+    // the word around it ("ENEPTEIA 167 kJ" is Greek read as Latin letters).
+    /(?:^|\n)[^\n]*?\d+(?:[.,]\d+)?\s*kj\b/u,
   ];
 
   let best = -1;

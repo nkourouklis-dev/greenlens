@@ -1,5 +1,13 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import {
+  AlertTriangle,
+  Camera,
+  CheckCircle2,
+  ChevronDown,
+  Info,
+  Pencil,
+} from "lucide-react";
 import { updateHistoryItem } from "../services/historyService";
 import {
   clearOcrDraft,
@@ -8,106 +16,51 @@ import {
   updateOcrDraftText,
 } from "../services/captureDraftService";
 import { extractIngredientText } from "../../worker/ingredientText";
-import { detectContentCategoryHeuristic } from "../../worker/contentCategory";
 import { inspectNutritionPanel } from "../../worker/nutritionPanel";
 import { detectProductType } from "../../worker/productType";
+import {
+  reviewState,
+  splitAroundBlock,
+  type ReviewStateKind,
+} from "../utils/reviewState";
+import PageHeader from "../components/PageHeader";
 import type { ContentCategory } from "../types";
 
 const categoryOptions: Array<{
   value: "auto" | Exclude<ContentCategory, "unknown">;
   label: string;
 }> = [
-  { value: "auto", label: "Αυτόματος εντοπισμός (προτεινόμενο)" },
-  { value: "ingredients", label: "Συστατικά" },
-  { value: "nutrition", label: "Διατροφικά" },
-  { value: "chemical_composition", label: "Χημική Ανάλυση" },
+  { value: "auto", label: "Αυτόματα (προτείνεται)" },
+  { value: "ingredients", label: "Λίστα συστατικών" },
+  { value: "nutrition", label: "Διατροφικός πίνακας" },
+  { value: "chemical_composition", label: "Χημική ανάλυση (π.χ. νερό)" },
 ];
 
-// Reasons that describe extra noise on the label (manufacturer, website,
-// storage advice) are shown as a quiet notice: the analysis strips them
-// anyway. Everything else is surfaced as a warning (blockingReason below),
-// but never disables the Continue button — see canContinue.
-const informationalPatterns = [
-  "κατασκευαστ",
-  "ιστοσελίδ",
-  "ιστοσελιδ",
-  "website",
-  "manufacturer",
-  "distributor",
-  "αποθήκευσ",
-  "αποθηκευσ",
-  "storage",
-  "heading",
-];
-
-function isInformationalReason(
-  reason: string,
-): boolean {
-  const normalized = reason.toLowerCase();
-
-  return informationalPatterns.some((pattern) =>
-    normalized.includes(pattern),
-  );
-}
-
-type TextQuality = {
-  canContinue: boolean;
-  blockingReason: string | null;
-  notice: string | null;
+const stateStyle: Record<
+  ReviewStateKind,
+  { box: string; icon: typeof CheckCircle2; iconClass: string }
+> = {
+  ready: {
+    box: "border-emerald-300/40 bg-emerald-950",
+    icon: CheckCircle2,
+    iconClass: "text-emerald-400",
+  },
+  incomplete: {
+    box: "border-amber-300/40 bg-amber-950",
+    icon: Info,
+    iconClass: "text-amber-400",
+  },
+  table_only: {
+    box: "border-amber-300/40 bg-amber-950",
+    icon: Info,
+    iconClass: "text-amber-400",
+  },
+  nothing: {
+    box: "border-red-300/40 bg-red-950",
+    icon: AlertTriangle,
+    iconClass: "text-red-400",
+  },
 };
-
-// Single source of truth: the same deterministic validator the Worker uses.
-// No parallel heuristics, so the review step can never disagree with the
-// analysis step.
-function reviewTextQuality(
-  text: string,
-  confidence: number,
-): TextQuality {
-  const trimmed = text.trim();
-
-  if (trimmed.length < 12) {
-    return {
-      canContinue: false,
-      blockingReason:
-        "Πάρα πολύ σύντομο κείμενο. Χρειάζεται ολόκληρη η λίστα συστατικών.",
-      notice: null,
-    };
-  }
-
-  const extraction = extractIngredientText(
-    trimmed,
-    confidence,
-  );
-
-  const reasons = Array.isArray(extraction.reasons)
-    ? extraction.reasons
-    : [];
-
-  const blocking = reasons.filter(
-    (reason) => !isInformationalReason(reason),
-  );
-
-  const informational = reasons.filter(
-    isInformationalReason,
-  );
-
-  if (!extraction.isValid && blocking.length > 0) {
-    return {
-      canContinue: false,
-      blockingReason: blocking[0],
-      notice: null,
-    };
-  }
-
-  return {
-    canContinue: true,
-    blockingReason: null,
-    notice:
-      informational.length > 0
-        ? "Βρέθηκαν και στοιχεία εκτός λίστας συστατικών (π.χ. κατασκευαστής ή οδηγίες). Θα αγνοηθούν κατά την ανάλυση."
-        : null,
-  };
-}
 
 export default function IngredientsReview() {
   const { id = "" } = useParams();
@@ -128,65 +81,41 @@ export default function IngredientsReview() {
       draft.result.confidence,
     );
 
-    return (
-      isolated.ingredientText?.trim() ||
-      draft.result.rawText
-    );
+    return isolated.ingredientText?.trim() || draft.result.rawText;
   });
-
-  const textQuality = useMemo(
-    () =>
-      reviewTextQuality(
-        text,
-        draft?.result.confidence ?? 0,
-      ),
-    [text, draft?.result.confidence],
-  );
-
-  const detectedCategory = useMemo(
-    () => detectContentCategoryHeuristic(text).category,
-    [text],
-  );
 
   const [categoryOverride, setCategoryOverride] = useState<
     ContentCategory | undefined
-  >(() => {
-    if (draft?.categoryOverride) {
-      return draft.categoryOverride;
-    }
+  >(() => draft?.categoryOverride);
 
-    // A label carrying both a list and a table scores best as ingredients:
-    // that path reads the table too (worker/nutritionPanel.ts) and judges
-    // sugar and salt from the printed quantities, while still charging for
-    // palm oil, sweeteners, parabens and the rest. The nutrition path sees
-    // only the numbers, so letting a mixed label fall there silently throws
-    // away half the verdict. Preselected, not forced — the dropdown below
-    // still overrides it.
-    return draft?.result.labelType === "mixed" ? "ingredients" : undefined;
-  });
+  const [editing, setEditing] = useState(false);
 
-  function selectCategory(
-    value: "auto" | Exclude<ContentCategory, "unknown">,
-  ) {
-    const next = value === "auto" ? undefined : value;
-    setCategoryOverride(next);
-    updateOcrDraftCategoryOverride(id, next);
-  }
+  const state = useMemo(
+    () =>
+      reviewState({
+        text,
+        confidence: draft?.result.confidence ?? 0,
+        categoryOverride,
+        isMerge: draft?.mergeInto !== undefined,
+      }),
+    [text, draft?.result.confidence, draft?.mergeInto, categoryOverride],
+  );
+
+  // Something the user has to fix is shown in the editor straight away.
+  const showEditor = editing || state.kind === "nothing";
 
   if (!draft) {
     return (
-      <main className="bg-canvas px-4 py-6 text-ink">
-        <section className="mx-auto max-w-md flex flex-col gap-3">
-          <h1 className="text-2xl font-bold">
-            Έλεγχος ετικέτας
-          </h1>
+      <main className="bg-canvas px-4 text-ink">
+        <PageHeader eyebrow="Ανάγνωση ετικέτας" title="Έλεγχος ετικέτας" />
+        <section className="mx-auto flex max-w-md flex-col gap-3">
           <p className="text-sm text-ink-muted">
-            Δεν βρέθηκε ανάγνωση ετικέτας.
+            Δεν βρέθηκε ανάγνωση ετικέτας. Ξεκίνα μια νέα σάρωση.
           </p>
           <button
             type="button"
             onClick={() => navigate("/scan")}
-            className="mt-2 h-11 rounded-lg bg-accent font-bold text-on-accent"
+            className="mt-2 h-12 rounded-xl bg-accent font-bold text-on-accent"
           >
             Νέα σάρωση
           </button>
@@ -197,68 +126,25 @@ export default function IngredientsReview() {
 
   const ocrDraft = draft;
 
-  // A pure nutrition reading only triggers an informational notice below —
-  // it never blocks the flow (see canContinue).
-  const nutritionOnly =
-    ocrDraft.result.labelType === "nutrition";
+  function selectCategory(value: "auto" | Exclude<ContentCategory, "unknown">) {
+    const next = value === "auto" ? undefined : value;
+    setCategoryOverride(next);
+    updateOcrDraftCategoryOverride(id, next);
+  }
 
-  // A photo added to an existing analysis may be either half of the label;
-  // the Worker decides which, so the ingredient-list checks do not apply.
-  const isMerge = ocrDraft.mergeInto !== undefined;
-
-  const isIngredientsIntent =
-    !isMerge &&
-    (!categoryOverride || categoryOverride === "ingredients");
-
-  // For an ingredient list, continuing with text the validator rejects was
-  // a dead end: the user was sent on to take the front photo, and only then
-  // did the Worker — running this exact same extractIngredientText — refuse
-  // the analysis. Blocking here instead keeps the user on the one screen
-  // where they can actually fix it (edit the text, or retake the photo);
-  // the button enables the moment the edited text passes. Nutrition and
-  // chemical-composition text has its own Worker-side validator, so it
-  // only needs to be non-empty.
-  const canContinue =
-    text.trim().length > 0 &&
-    (!isIngredientsIntent || textQuality.canContinue);
-
-  // The model's own labelType disagrees with the deterministic check: it
-  // thought this was an ingredient label, but extractIngredientText rejected
-  // the text. Surface that mismatch as a notice so the user understands why
-  // the reading looks uncertain, even though they can still continue.
-  const modelBelievedIngredients =
-    !textQuality.canContinue &&
-    (ocrDraft.result.labelType === "ingredients" ||
-      ocrDraft.result.labelType === "mixed");
-
-  // The OCR confidence score only measures how well the model read the
-  // pixels, not whether it read an actual ingredient list. Only pair it
-  // with a "Λίστα συστατικών" label once the deterministic validator has
-  // confirmed the text really is one — otherwise a high OCR confidence on,
-  // say, a front-of-pack photo would read as "we found the ingredients"
-  // when nothing of the sort happened.
-  const confirmedIngredientList =
-    textQuality.canContinue && !nutritionOnly;
-
-  // The ingredients-specific quality checks below (extractIngredientText)
-  // only make sense when the user actually intends this to be an
-  // ingredient list. Once they've manually picked nutrition/chemical
-  // composition, showing "no ingredient list found" would just be
-  // confusing noise — the Worker's own category-specific validator is the
-  // real gate for those paths.
   function retake() {
     clearOcrDraft(id);
     navigate(
-      `/ingredients-photo?barcode=${encodeURIComponent(
-        ocrDraft.barcode,
-      )}`,
+      `/ingredients-photo?barcode=${encodeURIComponent(ocrDraft.barcode)}`,
     );
   }
 
   function confirm() {
-    if (!canContinue) return;
+    if (!state.canContinue) return;
 
-    updateOcrDraftText(id, text.trim());
+    const finalText = text.trim();
+
+    updateOcrDraftText(id, finalText);
 
     if (ocrDraft.mergeInto) {
       // No front photo to take: the product already has one. Straight to a
@@ -267,7 +153,7 @@ export default function IngredientsReview() {
 
       updateHistoryItem(mergeInto, {
         ocrRawText: ocrDraft.result.rawText,
-        userCorrectedText: text.trim(),
+        userCorrectedText: finalText,
         ocrConfidence: ocrDraft.result.confidence,
         ocrLabelType: ocrDraft.result.labelType,
         categoryOverride: undefined,
@@ -281,19 +167,24 @@ export default function IngredientsReview() {
       return;
     }
 
-    // The nutrition table is the next step unless this photo already holds
-    // one, the user chose to score it as a table alone, or the product is not
-    // a food at all — a cream or a water analysis has no table to photograph.
-    const hasTable = inspectNutritionPanel(text).tableDetected;
+    // What the screen said this photo is, is what the analysis is asked
+    // for, so the result cannot disagree with the review.
+    const category = categoryOverride ?? state.suggestedCategory;
 
+    if (category !== categoryOverride) {
+      updateOcrDraftCategoryOverride(id, category);
+    }
+
+    // The nutrition table is the next step unless this photo already holds
+    // one, it is being scored as a table alone, or the product is not a food
+    // at all: a cream or a water analysis has no table to photograph.
     const takesNoTable =
-      categoryOverride === "chemical_composition" ||
-      (isIngredientsIntent && detectProductType(text) === "cosmetic");
+      category === "chemical_composition" ||
+      category === "nutrition" ||
+      detectProductType(finalText) === "cosmetic";
 
     const next =
-      hasTable || takesNoTable || categoryOverride === "nutrition"
-        ? "/product-photo"
-        : "/nutrition-photo";
+      state.hasTable || takesNoTable ? "/product-photo" : "/nutrition-photo";
 
     navigate(
       `${next}?barcode=${encodeURIComponent(
@@ -302,210 +193,187 @@ export default function IngredientsReview() {
     );
   }
 
-  const label =
-    ocrDraft.result.labelType === "ingredients"
-      ? "Λίστα συστατικών"
-      : ocrDraft.result.labelType === "nutrition"
-        ? "Διατροφικός πίνακας"
-        : ocrDraft.result.labelType === "mixed"
-          ? "Μικτή ετικέτα"
-          : "Άγνωστος τύπος";
+  const style = stateStyle[state.kind];
+  const StateIcon = style.icon;
+  const highlighted = splitAroundBlock(text, state.ingredientBlock);
+  const asksForRetake = state.kind === "table_only" || state.kind === "nothing";
 
   return (
-    <main className="bg-canvas px-4 py-4 pb-20 text-ink">
-      <section className="mx-auto flex max-w-md flex-col gap-3">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.14em] text-accent-strong">
-            Ανάγνωση ετικέτας
-          </p>
-          <h1 className="mt-1 text-2xl font-bold">
-            Έλεγχος κειμένου
-          </h1>
-        </div>
+    <main className="bg-canvas px-4 text-ink">
+      <PageHeader eyebrow="Ανάγνωση ετικέτας" title="Έλεγχος κειμένου" />
 
+      <section className="mx-auto flex max-w-md flex-col gap-4">
         <img
           src={ocrDraft.image}
-          alt="Φωτογραφία ετικέτας συστατικών"
-          className="max-h-[40vh] w-full rounded-2xl border border-line object-contain"
+          alt="Η φωτογραφία της ετικέτας"
+          className="max-h-[32dvh] w-full rounded-2xl border border-line bg-surface object-contain"
         />
 
-        {isIngredientsIntent && (confirmedIngredientList ? (
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface p-3">
-            <span className="text-sm font-semibold text-ink">
-              {label}
-            </span>
-            <span className="text-sm font-bold text-accent-soft">
-              {Math.round(ocrDraft.result.confidence * 100)}
-              %
-            </span>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface p-3">
-            <span className="text-sm font-semibold text-ink-muted">
-              Κείμενο εντοπίστηκε, αλλά δεν μοιάζει
-              με λίστα συστατικών
-            </span>
-          </div>
-        ))}
-
-        {isIngredientsIntent && nutritionOnly && (
-          <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-2.5 text-xs text-amber-50">
-            Εντοπίστηκε διατροφικός πίνακας, όχι
-            λίστα συστατικών. Φωτογραφίστε την
-            περιοχή μετά τη λέξη «Συστατικά».
-          </p>
-        )}
-
-        {isIngredientsIntent && ocrDraft.result.labelType === "mixed" && (
-          <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-2.5 text-xs text-amber-50">
-            Ελέγξτε ότι το κείμενο περιλαμβάνει
-            ολόκληρη τη λίστα συστατικών.
-          </p>
-        )}
-
-        {isIngredientsIntent && textQuality.notice && (
-          <p
-            className="rounded-lg border border-line bg-surface p-2.5 text-xs text-ink-muted"
-            aria-live="polite"
-          >
-            {textQuality.notice}
-          </p>
-        )}
-
-        {isIngredientsIntent && textQuality.blockingReason && (
-          <div
-            className="rounded-lg border border-red-400/40 bg-red-400/10 p-2.5 text-xs text-red-50"
-            role="alert"
-            aria-live="polite"
-          >
-            <p>
-              Δεν εντοπίστηκε λίστα συστατικών.
-              Φωτογραφίστε την περιοχή με την ένδειξη
-              «Συστατικά» / «Ingredients» / «INCI».
-            </p>
-
-            <details className="mt-1.5">
-              <summary className="cursor-pointer text-[11px] text-red-100/70">
-                Λεπτομέρειες
-              </summary>
-              <div className="mt-1 space-y-1 text-[11px] leading-4 text-red-100/70">
-                {modelBelievedIngredients && (
-                  <p>
-                    Το αρχικό μοντέλο ανάγνωσης
-                    πίστεψε ότι βρήκε λίστα
-                    συστατικών, αλλά ο λεπτομερής
-                    έλεγχος δεν εντόπισε πραγματικά
-                    συστατικά σε αυτό το κείμενο.
-                  </p>
-                )}
-                <p>Λόγος: {textQuality.blockingReason}</p>
-              </div>
-            </details>
-          </div>
-        )}
-
-        <div>
-          <label
-            htmlFor="ocr-text"
-            className="block text-xs font-semibold uppercase tracking-wide text-ink-faint"
-          >
-            Κείμενο ετικέτας
-          </label>
-          <textarea
-            id="ocr-text"
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            className="mt-2 min-h-32 w-full rounded-lg border border-line bg-surface p-3 text-sm leading-5 text-ink"
-            placeholder="Κείμενο από ετικέτα..."
+        <div
+          className={`flex gap-3 rounded-2xl border p-4 ${style.box}`}
+          role="status"
+          aria-live="polite"
+        >
+          <StateIcon
+            size={22}
+            className={`mt-0.5 shrink-0 ${style.iconClass}`}
+            aria-hidden
           />
-          <p className="mt-1 text-xs text-ink-faintest">
-            Μπορείτε να διορθώσετε το κείμενο πριν
-            συνεχίσετε. Αυτό ακριβώς το κείμενο θα
-            αναλυθεί.
-          </p>
-        </div>
-
-        {ocrDraft.result.unreadableSegments.length > 0 && (
-          <p className="text-xs text-ink-faint">
-            Μη αναγνώσιμα: {ocrDraft.result.unreadableSegments.join(", ")}
-          </p>
-        )}
-
-        <div>
-          <label
-            htmlFor="category-override"
-            className="block text-xs font-semibold uppercase tracking-wide text-ink-faint"
-          >
-            Τύπος περιεχομένου
-          </label>
-          <select
-            id="category-override"
-            value={categoryOverride ?? "auto"}
-            onChange={(event) =>
-              selectCategory(
-                event.target.value as
-                  | "auto"
-                  | Exclude<ContentCategory, "unknown">,
-              )
-            }
-            className="mt-2 h-11 w-full rounded-lg border border-line bg-surface px-3 text-sm text-ink"
-          >
-            {categoryOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          {/* Preselected above for a mixed label. Said out loud, because a
-              value the user did not choose should not look like one they
-              did — and because "why is Συστατικά picked when I photographed
-              a table?" has an answer worth giving. */}
-          {ocrDraft.result.labelType === "mixed" &&
-            categoryOverride === "ingredients" && (
-              <p className="mt-1 text-xs text-ink-faintest">
-                Η ετικέτα έχει και λίστα συστατικών και διατροφικό πίνακα.
-                Ως «Συστατικά» βαθμολογούνται και τα δύο — τα σάκχαρα και το
-                αλάτι από τις ποσότητες του πίνακα, τα υπόλοιπα από τη λίστα.
+          <div className="min-w-0">
+            <p className="font-semibold text-ink">{state.found}</p>
+            {state.hint && (
+              <p className="mt-1 text-sm leading-5 text-ink-muted">
+                {state.hint}
               </p>
             )}
-
-          {!categoryOverride && detectedCategory !== "unknown" && (
-            <p className="mt-1 text-xs text-ink-faintest">
-              Εντοπίστηκε αυτόματα ως:{" "}
-              {detectedCategory === "ingredients"
-                ? "Συστατικά"
-                : detectedCategory === "nutrition"
-                  ? "Διατροφικά"
-                  : "Χημική Ανάλυση"}
-              . Αν δεν είναι σωστό, διόρθωσέ το παραπάνω.
-            </p>
-          )}
+          </div>
         </div>
 
         <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={confirm}
-            disabled={!canContinue}
-            className="h-11 rounded-lg bg-accent font-bold text-on-accent disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
-            aria-live="polite"
-          >
-            Συνέχεια
-          </button>
-          {!canContinue && text.trim().length > 0 && (
-            <p className="text-center text-xs text-ink-faint">
-              Διόρθωσε το κείμενο ώστε να περιέχει μόνο τα
-              συστατικά, ή βγάλε ξανά φωτογραφία.
+          {asksForRetake ? (
+            <>
+              <button
+                type="button"
+                onClick={retake}
+                className="flex h-12 items-center justify-center gap-2 rounded-xl bg-accent font-bold text-on-accent"
+              >
+                <Camera size={18} aria-hidden />
+                {state.kind === "table_only"
+                  ? "Φωτογράφισε τα συστατικά"
+                  : "Νέα φωτογραφία"}
+              </button>
+              {state.canContinue && (
+                <button
+                  type="button"
+                  onClick={confirm}
+                  className="h-12 rounded-xl border border-line bg-surface font-semibold text-ink"
+                >
+                  {state.kind === "table_only"
+                    ? "Συνέχεια μόνο με τον πίνακα"
+                    : "Συνέχεια"}
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={confirm}
+                className="h-12 rounded-xl bg-accent font-bold text-on-accent"
+              >
+                Συνέχεια
+              </button>
+              <button
+                type="button"
+                onClick={retake}
+                className="flex h-12 items-center justify-center gap-2 rounded-xl border border-line bg-surface font-semibold text-ink-muted"
+              >
+                <Camera size={18} aria-hidden />
+                Νέα φωτογραφία
+              </button>
+            </>
+          )}
+        </div>
+
+        <section
+          aria-labelledby="ocr-text-title"
+          className="rounded-2xl border border-line bg-surface"
+        >
+          <div className="flex items-center justify-between gap-2 px-4 pt-2">
+            <h2 id="ocr-text-title" className="py-2 text-sm font-semibold text-ink">
+              Κείμενο που διαβάστηκε
+            </h2>
+            {!showEditor && (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="flex h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-semibold text-accent-soft"
+              >
+                <Pencil size={16} aria-hidden />
+                Διόρθωση
+              </button>
+            )}
+          </div>
+
+          {showEditor ? (
+            <div className="px-4 pb-4">
+              <label htmlFor="ocr-text" className="sr-only">
+                Κείμενο ετικέτας
+              </label>
+              {/* 16px text: iOS zooms the page into any smaller input. */}
+              <textarea
+                id="ocr-text"
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                className="min-h-40 w-full rounded-xl border border-line bg-canvas p-3 text-base leading-6 text-ink"
+                placeholder="Κείμενο από την ετικέτα..."
+              />
+              <p className="mt-1 text-xs text-ink-faint">
+                Αυτό ακριβώς το κείμενο θα αναλυθεί.
+              </p>
+            </div>
+          ) : (
+            <p className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words px-4 pb-4 text-sm leading-6 text-ink-muted">
+              {highlighted ? (
+                <>
+                  {highlighted.before}
+                  <mark className="rounded bg-emerald-950 px-0.5 text-ink ring-1 ring-emerald-300/40">
+                    {highlighted.block}
+                  </mark>
+                  {highlighted.after}
+                </>
+              ) : (
+                text
+              )}
             </p>
           )}
-          <button
-            type="button"
-            onClick={retake}
-            className="h-11 rounded-lg border border-line font-semibold text-ink-muted"
-          >
-            Λήψη ξανά
-          </button>
-        </div>
+          {highlighted && !showEditor && (
+            <p className="border-t border-line-subtle px-4 py-2 text-xs text-ink-faint">
+              Με πράσινο: η λίστα συστατικών που θα αναλυθεί.
+            </p>
+          )}
+        </section>
+
+        {ocrDraft.mergeInto === undefined && (
+          <details className="group rounded-2xl border border-line bg-surface">
+            <summary className="flex h-12 cursor-pointer list-none items-center justify-between px-4 text-sm font-semibold text-ink">
+              Τύπος περιεχομένου
+              <ChevronDown
+                size={18}
+                className="transition group-open:rotate-180"
+                aria-hidden
+              />
+            </summary>
+            <div className="px-4 pb-4">
+              <label htmlFor="category-override" className="sr-only">
+                Τύπος περιεχομένου
+              </label>
+              <select
+                id="category-override"
+                value={categoryOverride ?? "auto"}
+                onChange={(event) =>
+                  selectCategory(
+                    event.target.value as
+                      | "auto"
+                      | Exclude<ContentCategory, "unknown">,
+                  )
+                }
+                className="h-12 w-full rounded-xl border border-line bg-canvas px-3 text-base text-ink"
+              >
+                {categoryOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs leading-5 text-ink-faint">
+                Άλλαξέ το μόνο αν ο αυτόματος εντοπισμός έκανε λάθος. Μια
+                ετικέτα με λίστα και πίνακα αξιολογείται ολόκληρη ως «Λίστα
+                συστατικών».
+              </p>
+            </div>
+          </details>
+        )}
       </section>
     </main>
   );

@@ -82,6 +82,23 @@ body {
 	min-width: 320px;
 	margin: 0;
 	background: var(--color-canvas);
+	/* viewport-fit=cover lets the page reach under the notch in landscape;
+	   these keep content out of it. Zero in portrait. */
+	padding-left: env(safe-area-inset-left);
+	padding-right: env(safe-area-inset-right);
+	-webkit-tap-highlight-color: transparent;
+}
+
+/* An opaque strip under the status bar: iOS 26 Safari and an installed PWA
+   draw the page edge to edge, so scrolled content used to run under the
+   clock. Sits below the floating back button (z-20). */
+.gl-status-scrim {
+	position: fixed;
+	inset: 0 0 auto 0;
+	height: env(safe-area-inset-top);
+	background: var(--color-canvas);
+	z-index: 15;
+	pointer-events: none;
 }
 
 button,
