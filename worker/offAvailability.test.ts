@@ -88,6 +88,33 @@ test("not found or an OFF error gives nothing", () => {
   assert.equal(canSkipAllPhotos(dataAvailability(undefined)), false);
 });
 
+test("a truncated list or an OFF 'to be completed' flag is not trusted", () => {
+  // The real Nutella record read "sugar, palm oil".
+  assert.equal(hasUsableIngredients("sugar, palm oil"), false);
+  assert.equal(
+    hasUsableIngredients("Αλεύρι (σίτου, βρώμης), ζάχαρη, αλάτι"),
+    true,
+    "separators inside parentheses are one item",
+  );
+
+  assert.equal(
+    dataAvailability(
+      record({
+        offStates: { ingredientsToBeCompleted: true, nutritionToBeCompleted: false },
+      }),
+    ).ingredients,
+    false,
+  );
+  assert.equal(
+    dataAvailability(
+      record({
+        offStates: { ingredientsToBeCompleted: false, nutritionToBeCompleted: true },
+      }),
+    ).nutrition,
+    false,
+  );
+});
+
 test("garbage ingredient strings are not a list", () => {
   for (const text of ["", "   ", "-", "123", "n/a", ".,;", null, undefined]) {
     assert.equal(hasUsableIngredients(text), false, String(text));

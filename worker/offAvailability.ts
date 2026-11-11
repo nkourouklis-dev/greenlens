@@ -27,6 +27,33 @@ export const NO_AVAILABILITY: DataAvailability = {
 };
 
 const MIN_INGREDIENT_CHARS = 8;
+/**
+ * Fewer top-level items than this is too likely to be a list a contributor
+ * stopped typing ("sugar, palm oil" for a hazelnut spread). A genuinely
+ * short list (water, salt) just keeps the photo flow it always had.
+ */
+const MIN_INGREDIENT_ITEMS = 3;
+
+/** Top-level list items, ignoring separators inside parentheses. */
+function countIngredientItems(text: string): number {
+  let depth = 0;
+  let items = 0;
+  let current = "";
+
+  for (const char of text) {
+    if (char === "(" || char === "[") depth += 1;
+    if (char === ")" || char === "]") depth = Math.max(0, depth - 1);
+
+    if ((char === "," || char === ";") && depth === 0) {
+      if (current.trim()) items += 1;
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  return current.trim() ? items + 1 : items;
+}
 const MAX_INGREDIENT_CHARS = 4000;
 
 /** Whether an OFF ingredient string is a real list the pipeline can parse. */
@@ -46,6 +73,10 @@ export function hasUsableIngredients(text: string | null | undefined): boolean {
 
   // Needs actual words, not a bare number or punctuation left by an import.
   if (!/\p{L}{3,}/u.test(trimmed)) {
+    return false;
+  }
+
+  if (countIngredientItems(trimmed) < MIN_INGREDIENT_ITEMS) {
     return false;
   }
 
@@ -100,13 +131,16 @@ export function dataAvailability(
     return NO_AVAILABILITY;
   }
 
-  const ingredients = hasUsableIngredients(result.ingredientsText);
+  const ingredients =
+    result.offStates?.ingredientsToBeCompleted !== true &&
+    hasUsableIngredients(result.ingredientsText);
 
   return {
     ingredients,
     // Open Beauty Facts has no nutrition; never report it for cosmetics.
     nutrition:
       result.source === "openfoodfacts" &&
+      result.offStates?.nutritionToBeCompleted !== true &&
       hasCompleteNutrition(result.nutritionFacts),
     nutriScore:
       result.source === "openfoodfacts" &&

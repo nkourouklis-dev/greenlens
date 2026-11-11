@@ -69,6 +69,12 @@ export interface BarcodeProductResult {
   ingredientsText?: string | null;
   /** OFF's own Nutri-Score letter (a–e), kept for the completeness check only. */
   nutriscoreGrade?: string | null;
+  /**
+   * OFF's own "to be completed" markers (`states_tags`). A contributor who
+   * typed only the first two ingredients leaves the record flagged, and that
+   * flag is the best evidence the list is not the whole list.
+   */
+  offStates?: { ingredientsToBeCompleted: boolean; nutritionToBeCompleted: boolean };
   confidence: number;
   /**
    * Which service knew the barcode. Says nothing about whether the product
@@ -173,6 +179,7 @@ function extractFromOpenFoodFacts(
   categoryTags: string[];
   ingredientsText: string | null;
   nutriscoreGrade: string | null;
+  offStates: { ingredientsToBeCompleted: boolean; nutritionToBeCompleted: boolean };
 } | null {
   if (!data.code || !data.product) {
     return null;
@@ -223,7 +230,21 @@ function extractFromOpenFoodFacts(
       trimAndLimit(product.ingredients_text_el as string, 4000) ||
       trimAndLimit(product.ingredients_text as string, 4000),
     nutriscoreGrade: readNutriscoreGrade(product.nutriscore_grade),
+    offStates: {
+      ingredientsToBeCompleted: hasStateTag(
+        product.states_tags,
+        "en:ingredients-to-be-completed",
+      ),
+      nutritionToBeCompleted: hasStateTag(
+        product.states_tags,
+        "en:nutrition-facts-to-be-completed",
+      ),
+    },
   };
+}
+
+function hasStateTag(tags: unknown, wanted: string): boolean {
+  return Array.isArray(tags) && tags.includes(wanted);
 }
 
 function readNutriscoreGrade(value: unknown): string | null {
@@ -258,6 +279,7 @@ const EMPTY_RESULT: BarcodeProductResult = {
   categoryTags: [],
   ingredientsText: null,
   nutriscoreGrade: null,
+  offStates: { ingredientsToBeCompleted: false, nutritionToBeCompleted: false },
   confidence: 0,
   source: null,
 };
@@ -487,7 +509,7 @@ export async function lookupProductByBarcode(
       options?.requireIngredientField === true &&
       cached !== null &&
       cached.source !== null &&
-      cached.ingredientsText === undefined;
+      cached.offStates === undefined;
 
     if (cached && !stale) {
       return cached;

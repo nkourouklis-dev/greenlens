@@ -274,6 +274,7 @@ test("a row that already has the field is served from cache for the skip path", 
         ...JSON.parse(CACHED_WITHOUT_INGREDIENTS.result),
         ingredientsText: "Ζάχαρη, κακάο",
         nutriscoreGrade: "d",
+        offStates: { ingredientsToBeCompleted: false, nutritionToBeCompleted: false },
       }),
     },
   ]);
