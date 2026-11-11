@@ -1,8 +1,8 @@
 # GreenLens — Architecture, History and Working Agreements
 
-Single source of truth for any Claude Code session working on this repo. Snapshot date: **2026-11-03**
-(HEAD `c0fb453`, 158+ commits, first commit 2026-08-28). When this file and the code disagree, the code wins —
-then fix this file. Older Greek docs (`docs/GreenLens-Documentation.md`, `MVP_STATE.md`) are historical snapshots
+Single source of truth for any Claude Code session working on this repo. Snapshot date: **2026-11-11**
+(HEAD `ac0cee6`, 169 commits, first commit 2026-08-28). When this file and the code disagree, the code wins —
+then fix this file. Older Greek docs (`docs/archive/`) are historical snapshots
 from 6 and 13 September; this file supersedes them.
 
 ---
@@ -94,7 +94,8 @@ worker/              ~46k lines incl. tests. index.ts (~6.9k lines) is the route
   persistence        productCache, productLookup (+OFF cache), productVersions, productPhotos, ocrLog,
                      scanFailures, adminProducts, adminAssistant, identify
 migrations/          0001–0017 D1 SQL
-docs/                this file, BRAND-GUIDE, PROJECT-STRUCTURE (public/ assets), older Greek documentation
+docs/                this file, BRAND-GUIDE, PROJECT-STRUCTURE (public/ assets), archive/ (old Greek snapshots)
+data/                greek-products-seed.sql (manual D1 seed, not a migration)
 ```
 
 ### Frontend routes
@@ -208,6 +209,12 @@ error). Fixed in `c0fb453` and the Worker redeployed (version `afa14c2a`). Same 
 client errors now distinguish offline / timeout / connection failure and log server status codes (`88ab4f7`).
 
 **Phase 8 — Speed, routing and mobile UX (11-07).** Ingredient analysis no longer calls a model (`deterministicAnalysis.ts`); catalogue copy is drafted after the response; a printed "Συστατικά" heading always routes to the ingredients path; the ingredient block ends at a garbled nutrition heading, a net-weight line or any kJ row. Review screen rebuilt as a single-verdict state machine; `viewport-fit=cover` with a status-bar strip, nav hidden while typing, 16 px fields; the analysis wait shows elapsed time and survives going offline; the camera stream is re-acquired after iOS ends it.
+
+**Phase 9 — Domain, SEO and visual unification (11-07 → 11-09).** Share links use the current domain and never show
+broken/empty copy (`b858bb5`); camera stream is paused rather than closed between scans (`82e8af4`); new home hero,
+history and flow screens in one green visual language (`a181ce7`); canonical domain, JSON-LD, new OG image and Stoa Ops
+credit (`ac0cee6`). Uncommitted at 11-11: the Product page cards (ExecutiveSummaryCard, ScoreBreakdownPanel, summary
+section) being moved from the old dark slate classes to the light design tokens.
 
 ## 8. Known open items and decisions pending
 

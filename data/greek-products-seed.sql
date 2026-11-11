@@ -1,7 +1,7 @@
 -- Seed data: 6 fully-verified Greek products (real EAN-13 barcode + real
 -- ingredient list confirmed from manufacturer/retailer pages, not AI-generated).
 -- analysis_result JSON shape matches the confirmed-working production schema.
--- Run with: npx wrangler d1 execute greenlens-db --remote --file=./greek-products-seed.sql
+-- Run with: npx wrangler d1 execute greenlens-db --remote --file=./data/greek-products-seed.sql
 
 -- Using INSERT OR REPLACE because 5203069067815 (Korres) already exists from
 -- an earlier batch — this overwrites it with the verified-ingredients version
