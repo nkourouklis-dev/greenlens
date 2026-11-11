@@ -12,6 +12,7 @@ import { updateHistoryItem } from "../services/historyService";
 import {
   clearOcrDraft,
   getOcrDraft,
+  offHasNutrition,
   updateOcrDraftCategoryOverride,
   updateOcrDraftText,
 } from "../services/captureDraftService";
@@ -184,7 +185,9 @@ export default function IngredientsReview() {
       detectProductType(finalText) === "cosmetic";
 
     const next =
-      state.hasTable || takesNoTable ? "/product-photo" : "/nutrition-photo";
+      state.hasTable || takesNoTable || offHasNutrition(ocrDraft.barcode)
+        ? "/product-photo"
+        : "/nutrition-photo";
 
     navigate(
       `${next}?barcode=${encodeURIComponent(

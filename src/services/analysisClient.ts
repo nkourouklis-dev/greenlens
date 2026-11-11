@@ -175,6 +175,8 @@ export interface CachedProductLookup {
   photoUrl: string | null;
   /** The label text the stored score was computed from, if recorded. */
   sourceText: string;
+  /** "off" when the stored result was built from Open Food Facts, not a photo. */
+  dataSource: "off" | null;
 }
 
 /**
@@ -287,6 +289,7 @@ export async function checkCachedProduct(
     photoUrl: typeof meta.photoUrl === "string" ? meta.photoUrl : null,
     sourceText:
       typeof envelope.sourceText === "string" ? envelope.sourceText : "",
+    dataSource: envelope.dataSource === "off" ? "off" : null,
   };
 }
 
@@ -328,6 +331,32 @@ function isPlainObject(
  * are iterated directly). Not a full schema validation — just enough to
  * guarantee those specific reads are safe.
  */
+/**
+ * Parses a Worker analysis envelope the way the catalogue path does and keeps
+ * it only if it is well formed. Used for results the Worker built itself
+ * (Open Food Facts); anything off-shape is "no result", never an error.
+ */
+export function parseTrustedAnalysis(
+  raw: unknown,
+): { result: AnalysisApiResult; sourceText: string } | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const parsed = parseAnalysisApiResult(raw as RawAnalysisResponse);
+
+  if (!isWellFormedAnalysisResult(parsed)) {
+    return null;
+  }
+
+  const sourceText = (raw as Record<string, unknown>).sourceText;
+
+  return {
+    result: parsed,
+    sourceText: typeof sourceText === "string" ? sourceText : "",
+  };
+}
+
 export function isWellFormedAnalysisResult(
   result: AnalysisApiResult,
 ): boolean {

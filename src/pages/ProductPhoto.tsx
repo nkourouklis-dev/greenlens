@@ -16,15 +16,18 @@ export default function ProductPhoto() {
   const [isSaving, setIsSaving] = useState(false);
 
   async function saveProduct(file: File) {
+    const ocrDraft = productId ? getOcrDraft(productId) : null;
     const ingredientsPhoto = getIngredientsDraft(barcode);
-    if (!ingredientsPhoto) {
+    // The ingredient list may come from Open Food Facts instead of a photo
+    // (AddProduct stores it as the draft's text), so a photo is only
+    // required when there is no text either.
+    if (!ingredientsPhoto && !ocrDraft?.result.rawText) {
       setError("Χρειάζεται πρώτα φωτογραφία των συστατικών.");
       return;
     }
     setError("");
     setIsSaving(true);
     const scanId = productId ?? crypto.randomUUID();
-    const ocrDraft = productId ? getOcrDraft(productId) : null;
     const nutritionText = productId ? getNutritionDraft(productId) : null;
     try {
             const productPhoto =
@@ -42,7 +45,7 @@ export default function ProductPhoto() {
         ? composeDisplayTitle(identity.brand, identity.productName)
         : "";
 
-      const wasSaved = saveHistoryItem({ id: scanId, barcode, status: "unknown", scannedAt: new Date().toISOString(), ingredientsPhoto, productPhoto,productName: displayName || undefined,...(identity?.brand?.trim() ? { productBrand: identity.brand.trim() } : {}),ocrRawText: ocrDraft?.result.rawText, ocrConfidence: ocrDraft?.result.confidence, categoryOverride: ocrDraft?.categoryOverride, ...(nutritionText ? { extraLabelTexts: [nutritionText] } : {}) });
+      const wasSaved = saveHistoryItem({ id: scanId, barcode, status: "unknown", scannedAt: new Date().toISOString(), ...(ingredientsPhoto ? { ingredientsPhoto } : {}), productPhoto,productName: displayName || undefined,...(identity?.brand?.trim() ? { productBrand: identity.brand.trim() } : {}),ocrRawText: ocrDraft?.result.rawText, ocrConfidence: ocrDraft?.result.confidence, categoryOverride: ocrDraft?.categoryOverride, ...(nutritionText ? { extraLabelTexts: [nutritionText] } : {}) });
       if (!wasSaved) {
         setError("Ο χώρος αποθήκευσης της συσκευής δεν επαρκεί. Δοκίμασε μικρότερη φωτογραφία.");
         return;

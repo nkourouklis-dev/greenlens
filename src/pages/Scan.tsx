@@ -298,6 +298,7 @@ export default function Scan() {
           : {}),
         ...(cached.brand ? { productBrand: cached.brand } : {}),
         ...(cached.photoUrl ? { productPhoto: cached.photoUrl } : {}),
+        ...(cached.dataSource ? { dataSource: cached.dataSource } : {}),
         ...(cached.sourceText
           ? {
               ocrRawText: cached.sourceText,

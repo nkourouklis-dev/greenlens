@@ -19,6 +19,26 @@ export interface OcrDraft {
   mergeInto?: string;
 }
 
+const offNutritionKey = (barcode: string) =>
+  `greenlens.off-nutrition.v1.${barcode}`;
+
+/** Open Food Facts already holds this barcode's table: no table photo to ask for. */
+export function markOffHasNutrition(barcode: string): void {
+  try {
+    sessionStorage.setItem(offNutritionKey(barcode), "1");
+  } catch {
+    // Storage unavailable: the table photo is simply asked for as before.
+  }
+}
+
+export function offHasNutrition(barcode: string): boolean {
+  try {
+    return sessionStorage.getItem(offNutritionKey(barcode)) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function saveIngredientsDraft(barcode: string, image: string): void {
   sessionStorage.setItem(draftKey(barcode), image);
 }

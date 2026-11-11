@@ -110,6 +110,8 @@ extract → score → insights; cached per barcode; can run in the background so
 Admin (header `X-Admin-Password`): `/api/admin/products` (+ detail, edit, versions, restore, analyze, rescore,
 photos), `/api/admin/photos/file`, `/api/admin/scan-failures`, `/api/admin/usage`,
 `/api/admin/products/rescore-unverified`, `/api/admin/products/backfill-brands`, `/api/admin/assist`.
+Open Food Facts shortcut (no Azure, no AI): `GET /api/product/off/:barcode` (what OFF holds: `dataAvailability` from `offAvailability.ts`) and
+`POST /api/analysis/from-off` (full result from the record's ingredient list + per-100 table; stored results always win; a photographed scan replaces an unverified `dataSource: "off"` result; no catalogue copy is drafted for it).
 Every response carries `x-request-id`; `wrangler tail` plus stage-timing lines reassemble a whole scan.
 
 ## 5. Core flows
@@ -120,6 +122,8 @@ front photo (identification + catalogue thumbnail) → one back-label photo (ing
 `ocr/extract` → review screen → `analysis/run` → product page. The review screen (`src/utils/reviewState.ts`) shows exactly one verdict (ready / incomplete / table only / nothing usable) with one next step; the category it implies is what the analysis is asked for, and an override is still possible. Verdicts are pinned against real production failures in `worker/fixtures/scanFailures.json`. Camera permission is
 requested once per session. Captures are downscaled to ≤ 2400 px long side, JPEG 0.88 (≈ 1 MB). A gallery picker
 is available wherever a photo is requested. Results carry a share action.
+
+**Open Food Facts skip** (2026-11-11, `AddProduct.tsx`): after a catalogue miss the screen renders at once and asks the Worker what OFF holds. Food with ingredients + complete table → result straight away (history item `dataSource: "off"`, notice with «Διόρθωση / Σκάναρε ετικέτα» → `/add-product?...&manual=1`, which never shortcuts). Ingredients only → only the table photo is asked; table only → the table photo is skipped (`markOffHasNutrition`). Cosmetics (OBF): ingredients alone suffice. OFF/timeout/not found → the flow as before. The OFF cache now keeps `ingredientsText` and `nutriscoreGrade`; rows older than that are refreshed once, only by this path.
 
 **Ingredient analysis has no language model** (`deterministicAnalysis.ts`, 2026-11-07): names come from the label list, ranking from curated rules + `ingredient_knowledge`, summary is a fixed Greek sentence. Catalogue copy (summary/verdict) is drafted after the response via `afterResponse`. Works for food and cosmetic (INCI) lists. Nutrition-only and chemical paths still call Workers AI.
 

@@ -26,6 +26,7 @@ import { useAnalysisJobs } from "../services/analysisJobs";
 import ShareScanButton from "../components/ShareScanButton";
 import AllergenNoticeCard from "../components/AllergenNoticeCard";
 import ExecutiveSummaryCard from "../components/ExecutiveSummaryCard";
+import OffSourceNotice from "../components/OffSourceNotice";
 import IngredientCard from "../components/IngredientCard";
 import NutritionCard from "../components/NutritionCard";
 import SectionDrawer from "../components/SectionDrawer";
@@ -298,6 +299,16 @@ export default function Product() {
             onAddMissingPhoto={() =>
               navigate(
                 `/ingredients-photo?barcode=${encodeURIComponent(item.barcode)}&mergeInto=${encodeURIComponent(id)}${needsNutritionRescore ? "&for=nutrition" : ""}`,
+              )
+            }
+          />
+        )}
+
+        {item.dataSource === "off" && (
+          <OffSourceNotice
+            onCorrect={() =>
+              navigate(
+                `/add-product?barcode=${encodeURIComponent(item.barcode)}&manual=1`,
               )
             }
           />

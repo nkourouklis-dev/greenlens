@@ -236,3 +236,54 @@ test("an invalid barcode is never cached or looked up", async () => {
   assert.equal(fake.reads, 0);
   assert.equal(fake.writes, 0);
 });
+
+const CACHED_WITHOUT_INGREDIENTS: CacheRow = {
+  ...CACHED_NESTLE,
+  barcode: "5201234567890",
+};
+
+test("only the OFF-skip path refreshes a row cached before ingredient text was kept", async () => {
+  const fake = createFakeD1([{ ...CACHED_WITHOUT_INGREDIENTS }]);
+
+  // Every other caller is still served from the row without calling out.
+  const served = await lookupProductByBarcode("5201234567890", {
+    db: fake.db,
+    timeoutMs: 1,
+  });
+
+  assert.equal(served.productName, "NESTLE CLUSTERS");
+  assert.equal(fake.writes, 0);
+
+  // The skip path wants the field; the refresh fails here (no network in 1 ms)
+  // and must hand back the row it already had rather than a blank.
+  const refreshed = await lookupProductByBarcode("5201234567890", {
+    db: fake.db,
+    timeoutMs: 1,
+    requireIngredientField: true,
+  });
+
+  assert.equal(refreshed.productName, "NESTLE CLUSTERS");
+  assert.equal(refreshed.source, "openfoodfacts");
+});
+
+test("a row that already has the field is served from cache for the skip path", async () => {
+  const fake = createFakeD1([
+    {
+      ...CACHED_WITHOUT_INGREDIENTS,
+      result: JSON.stringify({
+        ...JSON.parse(CACHED_WITHOUT_INGREDIENTS.result),
+        ingredientsText: "Ζάχαρη, κακάο",
+        nutriscoreGrade: "d",
+      }),
+    },
+  ]);
+
+  const result = await lookupProductByBarcode("5201234567890", {
+    db: fake.db,
+    timeoutMs: 1,
+    requireIngredientField: true,
+  });
+
+  assert.equal(result.ingredientsText, "Ζάχαρη, κακάο");
+  assert.equal(fake.writes, 0);
+});

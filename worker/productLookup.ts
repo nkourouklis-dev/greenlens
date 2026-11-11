@@ -61,6 +61,14 @@ export interface BarcodeProductResult {
   nutritionFacts: NutritionFacts | null;
   /** Open Food Facts `categories_tags`, for the Nutri-Score category. */
   categoryTags: string[];
+  /**
+   * The record's ingredient list as printed (Greek when OFF has it, else the
+   * default language). Absent on rows cached before this field existed —
+   * `undefined` means "never looked", `null` means "record has none".
+   */
+  ingredientsText?: string | null;
+  /** OFF's own Nutri-Score letter (a–e), kept for the completeness check only. */
+  nutriscoreGrade?: string | null;
   confidence: number;
   /**
    * Which service knew the barcode. Says nothing about whether the product
@@ -163,6 +171,8 @@ function extractFromOpenFoodFacts(
   nutritionPanel: NutritionPanel | null;
   nutritionFacts: NutritionFacts | null;
   categoryTags: string[];
+  ingredientsText: string | null;
+  nutriscoreGrade: string | null;
 } | null {
   if (!data.code || !data.product) {
     return null;
@@ -209,7 +219,17 @@ function extractFromOpenFoodFacts(
           (tag): tag is string => typeof tag === "string",
         )
       : [],
+    ingredientsText:
+      trimAndLimit(product.ingredients_text_el as string, 4000) ||
+      trimAndLimit(product.ingredients_text as string, 4000),
+    nutriscoreGrade: readNutriscoreGrade(product.nutriscore_grade),
   };
+}
+
+function readNutriscoreGrade(value: unknown): string | null {
+  return typeof value === "string" && /^[a-e]$/i.test(value.trim())
+    ? value.trim().toLowerCase()
+    : null;
 }
 
 function isUsable(extracted: {
@@ -236,6 +256,8 @@ const EMPTY_RESULT: BarcodeProductResult = {
   nutritionPanel: null,
   nutritionFacts: null,
   categoryTags: [],
+  ingredientsText: null,
+  nutriscoreGrade: null,
   confidence: 0,
   source: null,
 };
@@ -438,7 +460,16 @@ async function fetchFromOpenFoodFacts(
  */
 export async function lookupProductByBarcode(
   barcode: string,
-  options?: { timeoutMs?: number; db?: D1Like },
+  options?: {
+    timeoutMs?: number;
+    db?: D1Like;
+    /**
+     * Treat a cached hit written before ingredient text was kept as a miss,
+     * so it is refreshed once. Only the OFF-skip path asks for this; every
+     * other caller keeps being served from whatever the cache holds.
+     */
+    requireIngredientField?: boolean;
+  },
 ): Promise<BarcodeProductResult> {
   if (!validateBarcode(barcode)) {
     return EMPTY_RESULT;
@@ -447,18 +478,33 @@ export async function lookupProductByBarcode(
   const key = barcode.trim();
   const db = options?.db;
 
+  let staleRow: BarcodeProductResult | null = null;
+
   if (db) {
     const cached = await readCachedLookup(db, key);
 
-    if (cached) {
+    const stale =
+      options?.requireIngredientField === true &&
+      cached !== null &&
+      cached.source !== null &&
+      cached.ingredientsText === undefined;
+
+    if (cached && !stale) {
       return cached;
     }
+
+    staleRow = stale ? cached : null;
   }
 
   const { result, completed } = await fetchFromOpenFoodFacts(
     key,
     options?.timeoutMs ?? 4000,
   );
+
+  // A refresh that failed must not blank a record we already hold.
+  if (!completed && staleRow) {
+    return staleRow;
+  }
 
   if (db && completed) {
     await writeCachedLookup(db, key, result);

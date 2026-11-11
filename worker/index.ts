@@ -143,6 +143,12 @@ import {
   lookupProductByBarcode,
 } from "./productLookup";
 import {
+  canSkipAllPhotos,
+  dataAvailability,
+  NO_AVAILABILITY,
+  type DataAvailability,
+} from "./offAvailability";
+import {
   cleanIngredientText,
   extractIngredientText,
 } from "./ingredientText";
@@ -300,6 +306,13 @@ type JsonBody =
       answer: string;
     }
   | ProductIdentity
+  | {
+      availability: DataAvailability;
+      productName?: string | null;
+      brand?: string | null;
+      netContent?: string | null;
+      ingredientsText?: string | null;
+    }
   | { found: false }
   | {
       found: true;
@@ -412,6 +425,21 @@ export default {
         origin,
         requestId,
       );
+    }
+
+    // What Open Food Facts already holds for a barcode (cache-first), so the
+    // client can skip the photo steps it makes redundant. Read-only.
+    const offBarcode = matchProductOffPath(url.pathname);
+
+    if (request.method === "GET" && offBarcode !== null) {
+      return runOffAvailability(offBarcode, env, origin, requestId);
+    }
+
+    if (
+      request.method === "POST" &&
+      url.pathname === "/api/analysis/from-off"
+    ) {
+      return runAnalysisFromOff(request, env, origin, requestId);
     }
 
     // Barcode-only cache check, used before the user is asked to
@@ -544,6 +572,28 @@ function matchProductCachePath(
     segments[4].length > 0;
 
   if (!matches) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(segments[4]);
+  } catch {
+    return null;
+  }
+}
+
+// Returns the barcode segment of /api/product/off/<barcode>.
+function matchProductOffPath(pathname: string): string | null {
+  const segments = pathname.split("/");
+
+  if (
+    segments.length !== 5 ||
+    segments[0] !== "" ||
+    segments[1] !== "api" ||
+    segments[2] !== "product" ||
+    segments[3] !== "off" ||
+    segments[4].length === 0
+  ) {
     return null;
   }
 
@@ -708,6 +758,158 @@ async function runProductCacheLookup(
     origin,
     requestId,
   );
+}
+
+/**
+ * GET /api/product/off/<barcode>: what Open Food Facts already holds, as
+ * `dataAvailability` plus the identity fields. Reads the D1 cache first and
+ * only asks OFF when the barcode was never cached (or was cached before
+ * ingredient text was kept). No OCR, no model, nothing billable; an OFF
+ * outage answers "nothing available", which is the flow as it always was.
+ */
+async function runOffAvailability(
+  barcode: string,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  try {
+    const startedAt = Date.now();
+
+    const lookup = await lookupProductByBarcode(barcode, {
+      db: env.DB,
+      requireIngredientField: true,
+    });
+
+    const availability = dataAvailability(lookup);
+
+    console.log("off_availability", {
+      requestId,
+      barcode,
+      source: availability.source,
+      ingredients: availability.ingredients,
+      nutrition: availability.nutrition,
+      nutriScore: availability.nutriScore,
+      durationMs: Date.now() - startedAt,
+    });
+
+    return json(
+      {
+        availability,
+        productName: lookup.productName,
+        brand: lookup.brand,
+        netContent: lookup.netContent,
+        ingredientsText: availability.ingredients
+          ? (lookup.ingredientsText ?? null)
+          : null,
+      },
+      200,
+      origin,
+      requestId,
+    );
+  } catch {
+    return json(
+      { availability: NO_AVAILABILITY },
+      200,
+      origin,
+      requestId,
+    );
+  }
+}
+
+/**
+ * POST /api/analysis/from-off {barcode}: the whole result for a product whose
+ * Open Food Facts record is complete, with no photograph and no OCR. It runs
+ * the same deterministic ingredient pipeline and `scoreFood` as a scan, fed
+ * the record's ingredient list; the per-100 table reaches the score through
+ * the existing OFF nutrition fallback. A stored catalogue result always wins
+ * (it is replayed untouched), and nothing here calls Azure or Workers AI.
+ */
+async function runAnalysisFromOff(
+  request: Request,
+  env: Env,
+  origin: string | null,
+  requestId: string,
+): Promise<Response> {
+  const body = await readJson(request);
+
+  const barcode =
+    isRecord(body) && typeof body.barcode === "string"
+      ? body.barcode.trim()
+      : "";
+
+  if (!/^\d{8,14}$/.test(barcode)) {
+    return error(
+      "Το αίτημα ανάλυσης δεν είναι έγκυρο.",
+      400,
+      origin,
+      requestId,
+    );
+  }
+
+  const cached = await lookupCachedProduct(env.DB, barcode);
+
+  if (cached) {
+    await incrementProductScanCount(env.DB, barcode);
+
+    return json(cached.analysisResult as JsonBody, 200, origin, requestId);
+  }
+
+  const lookup = await lookupProductByBarcode(barcode, {
+    db: env.DB,
+    requireIngredientField: true,
+  });
+
+  const availability = dataAvailability(lookup);
+
+  if (!canSkipAllPhotos(availability) || !lookup.ingredientsText) {
+    return error(
+      "Το Open Food Facts δεν έχει πλήρη δεδομένα για αυτό το προϊόν.",
+      422,
+      origin,
+      requestId,
+    );
+  }
+
+  const title = composeDisplayTitle(lookup.brand, lookup.productName);
+
+  const food = await analyzeFoodLabels(
+    barcode,
+    [
+      {
+        text: lookup.ingredientsText,
+        ocrConfidence: trustedOcrConfidence,
+        labelType: "ingredients",
+      },
+    ],
+    env,
+    requestId,
+    title || undefined,
+    "user_scan",
+    0,
+    "off",
+  );
+
+  if (
+    !food.outcome.ok ||
+    food.outcome.responseBody.score.score === null
+  ) {
+    return error(
+      "Δεν ήταν δυνατή η ανάλυση από τα δεδομένα του Open Food Facts.",
+      422,
+      origin,
+      requestId,
+    );
+  }
+
+  console.log("analysis_from_off", {
+    requestId,
+    barcode,
+    source: availability.source,
+    category: food.category,
+  });
+
+  return json(food.outcome.responseBody, 200, origin, requestId);
 }
 
 // Matches /api/admin/photos/<barcode> (both the POST upload and GET list
@@ -4136,10 +4338,23 @@ async function runAnalysis(
   // cache miss (including any D1 failure — lookupCachedProduct degrades to
   // null rather than throwing) falls straight through to the normal flow
   // below, unchanged.
-  const cached = await timedStage(requestId, "cache_lookup", () => lookupCachedProduct(
+  const storedRow = await timedStage(requestId, "cache_lookup", () => lookupCachedProduct(
     env.DB,
     requestBody.barcode,
   ));
+
+  // A result built from Open Food Facts is a stand-in for a photograph, never
+  // a reason to ignore one: when the person scans the label, the photographed
+  // analysis replaces it. A verified (admin-confirmed) row is never replaced
+  // here, and "add the missing photo" merges with whatever is stored.
+  const cached =
+    storedRow !== null &&
+    requestBody.mergeWithStored !== true &&
+    storedRow.status !== "verified" &&
+    isRecord(storedRow.analysisResult) &&
+    storedRow.analysisResult.dataSource === "off"
+      ? null
+      : storedRow;
 
   if (cached && requestBody.mergeWithStored === true) {
     return runMergeWithStored(
@@ -4623,20 +4838,23 @@ async function analyzeFoodLabels(
   productTitle: string | undefined,
   versionSource: ProductVersionSource,
   primaryIndex?: number,
+  dataSource: "ocr" | "off" = "ocr",
 ): Promise<FoodAnalysisOutcome> {
   // What the OCR actually returned, kept for the admin: when a score looks
   // wrong this is the first thing to look at.
-  await saveOcrTexts(
-    env.DB,
-    barcode,
-    versionSource,
-    labels.map((label) => ({
-      text: label.text,
-      labelType: label.labelType,
-      confidence: label.ocrConfidence,
-      photoType: label.photoType,
-    })),
-  );
+  if (dataSource === "ocr") {
+    await saveOcrTexts(
+      env.DB,
+      barcode,
+      versionSource,
+      labels.map((label) => ({
+        text: label.text,
+        labelType: label.labelType,
+        confidence: label.ocrConfidence,
+        photoType: label.photoType,
+      })),
+    );
+  }
 
   const ranked = labels
     .map((label, index) => ({
@@ -4683,6 +4901,7 @@ async function analyzeFoodLabels(
       productTitle,
       versionSource,
       othersThan(primary.text),
+      dataSource,
     );
 
     if (outcome.ok || outcome.kind !== "insufficient") {
@@ -4745,6 +4964,9 @@ async function analyzeIngredientsCore(
   // The nutrition table and the alcohol strength are looked for across all
   // of them; the ingredient list is read from `confirmedText` alone.
   otherTexts: string[] = [],
+  // "off": the text is an Open Food Facts ingredient list, not a photograph.
+  // It is then neither stored as OCR output nor given model-drafted copy.
+  dataSource: "ocr" | "off" = "ocr",
 ): Promise<IngredientsAnalysisOutcome> {
   // Single shared evaluation of the label text, identical to the OCR gate.
   const evaluation =
@@ -5196,6 +5418,9 @@ async function analyzeIngredientsCore(
       // Every photo's OCR text, so a later "add the missing photo" can merge
       // with this analysis instead of replacing it.
       labelTexts,
+      // Present only for a result built from Open Food Facts, so every
+      // photographed scan keeps exactly the body it always had.
+      ...(dataSource === "off" ? { dataSource: "off" as const } : {}),
     };
 
     // The written summary, verdict and cautions are part of what the user
@@ -5219,9 +5444,12 @@ async function analyzeIngredientsCore(
 
       // The written summary and verdict are drafted after the answer is sent;
       // waiting for a second model call here doubled every scan's latency.
-      await afterResponse(env, requestId, "scan_copy", () =>
-        autoApplyAssistantDraft(env, barcode),
-      );
+      // An Open Food Facts result stays model-free: no copy is drafted.
+      if (dataSource !== "off") {
+        await afterResponse(env, requestId, "scan_copy", () =>
+          autoApplyAssistantDraft(env, barcode),
+        );
+      }
     }
 
     return { ok: true, responseBody };

@@ -442,4 +442,10 @@ export interface ScanHistoryItem {
    * the work back up. Cleared on success.
    */
   analysisState?: "running" | "failed";
+  /**
+   * Set when the whole result was built from Open Food Facts' record, with no
+   * photograph. Absent for a scanned label. The product page says so and
+   * offers to scan the label instead.
+   */
+  dataSource?: "off";
 }
