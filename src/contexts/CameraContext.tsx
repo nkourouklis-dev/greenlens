@@ -333,6 +333,40 @@ function cameraErrorMessage(caughtError: unknown): string {
   return "Δεν ήταν δυνατή η πρόσβαση στην κάμερα. Δοκίμασε ξανά ή επίλεξε φωτογραφία από τη συλλογή.";
 }
 
+const FRAME_WAIT_TIMEOUT_MS = 1500;
+const FRAME_WAIT_STEP_MS = 50;
+
+/**
+ * Resolves with the live <video> once it holds a decoded frame and has a
+ * layout, or null if that does not happen within FRAME_WAIT_TIMEOUT_MS.
+ * The element is re-read on every step because it can be replaced while we
+ * wait (it is re-created when the camera viewport changes).
+ */
+async function waitForVideoFrame(
+  videoRef: RefObject<HTMLVideoElement | null>,
+): Promise<HTMLVideoElement | null> {
+  const deadline = Date.now() + FRAME_WAIT_TIMEOUT_MS;
+
+  for (;;) {
+    const video = videoRef.current;
+
+    if (
+      video &&
+      video.readyState >= 2 &&
+      video.videoWidth > 0 &&
+      video.clientWidth > 0 &&
+      video.clientHeight > 0
+    ) {
+      if (video.paused) await video.play().catch(() => {});
+      return video;
+    }
+
+    if (Date.now() >= deadline) return null;
+
+    await new Promise((resolve) => setTimeout(resolve, FRAME_WAIT_STEP_MS));
+  }
+}
+
 const CameraContext = createContext<CameraContextValue | null>(null);
 
 export function CameraProvider({ children }: { children: ReactNode }) {
@@ -455,17 +489,22 @@ export function CameraProvider({ children }: { children: ReactNode }) {
   const captureFrame = useCallback(async (
     region?: Element | null,
   ): Promise<CapturedPhoto | null> => {
-    const video = videoRef.current;
+    // The shutter appears as soon as the camera is "active", but a resumed
+    // stream or a re-parented <video> (see setVideoNode) needs a moment to
+    // decode its first frame. A tap in that window used to fail with "Η λήψη
+    // απέτυχε". Wait briefly for a real frame instead of giving up at once.
+    const video = await waitForVideoFrame(videoRef);
 
     // HAVE_CURRENT_DATA (2): the element has decoded at least one frame at
     // the current playback position. Below that, drawImage() would read a
     // black/blank or stale buffer instead of what's actually on screen.
-    if (!video || video.videoWidth === 0 || video.readyState < 2) {
+    if (!video) {
+      const current = videoRef.current;
       console.error("camera_capture_not_ready", {
-        hasVideo: Boolean(video),
-        videoWidth: video?.videoWidth ?? 0,
-        videoHeight: video?.videoHeight ?? 0,
-        readyState: video?.readyState ?? -1,
+        hasVideo: Boolean(current),
+        videoWidth: current?.videoWidth ?? 0,
+        videoHeight: current?.videoHeight ?? 0,
+        readyState: current?.readyState ?? -1,
       });
       return null;
     }
