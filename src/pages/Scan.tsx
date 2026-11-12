@@ -446,7 +446,7 @@ export default function Scan() {
                 navigate(
                   `/add-product?barcode=${encodeURIComponent(
                     value,
-                  )}`,
+                  )}&manual=1`,
                 );
               }}
               className="h-12 w-full rounded-full border border-line bg-surface px-4 text-sm font-semibold text-ink-muted transition active:scale-[0.98]"

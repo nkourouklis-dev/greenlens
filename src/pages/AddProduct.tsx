@@ -110,7 +110,12 @@ export default function AddProduct() {
         return;
       }
 
-      navigate(`/product/${id}`, { replace: true });
+      // The record gave data but no picture: ask for the front of the pack
+      // (skippable) so the product has a thumbnail and the catalogue a photo.
+      navigate(
+        `/product-photo?barcode=${encodeURIComponent(barcode)}&offId=${encodeURIComponent(id)}`,
+        { replace: true },
+      );
     })();
 
     return () => {

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import PhotoCapture from "../components/PhotoCapture";
 import { clearCaptureDraft, clearNutritionDraft, clearOcrDraft, getIngredientsDraft, getNutritionDraft, getOcrDraft } from "../services/captureDraftService";
-import { compressImageForStorage, saveHistoryItem } from "../services/historyService";
+import { compressImageForStorage, getHistoryItem, saveHistoryItem, updateHistoryItem } from "../services/historyService";
 import { identifyProduct } from "../services/identifyClient";
 import { startAnalysis } from "../services/analysisJobs";
 import { composeDisplayTitle } from "../utils/productTitle";
@@ -15,7 +15,50 @@ export default function ProductPhoto() {
   const [error, setError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
+  // Set when the result already exists (built from Open Food Facts) and only
+  // the front photo is missing.
+  const offId = searchParams.get("offId");
+
+  async function addPhotoToOffResult(file: File, id: string) {
+    setError("");
+    setIsSaving(true);
+
+    try {
+      const productPhoto = await compressImageForStorage(file);
+      // Also stores the photo in the shared catalogue (R2) for this barcode.
+      const identity = await identifyProduct(productPhoto, barcode);
+
+      const saved = updateHistoryItem(id, { productPhoto });
+
+      if (!saved) {
+        setError("Ο χώρος αποθήκευσης της συσκευής δεν επαρκεί. Δοκίμασε μικρότερη φωτογραφία.");
+        return;
+      }
+
+      const existing = getHistoryItem(id);
+
+      if (!existing?.productName && identity) {
+        const name = composeDisplayTitle(identity.brand, identity.productName);
+
+        if (name) {
+          updateHistoryItem(id, { productName: name });
+        }
+      }
+
+      navigate(`/product/${id}`, { replace: true });
+    } catch {
+      setError("Δεν ήταν δυνατή η αποθήκευση της φωτογραφίας. Δοκίμασε ξανά.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function saveProduct(file: File) {
+    if (offId) {
+      await addPhotoToOffResult(file, offId);
+      return;
+    }
+
     const ocrDraft = productId ? getOcrDraft(productId) : null;
     const ingredientsPhoto = getIngredientsDraft(barcode);
     // The ingredient list may come from Open Food Facts instead of a photo
@@ -81,6 +124,11 @@ export default function ProductPhoto() {
         onContinue={saveProduct}
         isSaving={isSaving}
         error={error}
+        {...(offId
+          ? {
+              onSkip: () => navigate(`/product/${offId}`, { replace: true }),
+            }
+          : {})}
       />
     </main>
   );
